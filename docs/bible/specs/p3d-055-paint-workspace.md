@@ -54,3 +54,49 @@ Princípios:
 - Path Paint reutiliza Spline Core;
 - nenhuma ferramenta cria scene/world authoring;
 - toolbar e Tool Properties permanecem contextuais para não aumentar carga cognitiva.
+
+## Iniciativa Paint (decisão 2026-09-16) — em implementação
+
+A iniciativa Paint redefine o escopo imediato do workspace. Tudo abaixo está
+**em implementação** nas branches `paint/core-engine` e `paint/ui-redesign`;
+nada é reivindicado como entregue.
+
+### Layout "mini Photoshop" dentro do shell congelado (cap. 36)
+
+O Paint respeita o shell `MODEL / PAINT` do capítulo 36 (sem docking livre, sem
+UV pill na V1 durante a iniciativa). O canvas 2D ocupa o centro com prévia 3D
+ao lado; o painel direito concentra **Layers** (com drag-and-drop), **Brush** e
+**Effects**. A antiga superfície dedicada de edição UV sai da UI V1 (ver
+P3D-063/064); o utilitário de projeção de `module-uv` aparece dentro do Paint
+como "Preparar superfície".
+
+### BrushSettings unificado
+
+Novo descriptor único `BrushSettings` substitui a dualidade `canvas_brush`
+(px) × `paint_radius` (metros):
+
+- `size_px` — tamanho em **pixels de tela** (estilo Photoshop);
+- `hardness` — dureza da borda (0–1);
+- `strength` — intensidade por dab;
+- `flow` — fluxo acumulado ao longo do stroke;
+- `spacing` — espaçamento entre dabs.
+
+O modelo é o mesmo para Pixel, Soft, Eraser e o novo **Airbrush** (pincel
+aditivo contínuo, em implementação). A antiga dualidade é deprecada em favor
+do descriptor único; P3D-056 e P3D-057 detalham os parâmetros.
+
+### Effect Stack com presets do capítulo 42
+
+A pilha de efeitos (P3D-134) ganha UX de presets "Add Effect" na pilha de
+camadas. Nodes iniciais confirmados:
+
+- **Já existentes no modelo**: Pixelate, Posterize, Invert.
+- **Novos a implementar**: Grain/Noise, Levels/Threshold, Brightness/Contrast,
+  Hue/Saturation (lista de nodes do capítulo 42).
+
+### Surface Recipe graph (P3D-113) — headless primeiro
+
+O modelo de dados do Surface Recipe graph começa **headless**: DAG, sockets,
+avaliador determinístico e cache. **Sem editor visual** nesta fase; o editor
+gráfico de nodes fica para o ciclo pós-Paint, quando a pilha de efeitos estiver
+estável.

@@ -194,12 +194,32 @@ Evidence is preserved in `.prumo/history/premium/`, [`docs/GAUNTLET.md`](file://
 
 ## Next action
 
-Executar a **Wave 11 (Extensibility, Plugins & Automation)** cobrindo P3D-110, P3D-111, P3D-112, P3D-141, P3D-142 e P3D-154:
-1. P3D-110 / P3D-111: Public Plugin API & Lua sandbox integration (`petunia_plugins` com `mlua`).
-2. P3D-112: Model Context Protocol (MCP) server endpoints & automações (`petunia_mcp` com rmcp 3.3).
-3. P3D-141: Painel interno de Agente de IA (`Internal AI Agent Panel`) integrado a comandos e diffs não-destrutivos.
-4. P3D-142: Pipeline de Modelagem Assistida por IA (`AI-Assisted Modeling Pipeline`).
-5. P3D-154: Gravador e executor de macros/receitas de comandos (`Command Recipes / Macros`).
+**Iniciativa Paint (decisão 2026-09-16)** — precede a Wave 11. Branches
+`paint/core-engine` (motor, descriptors, effects, graph headless) e
+`paint/ui-redesign` (layout mini-Photoshop, painel Layers/Brush/Effects).
+
+Fases da iniciativa, em ordem:
+
+1. **Congelar UV-editing na UI V1**: remover a pill UV temporariamente; preservar
+   `module-uv` como utilitário de "Preparar superfície" dentro do Paint (fluxo
+   paint-first, P3D-063/064/065). Redesign completo do workspace UV adiado para
+   o ciclo pós-Paint.
+2. **Brush engine unificado**: descriptor `BrushSettings` (`size_px`, `hardness`,
+   `strength`, `flow`, `spacing`) substituindo a dualidade `canvas_brush` ×
+   `paint_radius`; stroke engine baseado em dabs; novo pincel **Airbrush**
+   (P3D-055/056/057).
+3. **Effect Stack com presets do capítulo 42**: UX "Add Effect" na pilha de
+   camadas; nodes a implementar — Grain/Noise, Levels/Threshold,
+   Brightness/Contrast, Hue/Saturation (P3D-134).
+4. **Surface Recipe graph headless (P3D-113)**: DAG, sockets tipados, avaliador
+   determinístico e cache por node; sem editor visual nesta fase.
+5. **Layout Paint "mini Photoshop"**: canvas 2D central + prévia 3D; painel
+   direito com Layers (drag-and-drop), Brush e Effects; dentro do shell
+   congelado do cap. 36 (`MODEL / PAINT` preservado).
+
+Após a estabilização da iniciativa Paint, retomar a **Wave 11
+(Extensibility, Plugins & Automation)** cobrindo P3D-110, P3D-111, P3D-112,
+P3D-141, P3D-142 e P3D-154.
 
 ## Política de modelos por função (OpenCode Go — obrigatório)
 
