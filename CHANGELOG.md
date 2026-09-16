@@ -3,6 +3,16 @@
 Todas as alterações notáveis deste projeto são documentadas neste arquivo.
 O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [Unreleased] — Iniciativa Paint (decisões canônicas 2026-09-16)
+
+### Documentação — emenda canônica no Livro Vivo
+- **Paint Workspace (P3D-055)**: registrada a decisão de redesenhar o Paint como "mini Photoshop" dentro do shell congelado do cap. 36 — canvas 2D central + prévia 3D, painel direito com Layers (drag-and-drop), Brush e Effects; `module-uv` preservado como utilitário de "Preparar superfície" (fluxo paint-first, P3D-065).
+- **BrushSettings unificado**: novo descriptor único (`size_px` em pixels de tela, `hardness`, `strength`, `flow`, `spacing`) substituindo a dualidade `canvas_brush` (px) × `paint_radius` (metros); novo pincel **Airbrush** (aditivo contínuo). Stroke engine baseado em dabs (P3D-056, P3D-057).
+- **Effect Stack (P3D-134)**: UX de presets "Add Effect" na pilha de camadas; nodes iniciais consolidados — Pixelate/Posterize/Invert (já no modelo) + Grain/Noise, Levels/Threshold, Brightness/Contrast, Hue/Saturation (lista do cap. 42, a implementar).
+- **Surface Recipe graph (P3D-113)**: modelo de dados começa headless (DAG, sockets, avaliador determinístico, cache); editor visual de nodes adiado para o ciclo pós-Paint.
+- **UV Workspace congelado (P3D-063/064/065)**: edição UV sai da UI V1 durante a iniciativa Paint (conflito de `f.selected` com máscaras P3D-132; P3D-063 já exigia design conjunto com Materials/Paint); redesign completo marcado para pós-Paint. Shell `MODEL / PAINT` preservado; capítulo 36 não reaberto.
+- **Branches de implementação**: `paint/core-engine` (motor, descriptors, effects, graph headless) e `paint/ui-redesign` (layout mini-Photoshop, painel Layers/Brush/Effects).
+
 ## [Unreleased] — UI/UX, Responsiveness, Performance & Architecture Remediation (Waves 0–9)
 
 ### Adicionado

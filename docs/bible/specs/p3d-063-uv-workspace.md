@@ -3,13 +3,26 @@
 <aside>
 🧩
 
-Estado: **precisa design conjunto com Materials/Paint** · Prioridade: P1.
+Estado: **edição congelada durante a iniciativa Paint (2026-09-16)** · Prioridade: P1.
+Redesign marcado para **pós-Paint**.
 
 </aside>
 
 ## Objetivo
 
 Workspace dedicado a visualizar/editar UV sem duplicar dados do Paint/Material.
+
+## Decisão 2026-09-16 — iniciativa Paint
+
+A aba/superfície de **edição UV** sai da UI V1 durante a iniciativa Paint. Motivo:
+conflito de seleção compartilhada — o `uv_ui` alterna `f.selected`, a mesma flag
+usada pelas máscaras de pintura (P3D-132) — e P3D-063 já exigia "design conjunto
+com Materials/Paint". O workspace UV como pill independente volta no redesign
+pós-Paint, quando a integração com Paint e Materials estiver madura.
+
+O **módulo `module-uv` permanece** como utilitário: projeção Planar, Box/Cúbica
+e Auto Unwrap (xatlas) passam a ser oferecidas como "Preparar superfície" dentro
+do workspace Paint, porque pintar depende de UV projetada.
 
 ## UI
 

@@ -331,6 +331,12 @@ pub struct ToolState {
     pub paint_stroke: Option<Project>,
     pub canvas_brush: u32,
     pub paint_brush_kind: usize,
+    /// Dureza do pincel (0..=1) — iniciativa Paint (P3D-057, `BrushSettings`).
+    pub brush_hardness: f32,
+    /// Fluxo de tinta por dab (0..=1) — Airbrush (iniciativa Paint).
+    pub brush_flow: f32,
+    /// Espaçamento entre dabs como fração do diâmetro (0.01..=1.0).
+    pub brush_spacing: f32,
     pub paint_isolate_selection: bool,
     /// Canal de textura alvo da pintura (P3D-062). V1: só Albedo opera;
     /// demais canais ficam desabilitados na UI até V1.x.
@@ -388,6 +394,12 @@ impl ToolState {
             paint_stroke: None,
             canvas_brush: 4,
             paint_brush_kind: 0,
+            // 0.0 = falloff quadrático legado do Soft (semântica de duas zonas
+            // do motor: hardness é a fração de núcleo sólido). A UI migra para
+            // valores explícitos via `BrushSettings`.
+            brush_hardness: 0.0,
+            brush_flow: 1.0,
+            brush_spacing: 0.15,
             paint_isolate_selection: false,
             paint_channel: petunia_project::TextureChannel::Albedo,
             paint_pixel_grid: true,
@@ -1600,6 +1612,43 @@ impl AppState {
 
         fb.is_snapped = self.snap_enabled;
         Some(fb)
+    }
+
+    /// Descriptor canônico do pincel (iniciativa Paint — P3D-056/057).
+    ///
+    /// Fonte única da verdade: une os campos legados de sessão (`canvas_brush`,
+    /// `paint_brush_kind`, `paint_strength`) com os novos (`brush_hardness`,
+    /// `brush_flow`, `brush_spacing`). A UI migra para escrever `BrushSettings`
+    /// diretamente; enquanto isso, este método resolve o valor efetivo.
+    pub fn brush_settings(&self) -> crate::BrushSettings {
+        crate::BrushSettings {
+            kind: crate::brush_type_from_kind(self.session.tools.paint_brush_kind),
+            size_px: self.session.tools.canvas_brush.max(1) as f32,
+            hardness: self.session.tools.brush_hardness,
+            strength: self.session.tools.paint_strength,
+            flow: self.session.tools.brush_flow,
+            spacing: self.session.tools.brush_spacing,
+        }
+        .sanitized()
+    }
+
+    /// Raio de mundo equivalente ao pincel na profundidade do hit 3D.
+    ///
+    /// Contrato de coerência (iniciativa Paint): o anel de preview na viewport
+    /// e o carimbo real usam **o mesmo** valor. Deriva o tamanho em pixels de
+    /// tela para mundo pela projeção da câmera na profundidade do ponto.
+    pub fn brush_world_radius(&self, hit: Vec3) -> f32 {
+        let view_dir = self.camera.forward();
+        let depth = (hit - self.camera.eye()).dot(view_dir).max(0.05);
+        let half_fov = (self.camera.fov_y * 0.5).to_radians();
+        let world_height = 2.0 * depth * half_fov.tan();
+        let px_height = self
+            .ui
+            .viewport_rect
+            .map(|r| (r.max[1] - r.min[1]) * self.ui.viewport_pixels_per_point)
+            .unwrap_or(1080.0);
+        let world_per_px = world_height / px_height.max(1.0);
+        self.brush_settings().size_px * world_per_px * 0.5
     }
 
     /// Pinta vértices próximos do ponto 3D (vertex paint).

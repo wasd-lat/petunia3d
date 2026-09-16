@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::Canvas;
 
+/// Tamanho de tile para composição parcial (P3D-061: composite cacheável).
+pub const TILE_SIZE: u32 = 32;
+
 /// Modo de mesclagem de camadas de pintura (P3D-061).
 ///
 /// V1 usa `Normal`; demais modos existem para compatibilidade de
@@ -26,7 +29,11 @@ pub enum LayerBlendMode {
     Screen,
 }
 
-/// Efeitos não-destrutivos sobre texturas / camadas (P3D-134, pós-V1).
+/// Efeitos não-destrutivos sobre texturas / camadas (P3D-134, cap. 42).
+///
+/// Discriminantes **append-only**: variantes novas entram no fim para
+/// preservar valores serializados. A lista segue os nodes iniciais do
+/// cap. 42 (presets antes de graphs).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PaintEffect {
     /// Pixelização com tamanho de bloco especificado (P3D-134).
@@ -35,6 +42,21 @@ pub enum PaintEffect {
     Posterize { levels: u8 },
     /// Inversão de cores RGB.
     Invert,
+    /// Ruído aditivo determinístico por pixel (cap. 42: Pixel Noise / Grain).
+    /// `intensity` 0..=1; mesmo `seed` ⇒ mesmo resultado (avaliador determinístico).
+    Grain { intensity: f32, seed: u32 },
+    /// Remapeamento de tons: `[in_min, in_max]` → `[out_min, out_max]` com gamma.
+    Levels {
+        in_min: f32,
+        in_max: f32,
+        gamma: f32,
+        out_min: f32,
+        out_max: f32,
+    },
+    /// Brilho (`-1..=1`) e contraste (`-1..=1`; `-1` achata em cinza médio).
+    BrightnessContrast { brightness: f32, contrast: f32 },
+    /// Rotação de matiz em graus e escala de saturação (`-1..=1`).
+    HueSaturation { hue_shift_deg: f32, saturation: f32 },
 }
 
 /// Decalque / projeção 2D parametrizada e reposicionável (P3D-133, pós-V1).
@@ -313,79 +335,25 @@ impl PaintLayerStack {
                     }
                 }
                 LayerKind::Effect(effect) => {
-                    let w = base.w;
-                    let h = base.h;
-                    match effect {
-                        PaintEffect::Pixelate { cell_size } => {
-                            let step = (*cell_size).max(1);
-                            for y_block in (0..h).step_by(step as usize) {
-                                for x_block in (0..w).step_by(step as usize) {
-                                    if let Some(sample) = base.get(x_block, y_block) {
-                                        for dy in 0..step {
-                                            for dx in 0..step {
-                                                let px = x_block + dx;
-                                                let py = y_block + dy;
-                                                if px < w
-                                                    && py < h
-                                                    && let Some(current) = base.get(px, py)
-                                                {
-                                                    let blended = blend_pixels(
-                                                        current,
-                                                        sample,
-                                                        layer.opacity,
-                                                        LayerBlendMode::Normal,
-                                                    );
-                                                    base.set(px, py, blended);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        PaintEffect::Posterize { levels } => {
-                            let n = (*levels).max(2) as f32;
-                            let step = 255.0 / (n - 1.0);
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let pr = (((c[0] as f32 / 255.0 * (n - 1.0)).round())
-                                            * step)
-                                            .clamp(0.0, 255.0)
-                                            as u8;
-                                        let pg = (((c[1] as f32 / 255.0 * (n - 1.0)).round())
-                                            * step)
-                                            .clamp(0.0, 255.0)
-                                            as u8;
-                                        let pb = (((c[2] as f32 / 255.0 * (n - 1.0)).round())
-                                            * step)
-                                            .clamp(0.0, 255.0)
-                                            as u8;
-                                        let quant = [pr, pg, pb, c[3]];
-                                        let blended = blend_pixels(
-                                            c,
-                                            quant,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
-                                }
-                            }
-                        }
-                        PaintEffect::Invert => {
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let inv = [255 - c[0], 255 - c[1], 255 - c[2], c[3]];
-                                        let blended = blend_pixels(
-                                            c,
-                                            inv,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
+                    // Efeito a 100%: aplica direto. Com opacidade parcial:
+                    // aplica numa cópia e re-mescla antes/depois (idempotente).
+                    if layer.opacity >= 1.0 {
+                        apply_effect(&mut *base, effect);
+                    } else {
+                        let before = base.clone();
+                        apply_effect(&mut *base, effect);
+                        for y in 0..base.h {
+                            for x in 0..base.w {
+                                if let (Some(orig), Some(current)) =
+                                    (before.get(x, y), base.get(x, y))
+                                {
+                                    let blended = blend_pixels(
+                                        orig,
+                                        current,
+                                        layer.opacity,
+                                        LayerBlendMode::Normal,
+                                    );
+                                    base.set(x, y, blended);
                                 }
                             }
                         }
@@ -394,6 +362,407 @@ impl PaintLayerStack {
             }
         }
     }
+
+    /// True se a composição parcial por tiles é **equivalente** à completa.
+    ///
+    /// P3D-061: "composite deve ser cacheável e evitar recomposição integral".
+    /// Efeitos com amostragem de vizinhança além do pixel (Pixelate) impedem
+    /// tiling seguro; os per-pixel (Grain/Levels/BrightnessContrast/
+    /// HueSaturation/Invert/Posterize) são locais e permanecem tileáveis.
+    pub fn is_tileable(&self) -> bool {
+        !self
+            .layers
+            .iter()
+            .any(|l| matches!(l.kind, LayerKind::Effect(PaintEffect::Pixelate { .. })))
+    }
+
+    /// Recompõe apenas os tiles listados sobre `out`, que **deve conter o
+    /// resultado da composição anterior** (completa ou parcial).
+    ///
+    /// `dirty_tiles` usa indexação por linha: `tile = ty * tiles_x + tx`,
+    /// com tiles de [`TILE_SIZE`] a partir do canto superior esquerdo.
+    /// Exige [`Self::is_tileable`] — em stacks com Pixelate use `composite`.
+    pub fn composite_tiles(&self, out: &mut Canvas, dirty_tiles: &[u32]) {
+        assert!(
+            self.is_tileable(),
+            "composição parcial exige stack tileável (sem Pixelate)"
+        );
+        if dirty_tiles.is_empty() {
+            return;
+        }
+        let tiles_x = out.w.div_ceil(TILE_SIZE).max(1);
+        for tile in dirty_tiles {
+            let tx = tile % tiles_x;
+            let ty = tile / tiles_x;
+            let x0 = tx * TILE_SIZE;
+            let y0 = ty * TILE_SIZE;
+            let x1 = (x0 + TILE_SIZE).min(out.w);
+            let y1 = (y0 + TILE_SIZE).min(out.h);
+            self.composite_tile_region(out, x0, y0, x1, y1);
+        }
+    }
+
+    /// Recompõe a região de um tile: reset da base (primeiro layer) sobre
+    /// transparente, depois os layers restantes com blend — a mesma
+    /// aritmética do `composite` completo sobre scratch transparente.
+    fn composite_tile_region(&self, out: &mut Canvas, x0: u32, y0: u32, x1: u32, y1: u32) {
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        for (li, layer) in self.layers.iter().enumerate() {
+            if !layer.visible || layer.opacity <= 0.0 {
+                continue;
+            }
+            match &layer.kind {
+                LayerKind::Raster(canvas) => {
+                    for y in y0..y1 {
+                        for x in x0..x1 {
+                            let Some(src) = canvas.get(x, y) else {
+                                continue;
+                            };
+                            let v = if li == 0 {
+                                blend_pixels([0, 0, 0, 0], src, layer.opacity, layer.blend)
+                            } else {
+                                let Some(dst) = out.get(x, y) else {
+                                    continue;
+                                };
+                                blend_pixels(dst, src, layer.opacity, layer.blend)
+                            };
+                            out.set(x, y, v);
+                        }
+                    }
+                }
+                LayerKind::Decal(decal) => {
+                    if decal.scale_uv[0].abs() < 1e-5 || decal.scale_uv[1].abs() < 1e-5 {
+                        continue;
+                    }
+                    let (w, h) = (out.w, out.h);
+                    let cos_rot = (-decal.rotation_rad).cos();
+                    let sin_rot = (-decal.rotation_rad).sin();
+                    for y in y0..y1 {
+                        for x in x0..x1 {
+                            let u = (x as f32 + 0.5) / w as f32;
+                            let v = (y as f32 + 0.5) / h as f32;
+                            let dx = u - decal.center_uv[0];
+                            let dy = v - decal.center_uv[1];
+                            let rx = dx * cos_rot - dy * sin_rot;
+                            let ry = dx * sin_rot + dy * cos_rot;
+                            let decal_u = rx / decal.scale_uv[0] + 0.5;
+                            let decal_v = ry / decal.scale_uv[1] + 0.5;
+                            if !(0.0..=1.0).contains(&decal_u) || !(0.0..=1.0).contains(&decal_v) {
+                                continue;
+                            }
+                            let sx = (decal_u * decal.image.w as f32)
+                                .clamp(0.0, decal.image.w as f32 - 1.0)
+                                as u32;
+                            let sy = (decal_v * decal.image.h as f32)
+                                .clamp(0.0, decal.image.h as f32 - 1.0)
+                                as u32;
+                            let Some(src) = decal.image.get(sx, sy) else {
+                                continue;
+                            };
+                            let dst = out.get(x, y).unwrap_or([0, 0, 0, 0]);
+                            out.set(x, y, blend_pixels(dst, src, layer.opacity, layer.blend));
+                        }
+                    }
+                }
+                LayerKind::Effect(effect) => {
+                    // Só efeitos per-pixel chegam aqui (guardado por `is_tileable`).
+                    for y in y0..y1 {
+                        for x in x0..x1 {
+                            if let Some(c) = out.get(x, y) {
+                                let value = effect_pixel(effect, x, y, c);
+                                out.set(
+                                    x,
+                                    y,
+                                    blend_pixels(c, value, layer.opacity, LayerBlendMode::Normal),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Versão per-pixel de um efeito tileável (sem amostragem de vizinhança).
+/// Espelha a aritmética de [`apply_effect`] para os efeitos locais.
+fn effect_pixel(effect: &PaintEffect, x: u32, y: u32, c: [u8; 4]) -> [u8; 4] {
+    match effect {
+        PaintEffect::Posterize { levels } => {
+            let n = (*levels).max(2) as f32;
+            let step = 255.0 / (n - 1.0);
+            let q = |v: u8| -> u8 {
+                ((v as f32 / 255.0 * (n - 1.0)).round() * step).clamp(0.0, 255.0) as u8
+            };
+            [q(c[0]), q(c[1]), q(c[2]), c[3]]
+        }
+        PaintEffect::Invert => [255 - c[0], 255 - c[1], 255 - c[2], c[3]],
+        PaintEffect::Grain { intensity, seed } => {
+            let k = intensity.clamp(0.0, 1.0);
+            let n = hash_noise(x, y, *seed);
+            let d = (n * k * 255.0) as i32;
+            [
+                (c[0] as i32 + d).clamp(0, 255) as u8,
+                (c[1] as i32 + d).clamp(0, 255) as u8,
+                (c[2] as i32 + d).clamp(0, 255) as u8,
+                c[3],
+            ]
+        }
+        PaintEffect::Levels {
+            in_min,
+            in_max,
+            gamma,
+            out_min,
+            out_max,
+        } => {
+            let (lo, hi) = (
+                in_min.clamp(0.0, 1.0),
+                in_max.clamp(0.0, 1.0).max(in_min.clamp(0.0, 1.0) + 1e-3),
+            );
+            let (olo, ohi) = (out_min.clamp(0.0, 1.0), out_max.clamp(0.0, 1.0));
+            let g = gamma.clamp(0.1, 10.0);
+            let mapped = |v: u8| -> u8 {
+                let t = v as f32 / 255.0;
+                let out = if t <= lo {
+                    olo
+                } else if t >= hi {
+                    ohi
+                } else {
+                    let n = (t - lo) / (hi - lo);
+                    olo + n.powf(g) * (ohi - olo)
+                };
+                (out * 255.0).round().clamp(0.0, 255.0) as u8
+            };
+            [mapped(c[0]), mapped(c[1]), mapped(c[2]), c[3]]
+        }
+        PaintEffect::BrightnessContrast {
+            brightness,
+            contrast,
+        } => {
+            let b = brightness.clamp(-1.0, 1.0);
+            let ct = contrast.clamp(-1.0, 1.0);
+            let adj = |v: u8| -> u8 {
+                let t = (v as f32 - 127.5) * (1.0 + ct) + 127.5 + b * 127.5;
+                t.round().clamp(0.0, 255.0) as u8
+            };
+            [adj(c[0]), adj(c[1]), adj(c[2]), c[3]]
+        }
+        PaintEffect::HueSaturation {
+            hue_shift_deg,
+            saturation,
+        } => {
+            let shift = hue_shift_deg % 360.0;
+            let sat_scale = (1.0 + saturation.clamp(-1.0, 1.0)).max(0.0);
+            let (hue, sat, val) = rgb_to_hsv(c[0], c[1], c[2]);
+            let h2 = (hue + shift + 360.0) % 360.0;
+            let s2 = (sat * sat_scale).clamp(0.0, 1.0);
+            let (r2, g2, b2) = hsv_to_rgb(h2, s2, val);
+            [r2, g2, b2, c[3]]
+        }
+        // Pixelate não é tileável — nunca chega aqui (guardado por `is_tileable`).
+        PaintEffect::Pixelate { .. } => c,
+    }
+}
+
+/// Aplica um `PaintEffect` sobre o canvas (opacidade 100%).
+///
+/// Função compartilhada entre a pilha de camadas (P3D-134) e o Surface
+/// Recipe graph (P3D-113/cap. 42: "efeitos são node groups internamente;
+/// presets são a superfície"). Determinística: mesma entrada ⇒ mesma saída.
+pub fn apply_effect(canvas: &mut Canvas, effect: &PaintEffect) {
+    let w = canvas.w;
+    let h = canvas.h;
+    match effect {
+        PaintEffect::Pixelate { cell_size } => {
+            let step = (*cell_size).max(1);
+            for y_block in (0..h).step_by(step as usize) {
+                for x_block in (0..w).step_by(step as usize) {
+                    if let Some(sample) = canvas.get(x_block, y_block) {
+                        for dy in 0..step {
+                            for dx in 0..step {
+                                let px = x_block + dx;
+                                let py = y_block + dy;
+                                if px < w && py < h {
+                                    canvas.set(px, py, sample);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        PaintEffect::Posterize { levels } => {
+            let n = (*levels).max(2) as f32;
+            let step = 255.0 / (n - 1.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let q = |v: u8| -> u8 {
+                            ((v as f32 / 255.0 * (n - 1.0)).round() * step).clamp(0.0, 255.0) as u8
+                        };
+                        canvas.set(x, y, [q(c[0]), q(c[1]), q(c[2]), c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::Invert => {
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        canvas.set(x, y, [255 - c[0], 255 - c[1], 255 - c[2], c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::Grain { intensity, seed } => {
+            let k = intensity.clamp(0.0, 1.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let n = hash_noise(x, y, *seed);
+                        let d = (n * k * 255.0) as i32;
+                        canvas.set(
+                            x,
+                            y,
+                            [
+                                (c[0] as i32 + d).clamp(0, 255) as u8,
+                                (c[1] as i32 + d).clamp(0, 255) as u8,
+                                (c[2] as i32 + d).clamp(0, 255) as u8,
+                                c[3],
+                            ],
+                        );
+                    }
+                }
+            }
+        }
+        PaintEffect::Levels {
+            in_min,
+            in_max,
+            gamma,
+            out_min,
+            out_max,
+        } => {
+            let (lo, hi) = (
+                in_min.clamp(0.0, 1.0),
+                in_max.clamp(0.0, 1.0).max(in_min.clamp(0.0, 1.0) + 1e-3),
+            );
+            let (olo, ohi) = (out_min.clamp(0.0, 1.0), out_max.clamp(0.0, 1.0));
+            let g = gamma.clamp(0.1, 10.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let mapped = |v: u8| -> u8 {
+                            let t = v as f32 / 255.0;
+                            let out = if t <= lo {
+                                olo
+                            } else if t >= hi {
+                                ohi
+                            } else {
+                                let n = (t - lo) / (hi - lo);
+                                olo + n.powf(g) * (ohi - olo)
+                            };
+                            (out * 255.0).round().clamp(0.0, 255.0) as u8
+                        };
+                        canvas.set(x, y, [mapped(c[0]), mapped(c[1]), mapped(c[2]), c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::BrightnessContrast {
+            brightness,
+            contrast,
+        } => {
+            let b = brightness.clamp(-1.0, 1.0);
+            let ct = contrast.clamp(-1.0, 1.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let adj = |v: u8| -> u8 {
+                            let t = (v as f32 - 127.5) * (1.0 + ct) + 127.5 + b * 127.5;
+                            t.round().clamp(0.0, 255.0) as u8
+                        };
+                        canvas.set(x, y, [adj(c[0]), adj(c[1]), adj(c[2]), c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::HueSaturation {
+            hue_shift_deg,
+            saturation,
+        } => {
+            let shift = hue_shift_deg % 360.0;
+            let sat_scale = (1.0 + saturation.clamp(-1.0, 1.0)).max(0.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let (hue, sat, val) = rgb_to_hsv(c[0], c[1], c[2]);
+                        let h2 = (hue + shift + 360.0) % 360.0;
+                        let s2 = (sat * sat_scale).clamp(0.0, 1.0);
+                        let (r2, g2, b2) = hsv_to_rgb(h2, s2, val);
+                        canvas.set(x, y, [r2, g2, b2, c[3]]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Hash determinístico por pixel para Grain (mesmo seed ⇒ mesmo ruído).
+fn hash_noise(x: u32, y: u32, seed: u32) -> f32 {
+    let mut h = seed ^ x.wrapping_mul(0x9E37_79B9) ^ y.wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7FEB_352D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846C_A68B);
+    h ^= h >> 16;
+    h as f32 / u32::MAX as f32 * 2.0 - 1.0
+}
+
+/// RGB [0..255] → HSV (hue 0..360, s/v 0..1).
+fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let hue = if delta <= f32::EPSILON {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    let hue = if hue < 0.0 { hue + 360.0 } else { hue };
+    let sat = if max <= f32::EPSILON {
+        0.0
+    } else {
+        delta / max
+    };
+    (hue, sat, max)
+}
+
+/// HSV (hue 0..360, s/v 0..1) → RGB [0..255].
+fn hsv_to_rgb(hue: f32, sat: f32, val: f32) -> (u8, u8, u8) {
+    let c = val * sat;
+    let hp = hue / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = val - c;
+    (
+        ((r + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((g + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((b + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
 }
 
 #[cfg(test)]
@@ -423,5 +792,225 @@ mod tests {
         assert_eq!(stack.active().map(|l| l.id), Some(a));
         assert!(stack.remove_layer(b));
         assert_eq!(stack.layers.len(), 1);
+    }
+
+    #[test]
+    fn grain_is_deterministic_and_seeded() {
+        let effect = PaintEffect::Grain {
+            intensity: 0.5,
+            seed: 42,
+        };
+        let mut base_a = Canvas::new(16, 16, [100, 100, 100, 255]);
+        let mut base_b = Canvas::new(16, 16, [100, 100, 100, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect("Grain", effect));
+        stack.composite(&mut base_a);
+        let mut stack_b = PaintLayerStack::new();
+        stack_b.add_layer(PaintLayer::new_effect("Grain", effect));
+        stack_b.composite(&mut base_b);
+        assert_eq!(base_a.pixels, base_b.pixels, "mesmo seed ⇒ mesmo ruído");
+        assert!(
+            base_a.pixels.chunks(4).any(|p| p[0] != 100),
+            "intensidade > 0 deve alterar pixels"
+        );
+        // Seed diferente ⇒ padrão diferente (probabilidade de colisão desprezível).
+        let mut base_c = Canvas::new(16, 16, [100, 100, 100, 255]);
+        let mut stack_c = PaintLayerStack::new();
+        stack_c.add_layer(PaintLayer::new_effect(
+            "Grain",
+            PaintEffect::Grain {
+                intensity: 0.5,
+                seed: 43,
+            },
+        ));
+        stack_c.composite(&mut base_c);
+        assert_ne!(base_a.pixels, base_c.pixels);
+    }
+
+    #[test]
+    fn grain_zero_intensity_is_identity() {
+        let mut base = Canvas::new(4, 4, [10, 20, 30, 255]);
+        let before = base.pixels.clone();
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Grain",
+            PaintEffect::Grain {
+                intensity: 0.0,
+                seed: 7,
+            },
+        ));
+        stack.composite(&mut base);
+        assert_eq!(before, base.pixels);
+    }
+
+    #[test]
+    fn levels_maps_black_to_white_and_is_bounded() {
+        let mut base = Canvas::new(2, 1, [0, 0, 0, 255]);
+        base.set(1, 0, [255, 255, 255, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Levels",
+            PaintEffect::Levels {
+                in_min: 0.0,
+                in_max: 1.0,
+                gamma: 1.0,
+                out_min: 1.0,
+                out_max: 0.0,
+            },
+        ));
+        stack.composite(&mut base);
+        assert_eq!(
+            base.get(0, 0),
+            Some([255, 255, 255, 255]),
+            "preto vira branco"
+        );
+        assert_eq!(base.get(1, 0), Some([0, 0, 0, 255]), "branco vira preto");
+    }
+
+    #[test]
+    fn brightness_contrast_flat_is_mid_gray() {
+        let mut base = Canvas::new(2, 1, [0, 0, 0, 255]);
+        base.set(1, 0, [255, 255, 255, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Flat",
+            PaintEffect::BrightnessContrast {
+                brightness: 0.0,
+                contrast: -1.0,
+            },
+        ));
+        stack.composite(&mut base);
+        let a = base.get(0, 0).unwrap();
+        let b = base.get(1, 0).unwrap();
+        assert_eq!(a, b, "contraste -1 achata tudo em cinza médio");
+        assert!((a[0] as i32 - 128).abs() <= 2);
+    }
+
+    #[test]
+    fn hue_shift_180_turns_red_into_cyan() {
+        let mut base = Canvas::new(1, 1, [255, 0, 0, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Hue 180",
+            PaintEffect::HueSaturation {
+                hue_shift_deg: 180.0,
+                saturation: 0.0,
+            },
+        ));
+        stack.composite(&mut base);
+        let c = base.get(0, 0).unwrap();
+        assert!(
+            c[1] > 200 && c[2] > 200 && c[0] < 60,
+            "vermelho +180° ≈ ciano: {c:?}"
+        );
+    }
+
+    #[test]
+    fn new_effects_serialize_roundtrip() {
+        for e in [
+            PaintEffect::Grain {
+                intensity: 0.4,
+                seed: 9,
+            },
+            PaintEffect::Levels {
+                in_min: 0.1,
+                in_max: 0.9,
+                gamma: 1.5,
+                out_min: 0.0,
+                out_max: 1.0,
+            },
+            PaintEffect::BrightnessContrast {
+                brightness: 0.2,
+                contrast: 0.5,
+            },
+            PaintEffect::HueSaturation {
+                hue_shift_deg: 30.0,
+                saturation: -0.4,
+            },
+        ] {
+            let json = serde_json::to_string(&e).expect("serializa");
+            let back: PaintEffect = serde_json::from_str(&json).expect("desserializa");
+            assert_eq!(e, back);
+        }
+    }
+
+    #[test]
+    fn composite_tiles_matches_full_composite() {
+        // Stack com base + camada de detalhe + efeito per-pixel (tileável).
+        let mut stack =
+            PaintLayerStack::with_base("Base", Canvas::new(64, 64, [200, 200, 200, 255]));
+        let mut detail = PaintLayer::new("Detail", 64, 64, [0, 0, 0, 0]);
+        detail.opacity = 0.6;
+        // Pincelada na região do tile (1,0).
+        if let Some(cv) = detail.canvas_mut() {
+            for y in 30..40 {
+                for x in 35..50 {
+                    cv.set(x, y, [255, 100, 0, 255]);
+                }
+            }
+        }
+        stack.add_layer(detail);
+        stack.add_layer(PaintLayer::new_effect(
+            "Grain",
+            PaintEffect::Grain {
+                intensity: 0.2,
+                seed: 5,
+            },
+        ));
+        assert!(stack.is_tileable());
+
+        // Composição completa (referência).
+        let mut full = Canvas::new(64, 64, [0, 0, 0, 0]);
+        stack.composite(&mut full);
+
+        // Composição parcial: todos os tiles sujos a partir do estado anterior
+        // (que aqui é o resultado "antes da pincelada": compõe sem o detalhe).
+        let mut prev_stack =
+            PaintLayerStack::with_base("Base", Canvas::new(64, 64, [200, 200, 200, 255]));
+        prev_stack.add_layer(PaintLayer::new_effect(
+            "Grain",
+            PaintEffect::Grain {
+                intensity: 0.2,
+                seed: 5,
+            },
+        ));
+        let mut partial = Canvas::new(64, 64, [0, 0, 0, 0]);
+        prev_stack.composite(&mut partial);
+        // Tiles sujos: (1,0) e (1,1)? A pincelada toca x 35..50, y 30..40 →
+        // tiles (1,0) e (1,1) com TILE_SIZE 32.
+        stack.composite_tiles(&mut partial, &[1, 3]);
+
+        assert_eq!(partial.pixels, full.pixels, "tiled == full");
+    }
+
+    #[test]
+    fn composite_tiles_partial_keeps_clean_tiles() {
+        let mut stack = PaintLayerStack::with_base("Base", Canvas::new(64, 64, [50, 50, 50, 255]));
+        let mut top = PaintLayer::new("Top", 64, 64, [0, 0, 0, 0]);
+        if let Some(cv) = top.canvas_mut() {
+            cv.set(40, 40, [255, 0, 0, 255]);
+        }
+        stack.add_layer(top);
+
+        let mut full = Canvas::new(64, 64, [0, 0, 0, 0]);
+        stack.composite(&mut full);
+
+        // Estado anterior: só a base. Suja apenas o tile (1,1) que contém (40,40).
+        let mut prev = Canvas::new(64, 64, [0, 0, 0, 0]);
+        PaintLayerStack::with_base("Base", Canvas::new(64, 64, [50, 50, 50, 255]))
+            .composite(&mut prev);
+        stack.composite_tiles(&mut prev, &[3]);
+
+        assert_eq!(prev.pixels, full.pixels);
+    }
+
+    #[test]
+    fn pixelate_makes_stack_not_tileable() {
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Pixelate",
+            PaintEffect::Pixelate { cell_size: 4 },
+        ));
+        assert!(!stack.is_tileable());
     }
 }

@@ -519,6 +519,18 @@ Split UV 2D + viewport 3D, default aproximado `55/45`, redimensionável e com se
 
 Workspace não implementado não aparece como pill desabilitada.
 
+### Adendo 2026-09-16 — iniciativa Paint (decisão registrada)
+
+Durante a iniciativa Paint, a **pill UV sai temporariamente da UI V1**. O
+workspace de edição UV é congelado porque o `uv_ui` alterna `f.selected`, a
+mesma flag das máscaras de pintura (P3D-132), e o próprio P3D-063 exigia
+design conjunto com Materials/Paint. O módulo `module-uv` **permanece** como
+utilitário: projeções Planar, Box/Cúbica e Auto Unwrap (xatlas) são expostas
+dentro do Paint como "Preparar superfície" (P3D-065, fluxo paint-first). O
+redesign completo do workspace UV (P3D-063/064/065) fica marcado para o ciclo
+**pós-Paint**. O shell `MODEL / PAINT` permanece; nenhum outro princípio deste
+capítulo é reaberto pela decisão.
+
 # Viewport adapter final
 
 ```

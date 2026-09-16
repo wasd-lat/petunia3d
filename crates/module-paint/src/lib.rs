@@ -19,28 +19,11 @@ use petunia_project::Canvas;
 pub use petunia_project::paint_layers::{
     DecalLayer, LayerBlendMode, LayerKind, PaintEffect, PaintLayer, PaintLayerStack, blend_pixels,
 };
-use serde::{Deserialize, Serialize};
 
-/// Tipo de pincel ativo no motor de pintura (P3D-056 a P3D-060).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum BrushType {
-    /// Pincel rígido com pixels exatos sem anti-aliasing (P3D-056).
-    #[default]
-    Pixel,
-    /// Pincel com atenuação radial suave (P3D-057).
-    Soft,
-    /// Borracha que atenua ou remove o canal alfa (P3D-058).
-    Eraser,
-    /// Balde de preenchimento flood-fill por tolerância (P3D-059).
-    Fill,
-    /// Amostrador de cor / conta-gotas (P3D-060).
-    Eyedropper,
-    /// Linha reta entre dois pontos (cap. 15/44: raster op simples).
-    /// No fim do enum de propósito: preserva os discriminantes serializados.
-    Line,
-    /// Retângulo preenchido entre dois cantos (cap. 15/44). Idem.
-    Rectangle,
-}
+/// `BrushType`/`BrushSettings` vivem em `petunia_core` (descriptor único,
+/// iniciativa Paint — P3D-056/057). Re-exportados aqui por compatibilidade
+/// com call sites existentes (`petunia_module_paint::BrushType`).
+pub use petunia_core::{BrushSettings, BrushType};
 
 /// Traço de forma (Line/Rectangle) com estilo do pincel ativo.
 #[derive(Clone, Copy, Debug)]
@@ -279,27 +262,57 @@ impl PaintModule {
         color: [u8; 4],
         strength: f32,
     ) {
+        Self::stamp_soft_brush_hard(canvas, cx, cy, radius, color, strength, 0.0);
+    }
+
+    /// Carimbo suave com dureza explícita (iniciativa Paint).
+    ///
+    /// Semântica Photoshop-like de duas zonas: núcleo sólido de raio
+    /// `hardness * radius` + anel externo com falloff quadrático suave.
+    /// - `hardness = 1` → borda rígida (equivale ao Pixel no centro do dab);
+    /// - `hardness = 0` → falloff quadrático puro (comportamento legado exato).
+    pub fn stamp_soft_brush_hard(
+        canvas: &mut Canvas,
+        cx: u32,
+        cy: u32,
+        radius: u32,
+        color: [u8; 4],
+        strength: f32,
+        hardness: f32,
+    ) {
         let r = radius as i32;
         let r_f = radius as f32;
         let str_k = strength.clamp(0.0, 1.0);
+        let core = hardness.clamp(0.0, 1.0) * r_f;
 
         for dy in -r..=r {
             for dx in -r..=r {
                 let dist = ((dx * dx + dy * dy) as f32).sqrt();
-                if dist <= r_f {
-                    let factor = (1.0 - (dist / r_f)).powi(2) * str_k;
-                    let px = (cx as i32 + dx).max(0) as u32;
-                    let py = (cy as i32 + dy).max(0) as u32;
+                if dist > r_f {
+                    continue;
+                }
+                let factor = if dist <= core {
+                    str_k
+                } else if core >= r_f {
+                    0.0
+                } else {
+                    let t = (dist - core) / (r_f - core).max(1e-4);
+                    (1.0 - t) * (1.0 - t) * str_k
+                };
+                if factor <= 0.0 {
+                    continue;
+                }
+                let px = (cx as i32 + dx).max(0) as u32;
+                let py = (cy as i32 + dy).max(0) as u32;
 
-                    if let Some(bg) = canvas.get(px, py) {
-                        let blended = [
-                            (bg[0] as f32 * (1.0 - factor) + color[0] as f32 * factor) as u8,
-                            (bg[1] as f32 * (1.0 - factor) + color[1] as f32 * factor) as u8,
-                            (bg[2] as f32 * (1.0 - factor) + color[2] as f32 * factor) as u8,
-                            (bg[3] as f32 * (1.0 - factor) + color[3] as f32 * factor) as u8,
-                        ];
-                        canvas.set(px, py, blended);
-                    }
+                if let Some(bg) = canvas.get(px, py) {
+                    let blended = [
+                        (bg[0] as f32 * (1.0 - factor) + color[0] as f32 * factor) as u8,
+                        (bg[1] as f32 * (1.0 - factor) + color[1] as f32 * factor) as u8,
+                        (bg[2] as f32 * (1.0 - factor) + color[2] as f32 * factor) as u8,
+                        (bg[3] as f32 * (1.0 - factor) + color[3] as f32 * factor) as u8,
+                    ];
+                    canvas.set(px, py, blended);
                 }
             }
         }
@@ -466,7 +479,8 @@ impl PaintModule {
         }
     }
 
-    /// Pinta no canvas 2D com suporte aos 5 tipos de pincéis.
+    /// Pinta no canvas 2D com suporte aos 5 tipos de pincéis (API legado).
+    /// Delega para o descriptor canônico ([`BrushSettings`]).
     pub fn canvas_brush_advanced(
         state: &mut AppState,
         x: u32,
@@ -475,18 +489,42 @@ impl PaintModule {
         radius: u32,
         strength: f32,
     ) {
+        let settings = BrushSettings {
+            kind: brush,
+            size_px: (radius.max(1) * 2) as f32,
+            hardness: state.session.tools.brush_hardness,
+            strength,
+            flow: state.session.tools.brush_flow,
+            spacing: state.session.tools.brush_spacing,
+        };
+        Self::canvas_brush_with_settings(state, x, y, settings);
+    }
+
+    /// Pinta no canvas 2D com o descriptor canônico (iniciativa Paint).
+    ///
+    /// Carimba um único dab. A interpolação do traço entre eventos de ponteiro
+    /// é responsabilidade de quem alimenta os pontos — use
+    /// [`BrushSettings::stroke_dabs`] para densidade independente de poll rate.
+    pub fn canvas_brush_with_settings(
+        state: &mut AppState,
+        x: u32,
+        y: u32,
+        settings: BrushSettings,
+    ) {
         Self::ensure_stack(state);
+        let s = settings.sanitized();
         let color = [
             (state.paint_color[0] * 255.0) as u8,
             (state.paint_color[1] * 255.0) as u8,
             (state.paint_color[2] * 255.0) as u8,
             255,
         ];
+        let radius = s.radius_px();
 
         let active_idx = state.project.active;
         let mut picked = None;
         // Conta-gotas amostra o composto (o que o usuário vê — P3D-060).
-        if matches!(brush, BrushType::Eyedropper) {
+        if s.kind == BrushType::Eyedropper {
             if let Some(o) = state.project.assets.get(active_idx)
                 && let Some(cv) = o.texture.as_ref()
                 && x < cv.w
@@ -504,10 +542,22 @@ impl PaintModule {
             && let Some(layer) = stack.active_mut()
             && let Some(cv) = layer.canvas_mut()
         {
-            match brush {
+            match s.kind {
                 BrushType::Pixel => Self::stamp_pixel_brush(cv, x, y, radius, color),
-                BrushType::Soft => Self::stamp_soft_brush(cv, x, y, radius, color, strength),
-                BrushType::Eraser => Self::stamp_eraser(cv, x, y, radius, strength),
+                BrushType::Soft => {
+                    Self::stamp_soft_brush_hard(cv, x, y, radius, color, s.strength, s.hardness);
+                }
+                // Airbrush: falloff máximo + força modulada pelo fluxo.
+                BrushType::Airbrush => Self::stamp_soft_brush_hard(
+                    cv,
+                    x,
+                    y,
+                    radius,
+                    color,
+                    (s.strength * s.flow).clamp(0.0, 1.0),
+                    0.0,
+                ),
+                BrushType::Eraser => Self::stamp_eraser(cv, x, y, radius, s.strength),
                 BrushType::Fill => Self::flood_fill(cv, x, y, color, 16),
                 // Formas e conta-gotas têm caminho próprio (commit_shape / composto).
                 BrushType::Line | BrushType::Rectangle | BrushType::Eyedropper => {}
@@ -661,7 +711,8 @@ impl PaintModule {
         ))
     }
 
-    /// Pinta na textura 2D do modelo projetando o ponto de impacto 3D nas coordenadas UV da face.
+    /// Pinta na textura 2D do modelo projetando o ponto de impacto 3D nas
+    /// coordenadas UV da face (API legado → descriptor canônico).
     pub fn paint_mesh_3d(
         state: &mut AppState,
         face_idx: usize,
@@ -671,11 +722,31 @@ impl PaintModule {
         strength: f32,
         isolate_selection: bool,
     ) -> bool {
+        let settings = BrushSettings {
+            kind: brush,
+            size_px: (radius.max(1) * 2) as f32,
+            hardness: state.session.tools.brush_hardness,
+            strength,
+            flow: state.session.tools.brush_flow,
+            spacing: state.session.tools.brush_spacing,
+        };
+        Self::paint_mesh_3d_with_settings(state, face_idx, hit_pos, settings, isolate_selection)
+    }
+
+    /// Pinta na textura via UV com o descriptor canônico (iniciativa Paint).
+    pub fn paint_mesh_3d_with_settings(
+        state: &mut AppState,
+        face_idx: usize,
+        hit_pos: Vec3,
+        settings: BrushSettings,
+        isolate_selection: bool,
+    ) -> bool {
+        let s = settings.sanitized();
         let Some(uv) = Self::face_hit_uv(state, face_idx, hit_pos, isolate_selection) else {
             return false;
         };
         // Formas são confirmadas no release (commit_shape); aqui só pincéis livres.
-        if matches!(brush, BrushType::Line | BrushType::Rectangle) {
+        if s.kind.is_shape() {
             return false;
         }
 
@@ -684,7 +755,7 @@ impl PaintModule {
             return false;
         };
 
-        Self::canvas_brush_advanced(state, px, py, brush, radius, strength);
+        Self::canvas_brush_with_settings(state, px, py, s);
         true
     }
 }
@@ -777,6 +848,99 @@ mod tests {
         assert_eq!(cv.get(4, 3), Some([255, 255, 255, 255]));
         assert_eq!(cv.get(4, 5), Some([255, 255, 255, 255]));
         assert_eq!(cv.get(0, 0), Some([0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn test_hardness_shapes_falloff() {
+        let mut hard = Canvas::new(16, 16, [0, 0, 0, 255]);
+        PaintModule::stamp_soft_brush_hard(&mut hard, 8, 8, 4, [255, 0, 0, 255], 1.0, 1.0);
+        let mut soft = Canvas::new(16, 16, [0, 0, 0, 255]);
+        PaintModule::stamp_soft_brush_hard(&mut soft, 8, 8, 4, [255, 0, 0, 255], 1.0, 0.0);
+
+        // Dureza máxima: borda do dab totalmente opaca (núcleo sólido).
+        let hard_edge = hard.get(8 + 3, 8).unwrap();
+        assert_eq!(hard_edge[0], 255);
+        // Dureza zero: borda do dab atenua fortemente (falloff quadrático).
+        let soft_edge = soft.get(8 + 3, 8).unwrap();
+        assert!(
+            soft_edge[0] < hard_edge[0],
+            "soft {soft_edge:?} vs hard {hard_edge:?}"
+        );
+    }
+
+    #[test]
+    fn test_soft_brush_legacy_delegates_exact_behavior() {
+        // O falloff quadrático legado é exatamente hardness = 0.
+        let mut legacy = Canvas::new(16, 16, [0, 0, 0, 255]);
+        PaintModule::stamp_soft_brush(&mut legacy, 8, 8, 4, [255, 0, 0, 255], 1.0);
+        let mut explicit = Canvas::new(16, 16, [0, 0, 0, 255]);
+        PaintModule::stamp_soft_brush_hard(&mut explicit, 8, 8, 4, [255, 0, 0, 255], 1.0, 0.0);
+        assert_eq!(legacy.pixels, explicit.pixels);
+    }
+
+    #[test]
+    fn test_airbrush_flow_modulates_strength() {
+        let full = Canvas::new(8, 8, [0, 0, 0, 255]);
+        let s_full = petunia_core::BrushSettings {
+            kind: BrushType::Airbrush,
+            size_px: 6.0,
+            flow: 1.0,
+            ..Default::default()
+        };
+        let s_weak = petunia_core::BrushSettings {
+            kind: BrushType::Airbrush,
+            size_px: 6.0,
+            flow: 0.1,
+            ..Default::default()
+        };
+        let mut state_a = AppState::new("en");
+        let mut state_b = AppState::new("en");
+        state_a.paint_color = [1.0, 0.0, 0.0];
+        state_b.paint_color = [1.0, 0.0, 0.0];
+        PaintModule::canvas_brush_with_settings(&mut state_a, 4, 4, s_full);
+        PaintModule::canvas_brush_with_settings(&mut state_b, 4, 4, s_weak);
+        let center_a = state_a
+            .project
+            .active()
+            .unwrap()
+            .texture
+            .as_ref()
+            .unwrap()
+            .get(4, 4)
+            .unwrap();
+        let center_b = state_b
+            .project
+            .active()
+            .unwrap()
+            .texture
+            .as_ref()
+            .unwrap()
+            .get(4, 4)
+            .unwrap();
+        assert!(
+            center_a[0] > center_b[0],
+            "fluxo maior deve depositar mais tinta: {center_a:?} vs {center_b:?}"
+        );
+        let _ = full;
+    }
+
+    #[test]
+    fn test_paint_mesh_3d_with_settings_uses_radius() {
+        let mut state = AppState::new("en");
+        state.paint_color = [0.2, 0.8, 0.4];
+        let hit = Vec3::new(0.0, 0.0, 1.0);
+        let settings = petunia_core::BrushSettings {
+            kind: BrushType::Pixel,
+            size_px: 8.0,
+            ..Default::default()
+        };
+        let painted = PaintModule::paint_mesh_3d_with_settings(&mut state, 0, hit, settings, false);
+        assert!(painted);
+        assert!(PaintModule::has_canvas(&state));
+        // Dab de raio 4 (size 8) deve ter coberto vizinhança ao redor do centro UV.
+        let tex = state.project.active().unwrap().texture.as_ref().unwrap();
+        let painted_px = tex.pixels.chunks(4).any(|p| p[1] > 150 && p[0] < 120);
+        assert!(painted_px, "textura deve conter a cor pintada (51,204,102)");
     }
 
     #[test]

@@ -3,13 +3,32 @@
 <aside>
 🧩
 
-Estado: **implementação incerta; auditar** · Prioridade: P1.
+Estado: **em implementação (iniciativa Paint, 2026-09-16)** · Prioridade: P1.
+Descriptor unificado `BrushSettings` com hardness/strength/flow/spacing; stroke
+engine baseado em dabs.
 
 </aside>
 
 ## Objetivo
 
 Pincel suave convencional com size, opacity/strength e falloff simples.
+
+## BrushSettings — hardness / strength / flow / spacing (decisão 2026-09-16)
+
+O Soft Brush consome o mesmo descriptor unificado `BrushSettings` do Pixel
+Brush e do Eraser:
+
+- `hardness` — controla o falloff da borda (0 = totalmente suave, 1 = borda
+  definida); é o parâmetro que diferencia o Soft do Pixel;
+- `strength` — intensidade de cada dab sobre o canal alvo;
+- `flow` — taxa de acúmulo ao longo do stroke (diferente de strength, que é
+  por-dab);
+- `spacing` — distância entre dabs consecutivos ao longo do trajeto.
+
+O stroke engine é baseado em **dabs** (carimbos individuais) avaliados ao longo
+do caminho do cursor; a acumulação de `flow × strength` por dab é o que produz
+o efeito de pincel contínuo. O mesmo motor serve ao novo **Airbrush** (modo
+aditivo contínuo, em implementação).
 
 ## Arquitetura
 
