@@ -332,201 +332,171 @@ impl PaintLayerStack {
                     }
                 }
                 LayerKind::Effect(effect) => {
-                    let w = base.w;
-                    let h = base.h;
-                    match effect {
-                        PaintEffect::Pixelate { cell_size } => {
-                            let step = (*cell_size).max(1);
-                            for y_block in (0..h).step_by(step as usize) {
-                                for x_block in (0..w).step_by(step as usize) {
-                                    if let Some(sample) = base.get(x_block, y_block) {
-                                        for dy in 0..step {
-                                            for dx in 0..step {
-                                                let px = x_block + dx;
-                                                let py = y_block + dy;
-                                                if px < w
-                                                    && py < h
-                                                    && let Some(current) = base.get(px, py)
-                                                {
-                                                    let blended = blend_pixels(
-                                                        current,
-                                                        sample,
-                                                        layer.opacity,
-                                                        LayerBlendMode::Normal,
-                                                    );
-                                                    base.set(px, py, blended);
-                                                }
-                                            }
-                                        }
-                                    }
+                    // Efeito a 100%: aplica direto. Com opacidade parcial:
+                    // aplica numa cópia e re-mescla antes/depois (idempotente).
+                    if layer.opacity >= 1.0 {
+                        apply_effect(&mut *base, effect);
+                    } else {
+                        let before = base.clone();
+                        apply_effect(&mut *base, effect);
+                        for y in 0..base.h {
+                            for x in 0..base.w {
+                                if let (Some(orig), Some(current)) =
+                                    (before.get(x, y), base.get(x, y))
+                                {
+                                    let blended = blend_pixels(
+                                        orig,
+                                        current,
+                                        layer.opacity,
+                                        LayerBlendMode::Normal,
+                                    );
+                                    base.set(x, y, blended);
                                 }
                             }
                         }
-                        PaintEffect::Posterize { levels } => {
-                            let n = (*levels).max(2) as f32;
-                            let step = 255.0 / (n - 1.0);
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let pr = (((c[0] as f32 / 255.0 * (n - 1.0)).round())
-                                            * step)
-                                            .clamp(0.0, 255.0)
-                                            as u8;
-                                        let pg = (((c[1] as f32 / 255.0 * (n - 1.0)).round())
-                                            * step)
-                                            .clamp(0.0, 255.0)
-                                            as u8;
-                                        let pb = (((c[2] as f32 / 255.0 * (n - 1.0)).round())
-                                            * step)
-                                            .clamp(0.0, 255.0)
-                                            as u8;
-                                        let quant = [pr, pg, pb, c[3]];
-                                        let blended = blend_pixels(
-                                            c,
-                                            quant,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Aplica um `PaintEffect` sobre o canvas (opacidade 100%).
+///
+/// Função compartilhada entre a pilha de camadas (P3D-134) e o Surface
+/// Recipe graph (P3D-113/cap. 42: "efeitos são node groups internamente;
+/// presets são a superfície"). Determinística: mesma entrada ⇒ mesma saída.
+pub fn apply_effect(canvas: &mut Canvas, effect: &PaintEffect) {
+    let w = canvas.w;
+    let h = canvas.h;
+    match effect {
+        PaintEffect::Pixelate { cell_size } => {
+            let step = (*cell_size).max(1);
+            for y_block in (0..h).step_by(step as usize) {
+                for x_block in (0..w).step_by(step as usize) {
+                    if let Some(sample) = canvas.get(x_block, y_block) {
+                        for dy in 0..step {
+                            for dx in 0..step {
+                                let px = x_block + dx;
+                                let py = y_block + dy;
+                                if px < w && py < h {
+                                    canvas.set(px, py, sample);
                                 }
                             }
                         }
-                        PaintEffect::Invert => {
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let inv = [255 - c[0], 255 - c[1], 255 - c[2], c[3]];
-                                        let blended = blend_pixels(
-                                            c,
-                                            inv,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
-                                }
-                            }
-                        }
-                        PaintEffect::Grain { intensity, seed } => {
-                            let k = intensity.clamp(0.0, 1.0);
-                            if k <= 0.0 {
-                                continue;
-                            }
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let n = hash_noise(x, y, *seed);
-                                        let d = (n * k * 255.0) as i32;
-                                        let noisy = [
-                                            (c[0] as i32 + d).clamp(0, 255) as u8,
-                                            (c[1] as i32 + d).clamp(0, 255) as u8,
-                                            (c[2] as i32 + d).clamp(0, 255) as u8,
-                                            c[3],
-                                        ];
-                                        let blended = blend_pixels(
-                                            c,
-                                            noisy,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
-                                }
-                            }
-                        }
-                        PaintEffect::Levels {
-                            in_min,
-                            in_max,
-                            gamma,
-                            out_min,
-                            out_max,
-                        } => {
-                            let (lo, hi) = (
-                                in_min.clamp(0.0, 1.0),
-                                in_max.clamp(0.0, 1.0).max(in_min.clamp(0.0, 1.0) + 1e-3),
-                            );
-                            let (olo, ohi) = (out_min.clamp(0.0, 1.0), out_max.clamp(0.0, 1.0));
-                            let g = gamma.clamp(0.1, 10.0);
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let mapped = |v: u8| -> u8 {
-                                            let t = v as f32 / 255.0;
-                                            let out = if t <= lo {
-                                                olo
-                                            } else if t >= hi {
-                                                ohi
-                                            } else {
-                                                let n = (t - lo) / (hi - lo);
-                                                olo + n.powf(g) * (ohi - olo)
-                                            };
-                                            (out * 255.0).round().clamp(0.0, 255.0) as u8
-                                        };
-                                        let remapped =
-                                            [mapped(c[0]), mapped(c[1]), mapped(c[2]), c[3]];
-                                        let blended = blend_pixels(
-                                            c,
-                                            remapped,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
-                                }
-                            }
-                        }
-                        PaintEffect::BrightnessContrast {
-                            brightness,
-                            contrast,
-                        } => {
-                            let b = brightness.clamp(-1.0, 1.0);
-                            let ct = contrast.clamp(-1.0, 1.0);
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let adj = |v: u8| -> u8 {
-                                            let t =
-                                                (v as f32 - 127.5) * (1.0 + ct) + 127.5 + b * 127.5;
-                                            t.round().clamp(0.0, 255.0) as u8
-                                        };
-                                        let out = [adj(c[0]), adj(c[1]), adj(c[2]), c[3]];
-                                        let blended = blend_pixels(
-                                            c,
-                                            out,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
-                                }
-                            }
-                        }
-                        PaintEffect::HueSaturation {
-                            hue_shift_deg,
-                            saturation,
-                        } => {
-                            let shift = hue_shift_deg % 360.0;
-                            let sat_scale = (1.0 + saturation.clamp(-1.0, 1.0)).max(0.0);
-                            for y in 0..h {
-                                for x in 0..w {
-                                    if let Some(c) = base.get(x, y) {
-                                        let (hue, sat, val) = rgb_to_hsv(c[0], c[1], c[2]);
-                                        let h2 = (hue + shift + 360.0) % 360.0;
-                                        let s2 = (sat * sat_scale).clamp(0.0, 1.0);
-                                        let (r2, g2, b2) = hsv_to_rgb(h2, s2, val);
-                                        let out = [r2, g2, b2, c[3]];
-                                        let blended = blend_pixels(
-                                            c,
-                                            out,
-                                            layer.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        base.set(x, y, blended);
-                                    }
-                                }
-                            }
-                        }
+                    }
+                }
+            }
+        }
+        PaintEffect::Posterize { levels } => {
+            let n = (*levels).max(2) as f32;
+            let step = 255.0 / (n - 1.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let q = |v: u8| -> u8 {
+                            ((v as f32 / 255.0 * (n - 1.0)).round() * step).clamp(0.0, 255.0) as u8
+                        };
+                        canvas.set(x, y, [q(c[0]), q(c[1]), q(c[2]), c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::Invert => {
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        canvas.set(x, y, [255 - c[0], 255 - c[1], 255 - c[2], c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::Grain { intensity, seed } => {
+            let k = intensity.clamp(0.0, 1.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let n = hash_noise(x, y, *seed);
+                        let d = (n * k * 255.0) as i32;
+                        canvas.set(
+                            x,
+                            y,
+                            [
+                                (c[0] as i32 + d).clamp(0, 255) as u8,
+                                (c[1] as i32 + d).clamp(0, 255) as u8,
+                                (c[2] as i32 + d).clamp(0, 255) as u8,
+                                c[3],
+                            ],
+                        );
+                    }
+                }
+            }
+        }
+        PaintEffect::Levels {
+            in_min,
+            in_max,
+            gamma,
+            out_min,
+            out_max,
+        } => {
+            let (lo, hi) = (
+                in_min.clamp(0.0, 1.0),
+                in_max.clamp(0.0, 1.0).max(in_min.clamp(0.0, 1.0) + 1e-3),
+            );
+            let (olo, ohi) = (out_min.clamp(0.0, 1.0), out_max.clamp(0.0, 1.0));
+            let g = gamma.clamp(0.1, 10.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let mapped = |v: u8| -> u8 {
+                            let t = v as f32 / 255.0;
+                            let out = if t <= lo {
+                                olo
+                            } else if t >= hi {
+                                ohi
+                            } else {
+                                let n = (t - lo) / (hi - lo);
+                                olo + n.powf(g) * (ohi - olo)
+                            };
+                            (out * 255.0).round().clamp(0.0, 255.0) as u8
+                        };
+                        canvas.set(x, y, [mapped(c[0]), mapped(c[1]), mapped(c[2]), c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::BrightnessContrast {
+            brightness,
+            contrast,
+        } => {
+            let b = brightness.clamp(-1.0, 1.0);
+            let ct = contrast.clamp(-1.0, 1.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let adj = |v: u8| -> u8 {
+                            let t = (v as f32 - 127.5) * (1.0 + ct) + 127.5 + b * 127.5;
+                            t.round().clamp(0.0, 255.0) as u8
+                        };
+                        canvas.set(x, y, [adj(c[0]), adj(c[1]), adj(c[2]), c[3]]);
+                    }
+                }
+            }
+        }
+        PaintEffect::HueSaturation {
+            hue_shift_deg,
+            saturation,
+        } => {
+            let shift = hue_shift_deg % 360.0;
+            let sat_scale = (1.0 + saturation.clamp(-1.0, 1.0)).max(0.0);
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(c) = canvas.get(x, y) {
+                        let (hue, sat, val) = rgb_to_hsv(c[0], c[1], c[2]);
+                        let h2 = (hue + shift + 360.0) % 360.0;
+                        let s2 = (sat * sat_scale).clamp(0.0, 1.0);
+                        let (r2, g2, b2) = hsv_to_rgb(h2, s2, val);
+                        canvas.set(x, y, [r2, g2, b2, c[3]]);
                     }
                 }
             }

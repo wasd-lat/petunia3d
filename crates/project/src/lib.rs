@@ -19,6 +19,7 @@ pub mod paint_layers;
 pub mod palette;
 pub mod pipeline;
 pub mod rig;
+pub mod surface_recipe;
 
 pub use animation::{
     AnimationAsset, AnimationClip, AnimationLibrary, BoneTrack, Interpolation, Keyframe,
@@ -36,7 +37,8 @@ pub use package::{
     save_package, save_package_bytes,
 };
 pub use paint_layers::{
-    DecalLayer, LayerBlendMode, LayerKind, PaintEffect, PaintLayer, PaintLayerStack, blend_pixels,
+    DecalLayer, LayerBlendMode, LayerKind, PaintEffect, PaintLayer, PaintLayerStack, apply_effect,
+    blend_pixels,
 };
 pub use palette::{export_gpl, export_hex, import_gpl, import_hex, preset_gameboy, preset_pico8};
 pub use pipeline::{
@@ -45,6 +47,10 @@ pub use pipeline::{
     PipelineError,
 };
 pub use rig::{Bone, RigError, Skeleton, SkinData, Transform3D, VertexSkinWeight};
+pub use surface_recipe::{
+    NodeSpec, RECIPE_SCHEMA_VERSION, RecipeEdge, RecipeError, RecipeNode, RecipeOutputChannel,
+    RecipeResult, SocketType, SocketValue, SurfaceRecipe,
+};
 
 /// Canvas de textura simples (albedo) por asset — workspace PAINT.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
