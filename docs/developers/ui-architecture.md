@@ -27,8 +27,9 @@ Matriz obrigatória:
 | barra de faixas com overflow (toolbars) | `PetuniaResponsiveToolbar` (`adapters::toolbar`) |
 | macro shell | `PetuniaLayoutAdapter` (`egui_tiles`) |
 | árvore Parts / Scene | `PetuniaTreeAdapter` (`egui_ltreeview`) |
-| reorder / drag list | `PetuniaDragAdapter` (`egui_dnd`) |
-| animação | `PetuniaMotion` (`egui_animation`) |
+| reorder / drag list | `PetuniaDragList` (`egui_dnd`) |
+| animação (reveal, valor, posição, collapse) | `PetuniaMotion` (`egui_animation`) |
+| validação por campo + resumo inline | `PetuniaFormSession` (`egui_form`) |
 | async → UI | `PetuniaInboxAdapter` (`egui_inbox`) |
 | ícones | `IconRegistry` / iconflow / Petunia Domain |
 | transforms 3D | adapter sobre `transform-gizmo` |
@@ -218,8 +219,49 @@ if SETTINGS_FORM.toggle(ui, &label, &mut value) { /* `changed()` */ }
 - a linha `Inline` é a primitiva `taffy_layout::fixed_label_row` (uma linha taffy,
   rótulo de largura fixa + controle crescendo), e a largura entregue ao closure é
   a largura real do `Ui` do item;
-- a validação por campo (crate `egui_form`) entra na Wave 9 como **backend** do
-  mesmo contrato — o arranjo não depende dela.
+- a validação por campo (crate `egui_form`) entrou na Wave 7 como **backend** do
+  mesmo contrato — o arranjo continua sem depender dela:
+
+```rust
+let report = PetuniaValidationReport::new()
+    .with_error("atalho.salvar", "compartilha o atalho com 'Salvar como'");
+let mut session = PetuniaFormSession::new(report);
+SETTINGS_FORM.validated_control(ui, &mut session, "atalho.salvar", |ui| badge(ui));
+SETTINGS_FORM.error_summary_titled(ui, &session, Some(&title));   // resumo inline
+session.reveal_errors(ui);                                        // "confirmar"
+```
+
+Quem decide o que é válido é o **domínio** (ex.: `Keybinds::detect_conflicts`);
+relatório, sessão e id de campo são tipos Petunia — a crate não aparece no
+product code.
+
+### Lista reordenável (Wave 7)
+
+O adapter é dono do esqueleto da linha (grip + conteúdo) e da nova ordem; o
+produto só desenha o conteúdo:
+
+```rust
+TOOLBAR_ORDER_DRAG.show(ui, "toolbar_config_order", &mut order, |id| Id::new(id), |ui, id, row| {
+    // `row.dragging` colore a linha; `row.index` é a posição neste frame
+});
+```
+
+A ordem é aplicada no **drop** (`apply_drag_update`), não a cada frame. O grip é
+área de aquisição do gesto: o motor só inicia o arrasto com o ponteiro sobre ele
+(ou após 250ms) — ver armadilhas medidas em
+[`docs/dependencies/ui-ecosystem-lock.md`](../dependencies/ui-ecosystem-lock.md).
+
+### Motion (Wave 7)
+
+`foundation::motion` é o dono único de durações, curvas e do backend. Motion aqui
+é **feedback de estado** (abrir/fechar, revelar campo), nunca decoração contínua
+(capítulo 36). Com `animation_time == 0` no tema, tudo vira troca instantânea. A
+unidade das APIs é **segundos** — use `motion::seconds(..)`, nunca `millis(..)`.
+
+```rust
+let alpha = PetuniaMotion::reveal(ui.ctx(), "shelf", visible);
+PetuniaMotion::section(ui, "outliner-search", open, |ui| { /* conteúdo */ });
+```
 
 Estados medidos hoje (incluindo dívida herdada): `cargo run -p xtask -- ui-guard`.
 Baseline congelada em
@@ -227,7 +269,8 @@ Baseline congelada em
 
 O confinamento de tipos de terceiros já vale hoje e é verificável:
 `cargo run -p xtask -- ui-guard --strict` falha se `egui_taffy::`, `egui_tiles::`,
-`egui_dnd::` ou `twill::` aparecerem fora do adapter correspondente.
+`egui_dnd::`, `egui_animation::`, `egui_form::` ou `twill::` aparecerem fora do
+adapter correspondente.
 
 ## Conceitos centrais
 

@@ -47,7 +47,6 @@
 
 use egui::{Color32, Id, Response, Sense, Ui, vec2};
 
-
 use crate::icon_registry::PetuniaIcon;
 use crate::tokens;
 
@@ -67,7 +66,9 @@ impl PetuniaDragSpec {
     /// Especificação com o motion do sistema ([`crate::foundation::motion`]).
     pub const fn new() -> Self {
         Self {
-            settle_s: crate::foundation::motion::seconds(crate::foundation::motion::PetuniaMotion::BASE),
+            settle_s: crate::foundation::motion::seconds(
+                crate::foundation::motion::PetuniaMotion::BASE,
+            ),
             grip_width: 18.0,
             grip_height: 20.0,
         }
@@ -166,10 +167,8 @@ impl PetuniaDragList {
             // legível (o produto vê `dragging: false` e nenhum movimento).
             for (index, item) in items.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
-                    let response = ui.allocate_response(
-                        vec2(spec.grip_width, spec.grip_height),
-                        Sense::hover(),
-                    );
+                    let response = ui
+                        .allocate_response(vec2(spec.grip_width, spec.grip_height), Sense::hover());
                     draw_grip_at(ui, response.rect, false, false);
                     row(
                         ui,
@@ -460,11 +459,17 @@ mod tests {
         };
         ctx.run_ui(raw, |ui| {
             ui.disable();
-            let changed = adapter.show(ui, "drag-probe", &mut items, |item| Id::new(item), |ui, item, row| {
-                drawn += 1;
-                ui.label(item.as_str());
-                assert_eq!(row.index, drawn - 1);
-            });
+            let changed = adapter.show(
+                ui,
+                "drag-probe",
+                &mut items,
+                |item| Id::new(item),
+                |ui, item, row| {
+                    drawn += 1;
+                    ui.label(item.as_str());
+                    assert_eq!(row.index, drawn - 1);
+                },
+            );
             assert!(!changed);
         })
         .textures_delta

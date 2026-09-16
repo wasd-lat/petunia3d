@@ -174,12 +174,13 @@ para problemas especializados; tipos de terceiros sempre confinados a adapters.
 | --- | --- | --- |
 | `egui_taffy` | **P0 baseline** | `PetuniaTaffyLayout` — layout responsivo complexo, flex/wrap/grid |
 | `egui_tiles` | **P0 baseline** | `PetuniaLayoutAdapter` — macro-layout controlado, sem docking livre |
-| `egui_dnd` | **P0 baseline** | `PetuniaDragAdapter` — reorder por drag real |
-| `egui_animation` | P0 baseline | `PetuniaMotion` — motion centralizado |
+| `egui_dnd` | **P0 baseline (wave 7)** | `PetuniaDragList` — reorder por drag real; path: config da paleta |
+| `egui_animation` | **P0 baseline (wave 7)** | `PetuniaMotion` — reveal/animate/position/section; paths: busca do Outliner/Inspector |
+| `egui_form` | **P1 adotada (wave 7)** | `PetuniaFormSession` — validação por campo; path: conflitos de keymap |
 | `twill` (core) | foundation | adapter de tokens tipados |
 | `egui_ltreeview` | baseline | `PetuniaTreeAdapter` — árvore Parts/Scene |
 | `egui_inbox` | baseline | `PetuniaInboxAdapter` — async → UI |
-| `egui_table`, `egui_virtual_list`, `egui_suspense`, `egui_form`, `egui-notify` | P1 | adotar em product paths após o gate de compatibilidade (§18) |
+| `egui_table`, `egui_virtual_list`, `egui_suspense`, `egui-notify` | P1 | adotar em product paths após o gate de compatibilidade (§18) |
 
 A compatibilidade segue a ordem normativa **release crates.io → upstream atual →
 revision pin → fork mínimo Petunia → implementação local/defer** (§18). A idade do

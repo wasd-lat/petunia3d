@@ -23,9 +23,15 @@ cargo tree -d          # não pode listar duas versões de egui/egui_extras/efra
 cargo tree -p petunia_ui | grep -c "egui v"
 ```
 
-Estado atual (2026-09-16): **verificado.** `cargo tree -d` só reporta duplicações
-não relacionadas a UI (`base64`, `bitflags`, `png`). Nenhuma segunda família
-`egui` no grafo empacotado.
+Estado atual (2026-09-16, re-verificado depois das Waves 6 e 7): **verificado.**
+`cargo tree -d` só reporta duplicações não relacionadas a UI (`base64`,
+`bitflags`, `darling`, `png`, `glam`). Nenhuma segunda família `egui` no grafo
+empacotado — as três entradas da Wave 7 (`egui_dnd` 0.17, `egui_animation` 0.13,
+`egui_form` 0.10) declaram `egui ^0.36.0`, a mesma `0.36.2` do baseline.
+
+> A `egui_animation` entra também como **transitiva** do `egui_dnd`: uma linha
+> fina a menos para manter. Se o DnD sair do grafo um dia, o motion precisa
+> declará-la explicitamente.
 
 # Ordem normativa de compatibilidade (§18)
 
@@ -59,6 +65,9 @@ Dependências de UI realmente presentes no grafo, com versão resolvida no
 | `iconflow` | crates.io, features `pack-lucide`, `pack-iconoir` | 1.0.0 | — | **n/a** | carga dos packs genéricos de ícones | `adapters::icons` | sim | — |
 | `egui-file-dialog` | crates.io | 0.15.0 | — | 0.36 | browse/save dentro da janela | `adapters::file_dialog` | sim | — |
 | `transform-gizmo` + `transform-gizmo-egui` | crates.io | 0.11.0 | — | 0.36 | gizmo 3D de transformação | `adapters::gizmo` | sim | — |
+| `egui_dnd` | crates.io | 0.17.0 | — | 0.36 | reordenação por arrasto em listas ordenáveis (Wave 7) | `adapters::drag_drop` | sim | quando o egui nativo cobrir drag-to-reorder com handle |
+| `egui_animation` | crates.io (transitiva de `egui_dnd`) | 0.13.0 | — | 0.36 | backend de motion atrás de `foundation::motion` | `foundation::motion` | sim | quando `Context::animate_*` cobrir curva + collapse |
+| `egui_form` | crates.io | 0.10.0 | — | 0.36 | validação por campo atrás do contrato `adapters::form` | `adapters::form` | sim | — |
 
 > `twill` é usado **sem** o backend `egui` (que fixa `egui 0.33`). É o que mantém
 > a invariante de família única: o adapter usa só os tokens e a serialização CSS.
@@ -146,6 +155,25 @@ Verificadas na Wave 5 com sonda descartável + testes permanentes no adapter.
    Consequência prática: a migração pode trocar painel por tile por região, sem
    reescrever o conteúdo de cada painel de uma vez (§60).
 
+## Três armadilhas medidas do `egui_dnd` 0.17 e do `egui_animation` 0.13
+
+1. **O arrasto só começa com o ponteiro sobre o handle.** O motor passa de
+   "esperando limiar" para "pode arrastar" quando o ponteiro andou mais de 1px
+   **e** `contains_pointer()` é verdadeiro — o caminho alternativo é 250ms de
+   pressão (`click_tolerance_timeout`). Medido em sonda: um primeiro passo de 6px
+   para fora de um grip de 18×20px não inicia o arrasto; o mesmo passo dentro do
+   grip inicia. Consequência de projeto: o grip é a área de aquisição do gesto,
+   não decoração (`PetuniaDragSpec::grip_width/height`).
+2. **`to` é limite exclusivo quando o arrasto desce.** `to = 2` partindo de `0`
+   deixa o item na posição **1**. O adapter converte para a semântica de inserção
+   do Petunia e a equivalência é verificada contra `egui_dnd::utils::shift_vec`
+   para todos os pares de posições.
+3. **O tempo de animação é em segundos, não milissegundos.** `egui_animation` e
+   o próprio egui esperam segundos: passar `160` (em vez de `0,16`) deixa a
+   transição ~1000× mais lenta — medido, **0,1% por frame** em vez de 160ms.
+   Nada quebra, só parece que a animação não existe. `foundation::motion::seconds`
+   é a única conversão usada, e um teste de taxa falha se a unidade regredir.
+
 ## Medir uma faixa sem desenhar duas vezes (técnica da Wave 4)
 
 O adapter da barra responsiva (`adapters::toolbar`) precisa da largura **real** de
@@ -178,25 +206,24 @@ linha (o `spacing` do tema) é o que entra na aritmética de overflow.
 | `egui_commonmark` | crates.io | 0.25.0 | 0.36 | ajuda/release notes em Markdown | `help-markdown` | não |
 | `egui_autocomplete` | crates.io | 15.0.0 | 0.36 | completion da command palette | `palette-autocomplete` | não |
 
-# P0 alvo — ainda **não** instaladas
+# P0 alvo — todas adotadas (Wave 7)
 
 Classificação da diretiva §21. Cada linha só vira dependência quando o gate de
 compatibilidade (§18 e §67) passa **e** o adapter correspondente existe.
-Nenhum arquivo de adapter é criado antes disso.
 
-| crate | versão alvo | adapter planejado | por quê | bloqueio atual |
-| --- | --- | --- | --- | --- |
-| `egui_dnd` | 0.17 | `adapters::drag_drop` | reorder por drag real em listas e na Asset Library | nenhum técnico conhecido; hoje reorder é por setas |
-| `egui_animation` | 0.13 | `PetuniaMotion` | centralizar motion (`foundation::motion` já declara as durações) | nenhum técnico conhecido |
+| crate | versão alvo | adapter | estado |
+| --- | --- | --- | --- |
+| `egui_dnd` | 0.17 | `adapters::drag_drop` | ✅ instalada; product path: menu de configuração da paleta |
+| `egui_animation` | 0.13 | `foundation::motion` | ✅ instalada (transitiva do `egui_dnd`); product paths: revelação da busca (Outliner/Inspector) |
 
 # P1 — adotar em product paths
 
-| crate | uso | adapter | bloqueio atual |
+| crate | uso | adapter | estado |
 | --- | --- | --- | --- |
-| `egui_table` | listas/tabelas do Context e Asset Library | `adapters::table` | compatibilidade a confirmar antes de instalar |
-| `egui_virtual_list` | coleções grandes (Asset Library) | `adapters::virtual_collection` | idem |
-| `egui_suspense` | estados async/loading declarativos | `adapters::suspense` | idem |
-| `egui_form` | validação por campo em Settings/forms | backend de `adapters::form` | o contrato `PetuniaForm` **já existe** sobre o taffy (arranjo, campos, seções); a crate acrescenta erro por campo e estado de validação, sem reescrever Settings. Compatibilidade a confirmar antes de instalar |
+| `egui_form` | validação por campo em Settings/forms | backend de `adapters::form` | ✅ instalada; product path: conflitos de keymap |
+| `egui_table` | listas/tabelas do Context e Asset Library | `adapters::table` | não instalada — Wave 8/9 |
+| `egui_virtual_list` | coleções grandes (Asset Library) | `adapters::virtual_collection` | não instalada — Wave 8 |
+| `egui_suspense` | estados async/loading declarativos | `adapters::suspense` | não instalada — Wave 9 |
 | `egui-notify` | notificações | — | exige **fork mínimo** (§19.3) — ver [`forks.md`](./forks.md) |
 
 # Git pin e forks

@@ -107,12 +107,7 @@ impl PetuniaMotion {
     }
 
     /// Posição animada (listas que reordenam, item que encaixa).
-    pub fn position(
-        ui: &mut Ui,
-        id: impl egui::AsId,
-        value: Pos2,
-        duration: Duration,
-    ) -> Pos2 {
+    pub fn position(ui: &mut Ui, id: impl egui::AsId, value: Pos2, duration: Duration) -> Pos2 {
         if animation_off(ui.ctx()) {
             return value;
         }
@@ -131,12 +126,7 @@ impl PetuniaMotion {
     /// O conteúdo continua sendo desenhado enquanto a seção fecha (recortado e
     /// encolhendo), então o closure precisa ser um desenho idempotente — mesma
     /// disciplina das linhas de taffy e das listas de arrasto.
-    pub fn section(
-        ui: &mut Ui,
-        id: impl Into<Id>,
-        open: bool,
-        add_contents: impl FnOnce(&mut Ui),
-    ) {
+    pub fn section(ui: &mut Ui, id: impl Into<Id>, open: bool, add_contents: impl FnOnce(&mut Ui)) {
         if animation_off(ui.ctx()) {
             if open {
                 add_contents(ui);
@@ -207,7 +197,10 @@ mod tests {
         for step in 1..=8 {
             value = reveal_frame(&ctx, "rate", true, 0.001 + step as f64 * 0.02);
         }
-        assert!(value > 0.9, "revelação lenta demais: {value} (unidade errada?)");
+        assert!(
+            value > 0.9,
+            "revelação lenta demais: {value} (unidade errada?)"
+        );
     }
 
     #[test]
@@ -218,16 +211,29 @@ mod tests {
 
     #[test]
     fn every_curve_maps_zero_to_zero_and_one_to_one() {
-        for easing in [Easing::EaseOut, Easing::EaseIn, Easing::EaseInOut, Easing::Linear] {
+        for easing in [
+            Easing::EaseOut,
+            Easing::EaseIn,
+            Easing::EaseInOut,
+            Easing::Linear,
+        ] {
             let curve = easing.curve();
             assert!(curve(0.0).abs() < 1e-4, "{easing:?} não começa em 0");
-            assert!((curve(1.0) - 1.0).abs() < 1e-4, "{easing:?} não termina em 1");
+            assert!(
+                (curve(1.0) - 1.0).abs() < 1e-4,
+                "{easing:?} não termina em 1"
+            );
         }
     }
 
     #[test]
     fn curves_are_monotonic_in_the_unit_interval() {
-        for easing in [Easing::EaseOut, Easing::EaseIn, Easing::EaseInOut, Easing::Linear] {
+        for easing in [
+            Easing::EaseOut,
+            Easing::EaseIn,
+            Easing::EaseInOut,
+            Easing::Linear,
+        ] {
             let curve = easing.curve();
             let mut previous = curve(0.0);
             for step in 1..=40 {
@@ -237,7 +243,10 @@ mod tests {
                     y >= previous - 1e-4,
                     "{easing:?} não é monótona em x={x}: {previous} → {y}"
                 );
-                assert!((-1e-3..=1.0 + 1e-3).contains(&y), "{easing:?} saiu de 0..1: {y}");
+                assert!(
+                    (-1e-3..=1.0 + 1e-3).contains(&y),
+                    "{easing:?} saiu de 0..1: {y}"
+                );
                 previous = y;
             }
         }
@@ -273,7 +282,10 @@ mod tests {
         let mut settled = first;
         for step in 1..=30 {
             let value = reveal_frame(&ctx, "reveal", true, 0.01 + step as f64 / 60.0);
-            assert!(value >= previous - 1e-3, "revelação andou para trás: {value}");
+            assert!(
+                value >= previous - 1e-3,
+                "revelação andou para trás: {value}"
+            );
             previous = value;
             settled = value;
         }

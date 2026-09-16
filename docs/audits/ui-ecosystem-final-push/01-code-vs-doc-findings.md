@@ -358,16 +358,24 @@ descartado.
 | Pendência | Por que | Onde |
 | --- | --- | --- |
 | Captura real de screenshots | decisão explícita: capturar depois de todas as correções | diretiva §40, §42 |
-| `PetuniaDragAdapter`, `PetuniaMotion`, `PetuniaTable`, `PetuniaVirtualCollection`, backend `egui_form` de validação | dependem das waves 7–9 | diretiva §49–§51 |
-| Componentes listados em `PENDING` (tree, drag list, popup, modal, empty state, inline messages, progress, async, toggle, badge, breadcrumb, table, virtual list, suspense, validação de form) | dependem de extração de painel ou de crate não instalada | `crates/ui/src/gallery.rs` · diretiva §38 |
-| Adoção de Tables/Forms/DnD/Motion em product paths | Waves 7–9 | diretiva §49–§51 |
+| `PetuniaTable`, `PetuniaVirtualCollection`, `PetuniaAsyncView` | dependem das waves 8–9 | diretiva §50–§51 |
+| Reordenar o Modifier Stack por arrasto | o contrato existe (`PetuniaDragList`); falta trocar as setas da lista de modificadores — primeira expansão da §49 | diretiva §49, §52 |
+| Componentes listados em `PENDING` (context menu, toggle/switch, badge, breadcrumb, table, virtual list, suspense, drag handle do Modifier Stack) | dependem de extração de painel ou de crate não instalada | `crates/ui/src/gallery.rs` · diretiva §38 |
+| Adoção de Tables/Virtual List/Suspense em product paths | Waves 8–9 | diretiva §50–§51 |
 | Captura real de screenshots do inspector migrado | depende do passe de screenshot | diretiva §40, §42 |
-| Breakpoints remanescentes fora do inspector (`primitive_card`, `status_bar`, `animation_ui`, timeline) | pertencem às waves 7–10; `toolbar` e `reference_manager` saíram na Wave 6 | `cargo run -p xtask -- ui-guard` · diretiva §47–§50 |
+| Breakpoints remanescentes fora do inspector (`primitive_card`, `status_bar`, `animation_ui`, timeline) | pertencem às waves 8–10; `toolbar`, `reference_manager` (wave 6) e as buscas do Outliner/Inspector (wave 7) já saíram | `cargo run -p xtask -- ui-guard` · diretiva §47–§50 |
 | `docs/public/ui-map.json` desatualizado (7 nós: `toolbar::draw`, `right_panel`, `draw_split_dock`, `animate_workspace_center`, `scene_panel_height`) | o arquivo está no **site público congelado** (AGENTS.md §1); corrigir exige `bible-lock` e decisão explícita de descongelar. O `docs-check` fica vermelho só neste passo | `cargo run -p xtask -- docs-check` · Wave 5b/6 |
 | Largura mínima da barra da viewport | o núcleo (Domain/Menus/Display) é largo por natureza: abaixo de ~660px a linha passa da largura em vez de ocultar núcleo | diretiva §47/§59 |
 
 > `ui-guard` na CI: **feito** — `.github/workflows/ui-guard.yml` roda
 > `ui-guard --strict` e compila a vitrine.
+>
+> Adoção de `egui_dnd`/`egui_animation`/`egui_form` em product path: **wave 7** —
+> reordenar a paleta por arrasto (`adapters::drag_drop`), revelação animada do
+> campo de busca (Outliner/Inspector, via `foundation::motion`) e validação de
+> conflitos de keymap (`PetuniaFormSession`). Três armadilhas medidas ficaram no
+> `docs/dependencies/ui-ecosystem-lock.md` (limiar do handle, `to` exclusivo,
+> tempo em segundos).
 >
 > Adoção de Taffy em product path: **wave 3** (inspector), **wave 4** (barra da
 > viewport), **wave 5** (Top Bar) e **wave 6** (paleta lateral, Settings,

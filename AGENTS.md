@@ -60,7 +60,11 @@ implementação de componente de baixo nível):
 - `ui.spacing_mut()` fora de foundation;
 - `allocate_exact_size` / `painter().rect_filled` / `add_space` quando já existe
   componente padrão;
-- tipos de `egui_taffy`, `egui_tiles`, `egui_dnd` ou `twill` fora do adapter.
+- tipos de `egui_taffy`, `egui_tiles`, `egui_dnd`, `egui_animation`, `egui_form`
+  ou `twill` fora do adapter;
+- tempo de animação em milissegundos nas APIs do egui — use
+  `foundation::motion::seconds(..)` (a unidade é **segundo**; ms deixa a
+  transição ~1000× mais lenta sem quebrar nada).
 
 Contratos que já substituíram fórmulas manuais (não os reimplemente):
 
@@ -80,6 +84,15 @@ Contratos que já substituíram fórmulas manuais (não os reimplemente):
 - campo rotulado (rótulo + controle) → `PetuniaForm` (`adapters::form`, §48):
   `field`, `toggle`, `section`; a decisão `Inline`/`Stacked` sai de `plan_row`
   (largura do rótulo × mínimo do controle), não de um breakpoint;
+- validação por campo → `PetuniaValidationReport` + `PetuniaFormSession`
+  (`adapters::form`, §51): o **domínio** monta o relatório (ex.:
+  `Keybinds::detect_conflicts`), o contrato mostra (`validated_control`,
+  `error_summary_titled`, `reveal_errors`). Nada de banner com cor literal;
+- lista reordenável → `PetuniaDragList` (`adapters::drag_drop`, §49): o adapter
+  desenha o esqueleto da linha (grip + conteúdo) e aplica a ordem no drop; o
+  produto só desenha o conteúdo. Setas ↑/↓ só existem onde o arrasto não chegou;
+- animação de estado → `PetuniaMotion` (`foundation::motion`, §49): `reveal`,
+  `animate`, `position`, `section`. Feedback de estado, nunca decoração contínua;
 - item horizontal dentro de um layout taffy →
   `PetuniaResponsiveLayout::with_item_layout(PetuniaItemLayout::Row)` — sem isso o
   item herda o layout vertical do painel e empilha os próprios filhos;

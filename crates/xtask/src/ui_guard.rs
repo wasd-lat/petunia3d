@@ -110,8 +110,22 @@ const RULES: &[Rule] = &[
         id: "egui_dnd",
         pattern: "egui_dnd::",
         kind: RuleKind::AdapterOnly,
-        replacement: "PetuniaDragAdapter (crate::adapters::drag_drop)",
+        replacement: "PetuniaDragList (crate::adapters::drag_drop)",
         allow_path_contains: &["adapters/drag_drop.rs"],
+    },
+    Rule {
+        id: "egui_animation",
+        pattern: "egui_animation::",
+        kind: RuleKind::AdapterOnly,
+        replacement: "PetuniaMotion (crate::foundation::motion)",
+        allow_path_contains: &["foundation/motion.rs"],
+    },
+    Rule {
+        id: "egui_form",
+        pattern: "egui_form::",
+        kind: RuleKind::AdapterOnly,
+        replacement: "PetuniaFormSession (crate::adapters::form)",
+        allow_path_contains: &["adapters/form.rs"],
     },
     Rule {
         id: "twill",

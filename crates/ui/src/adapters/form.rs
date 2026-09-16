@@ -287,7 +287,7 @@ impl PetuniaForm {
                                 .color(tokens::ACCENT_ERROR),
                         );
                         ui.label(
-                            rich(&format!("{field}: {message}"), TextRole::Label)
+                            rich(format!("{field}: {message}"), TextRole::Label)
                                 .color(tokens::TEXT_PRIMARY),
                         );
                     });
@@ -390,7 +390,8 @@ impl EguiValidationReport for PetuniaValidationReport {
     type Errors = Vec<(String, String)>;
 
     fn get_field_error(&self, field: Self::FieldPath<'_>) -> Option<Cow<'static, str>> {
-        self.error_for(field.0).map(|message| Cow::Owned(message.to_string()))
+        self.error_for(field.0)
+            .map(|message| Cow::Owned(message.to_string()))
     }
 
     fn has_errors(&self) -> bool {
@@ -419,7 +420,10 @@ pub struct PetuniaFormSession {
 impl PetuniaFormSession {
     /// Cria a sessão a partir do relatório do domínio.
     pub fn new(report: PetuniaValidationReport) -> Self {
-        let errors = report.errors().map(|(f, m)| (f.to_string(), m.to_string())).collect();
+        let errors = report
+            .errors()
+            .map(|(f, m)| (f.to_string(), m.to_string()))
+            .collect();
         Self {
             form: Form::new().add_report(report),
             errors,
@@ -518,7 +522,10 @@ mod tests {
             Some("duplicado"),
             "o resumo segue a ordem de declaração do domínio"
         );
-        assert_eq!(report.errors().next(), Some(("atalho.salvar", "compartilha o atalho com 'Salvar como'")));
+        assert_eq!(
+            report.errors().next(),
+            Some(("atalho.salvar", "compartilha o atalho com 'Salvar como'"))
+        );
         assert_eq!(report.error_for("inexistente"), None);
         assert!(PetuniaValidationReport::new().is_valid());
     }
@@ -527,9 +534,8 @@ mod tests {
     fn the_summary_only_draws_while_there_are_errors() {
         let ctx = egui::Context::default();
         let form = PetuniaForm::new(96.0, 160.0);
-        let invalid = PetuniaFormSession::new(
-            PetuniaValidationReport::new().with_error("campo", "mensagem"),
-        );
+        let invalid =
+            PetuniaFormSession::new(PetuniaValidationReport::new().with_error("campo", "mensagem"));
         let valid = PetuniaFormSession::new(PetuniaValidationReport::new());
 
         let mut drawn = (false, false);
@@ -557,10 +563,16 @@ mod tests {
                 PetuniaValidationReport::new().with_error("escala", "fora da faixa"),
             );
             let mut output = ctx.run_ui(raw, |ui| {
-                form.validated_field(ui, &mut session, "escala", "Escala", |ui: &mut Ui, w: f32| {
-                    ui.add(egui::Slider::new(&mut 1.0_f32, 0.0..=2.0))
-                        .on_hover_text(format!("{w:.0}"))
-                });
+                form.validated_field(
+                    ui,
+                    &mut session,
+                    "escala",
+                    "Escala",
+                    |ui: &mut Ui, w: f32| {
+                        ui.add(egui::Slider::new(&mut 1.0_f32, 0.0..=2.0))
+                            .on_hover_text(format!("{w:.0}"))
+                    },
+                );
             });
             output.textures_delta.clear();
         }
@@ -570,9 +582,8 @@ mod tests {
     fn revealing_errors_focuses_the_invalid_field() {
         let ctx = egui::Context::default();
         let form = PetuniaForm::new(96.0, 160.0);
-        let mut session = PetuniaFormSession::new(
-            PetuniaValidationReport::new().with_error("campo", "mensagem"),
-        );
+        let mut session =
+            PetuniaFormSession::new(PetuniaValidationReport::new().with_error("campo", "mensagem"));
         // Dois frames: o primeiro desenha os campos, o segundo revela os erros.
         for step in 0..2 {
             frame(&ctx, |ui| {

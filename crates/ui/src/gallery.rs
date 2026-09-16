@@ -37,9 +37,7 @@ use egui::Ui;
 use petunia_core::{AppState, UiDensity, Workspace};
 
 use crate::adapters::drag_drop::{PetuniaDragList, PetuniaDragSpec};
-use crate::adapters::form::{
-    PetuniaForm, PetuniaFormSession, PetuniaValidationReport, plan_row,
-};
+use crate::adapters::form::{PetuniaForm, PetuniaFormSession, PetuniaValidationReport, plan_row};
 use crate::adapters::taffy_layout::{
     PetuniaColumnSpec, PetuniaGap, PetuniaJustify, PetuniaResponsiveLayout, clamped_width, columns,
     fill_remaining, flex_key_value_row, responsive,
@@ -800,11 +798,7 @@ fn motion_exhibit(ui: &mut Ui, g: &GalleryState) {
         }
         vspace(ui, RELATED);
         ui.label(
-            rich(
-                format!("reveal() = {alpha:.2}"),
-                TextRole::Label,
-            )
-            .color(tokens::TEXT_PRIMARY),
+            rich(format!("reveal() = {alpha:.2}"), TextRole::Label).color(tokens::TEXT_PRIMARY),
         );
         let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, 8.0), egui::Sense::hover());
         ui.painter()
