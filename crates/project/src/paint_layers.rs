@@ -26,7 +26,11 @@ pub enum LayerBlendMode {
     Screen,
 }
 
-/// Efeitos não-destrutivos sobre texturas / camadas (P3D-134, pós-V1).
+/// Efeitos não-destrutivos sobre texturas / camadas (P3D-134, cap. 42).
+///
+/// Discriminantes **append-only**: variantes novas entram no fim para
+/// preservar valores serializados. A lista segue os nodes iniciais do
+/// cap. 42 (presets antes de graphs).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PaintEffect {
     /// Pixelização com tamanho de bloco especificado (P3D-134).
@@ -35,6 +39,21 @@ pub enum PaintEffect {
     Posterize { levels: u8 },
     /// Inversão de cores RGB.
     Invert,
+    /// Ruído aditivo determinístico por pixel (cap. 42: Pixel Noise / Grain).
+    /// `intensity` 0..=1; mesmo `seed` ⇒ mesmo resultado (avaliador determinístico).
+    Grain { intensity: f32, seed: u32 },
+    /// Remapeamento de tons: `[in_min, in_max]` → `[out_min, out_max]` com gamma.
+    Levels {
+        in_min: f32,
+        in_max: f32,
+        gamma: f32,
+        out_min: f32,
+        out_max: f32,
+    },
+    /// Brilho (`-1..=1`) e contraste (`-1..=1`; `-1` achata em cinza médio).
+    BrightnessContrast { brightness: f32, contrast: f32 },
+    /// Rotação de matiz em graus e escala de saturação (`-1..=1`).
+    HueSaturation { hue_shift_deg: f32, saturation: f32 },
 }
 
 /// Decalque / projeção 2D parametrizada e reposicionável (P3D-133, pós-V1).
@@ -389,11 +408,186 @@ impl PaintLayerStack {
                                 }
                             }
                         }
+                        PaintEffect::Grain { intensity, seed } => {
+                            let k = intensity.clamp(0.0, 1.0);
+                            if k <= 0.0 {
+                                continue;
+                            }
+                            for y in 0..h {
+                                for x in 0..w {
+                                    if let Some(c) = base.get(x, y) {
+                                        let n = hash_noise(x, y, *seed);
+                                        let d = (n * k * 255.0) as i32;
+                                        let noisy = [
+                                            (c[0] as i32 + d).clamp(0, 255) as u8,
+                                            (c[1] as i32 + d).clamp(0, 255) as u8,
+                                            (c[2] as i32 + d).clamp(0, 255) as u8,
+                                            c[3],
+                                        ];
+                                        let blended = blend_pixels(
+                                            c,
+                                            noisy,
+                                            layer.opacity,
+                                            LayerBlendMode::Normal,
+                                        );
+                                        base.set(x, y, blended);
+                                    }
+                                }
+                            }
+                        }
+                        PaintEffect::Levels {
+                            in_min,
+                            in_max,
+                            gamma,
+                            out_min,
+                            out_max,
+                        } => {
+                            let (lo, hi) = (
+                                in_min.clamp(0.0, 1.0),
+                                in_max.clamp(0.0, 1.0).max(in_min.clamp(0.0, 1.0) + 1e-3),
+                            );
+                            let (olo, ohi) = (out_min.clamp(0.0, 1.0), out_max.clamp(0.0, 1.0));
+                            let g = gamma.clamp(0.1, 10.0);
+                            for y in 0..h {
+                                for x in 0..w {
+                                    if let Some(c) = base.get(x, y) {
+                                        let mapped = |v: u8| -> u8 {
+                                            let t = v as f32 / 255.0;
+                                            let out = if t <= lo {
+                                                olo
+                                            } else if t >= hi {
+                                                ohi
+                                            } else {
+                                                let n = (t - lo) / (hi - lo);
+                                                olo + n.powf(g) * (ohi - olo)
+                                            };
+                                            (out * 255.0).round().clamp(0.0, 255.0) as u8
+                                        };
+                                        let remapped =
+                                            [mapped(c[0]), mapped(c[1]), mapped(c[2]), c[3]];
+                                        let blended = blend_pixels(
+                                            c,
+                                            remapped,
+                                            layer.opacity,
+                                            LayerBlendMode::Normal,
+                                        );
+                                        base.set(x, y, blended);
+                                    }
+                                }
+                            }
+                        }
+                        PaintEffect::BrightnessContrast {
+                            brightness,
+                            contrast,
+                        } => {
+                            let b = brightness.clamp(-1.0, 1.0);
+                            let ct = contrast.clamp(-1.0, 1.0);
+                            for y in 0..h {
+                                for x in 0..w {
+                                    if let Some(c) = base.get(x, y) {
+                                        let adj = |v: u8| -> u8 {
+                                            let t =
+                                                (v as f32 - 127.5) * (1.0 + ct) + 127.5 + b * 127.5;
+                                            t.round().clamp(0.0, 255.0) as u8
+                                        };
+                                        let out = [adj(c[0]), adj(c[1]), adj(c[2]), c[3]];
+                                        let blended = blend_pixels(
+                                            c,
+                                            out,
+                                            layer.opacity,
+                                            LayerBlendMode::Normal,
+                                        );
+                                        base.set(x, y, blended);
+                                    }
+                                }
+                            }
+                        }
+                        PaintEffect::HueSaturation {
+                            hue_shift_deg,
+                            saturation,
+                        } => {
+                            let shift = hue_shift_deg % 360.0;
+                            let sat_scale = (1.0 + saturation.clamp(-1.0, 1.0)).max(0.0);
+                            for y in 0..h {
+                                for x in 0..w {
+                                    if let Some(c) = base.get(x, y) {
+                                        let (hue, sat, val) = rgb_to_hsv(c[0], c[1], c[2]);
+                                        let h2 = (hue + shift + 360.0) % 360.0;
+                                        let s2 = (sat * sat_scale).clamp(0.0, 1.0);
+                                        let (r2, g2, b2) = hsv_to_rgb(h2, s2, val);
+                                        let out = [r2, g2, b2, c[3]];
+                                        let blended = blend_pixels(
+                                            c,
+                                            out,
+                                            layer.opacity,
+                                            LayerBlendMode::Normal,
+                                        );
+                                        base.set(x, y, blended);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/// Hash determinístico por pixel para Grain (mesmo seed ⇒ mesmo ruído).
+fn hash_noise(x: u32, y: u32, seed: u32) -> f32 {
+    let mut h = seed ^ x.wrapping_mul(0x9E37_79B9) ^ y.wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7FEB_352D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846C_A68B);
+    h ^= h >> 16;
+    h as f32 / u32::MAX as f32 * 2.0 - 1.0
+}
+
+/// RGB [0..255] → HSV (hue 0..360, s/v 0..1).
+fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let hue = if delta <= f32::EPSILON {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    let hue = if hue < 0.0 { hue + 360.0 } else { hue };
+    let sat = if max <= f32::EPSILON {
+        0.0
+    } else {
+        delta / max
+    };
+    (hue, sat, max)
+}
+
+/// HSV (hue 0..360, s/v 0..1) → RGB [0..255].
+fn hsv_to_rgb(hue: f32, sat: f32, val: f32) -> (u8, u8, u8) {
+    let c = val * sat;
+    let hp = hue / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = val - c;
+    (
+        ((r + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((g + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((b + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
 }
 
 #[cfg(test)]
@@ -423,5 +617,145 @@ mod tests {
         assert_eq!(stack.active().map(|l| l.id), Some(a));
         assert!(stack.remove_layer(b));
         assert_eq!(stack.layers.len(), 1);
+    }
+
+    #[test]
+    fn grain_is_deterministic_and_seeded() {
+        let effect = PaintEffect::Grain {
+            intensity: 0.5,
+            seed: 42,
+        };
+        let mut base_a = Canvas::new(16, 16, [100, 100, 100, 255]);
+        let mut base_b = Canvas::new(16, 16, [100, 100, 100, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect("Grain", effect));
+        stack.composite(&mut base_a);
+        let mut stack_b = PaintLayerStack::new();
+        stack_b.add_layer(PaintLayer::new_effect("Grain", effect));
+        stack_b.composite(&mut base_b);
+        assert_eq!(base_a.pixels, base_b.pixels, "mesmo seed ⇒ mesmo ruído");
+        assert!(
+            base_a.pixels.chunks(4).any(|p| p[0] != 100),
+            "intensidade > 0 deve alterar pixels"
+        );
+        // Seed diferente ⇒ padrão diferente (probabilidade de colisão desprezível).
+        let mut base_c = Canvas::new(16, 16, [100, 100, 100, 255]);
+        let mut stack_c = PaintLayerStack::new();
+        stack_c.add_layer(PaintLayer::new_effect(
+            "Grain",
+            PaintEffect::Grain {
+                intensity: 0.5,
+                seed: 43,
+            },
+        ));
+        stack_c.composite(&mut base_c);
+        assert_ne!(base_a.pixels, base_c.pixels);
+    }
+
+    #[test]
+    fn grain_zero_intensity_is_identity() {
+        let mut base = Canvas::new(4, 4, [10, 20, 30, 255]);
+        let before = base.pixels.clone();
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Grain",
+            PaintEffect::Grain {
+                intensity: 0.0,
+                seed: 7,
+            },
+        ));
+        stack.composite(&mut base);
+        assert_eq!(before, base.pixels);
+    }
+
+    #[test]
+    fn levels_maps_black_to_white_and_is_bounded() {
+        let mut base = Canvas::new(2, 1, [0, 0, 0, 255]);
+        base.set(1, 0, [255, 255, 255, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Levels",
+            PaintEffect::Levels {
+                in_min: 0.0,
+                in_max: 1.0,
+                gamma: 1.0,
+                out_min: 1.0,
+                out_max: 0.0,
+            },
+        ));
+        stack.composite(&mut base);
+        assert_eq!(
+            base.get(0, 0),
+            Some([255, 255, 255, 255]),
+            "preto vira branco"
+        );
+        assert_eq!(base.get(1, 0), Some([0, 0, 0, 255]), "branco vira preto");
+    }
+
+    #[test]
+    fn brightness_contrast_flat_is_mid_gray() {
+        let mut base = Canvas::new(2, 1, [0, 0, 0, 255]);
+        base.set(1, 0, [255, 255, 255, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Flat",
+            PaintEffect::BrightnessContrast {
+                brightness: 0.0,
+                contrast: -1.0,
+            },
+        ));
+        stack.composite(&mut base);
+        let a = base.get(0, 0).unwrap();
+        let b = base.get(1, 0).unwrap();
+        assert_eq!(a, b, "contraste -1 achata tudo em cinza médio");
+        assert!((a[0] as i32 - 128).abs() <= 2);
+    }
+
+    #[test]
+    fn hue_shift_180_turns_red_into_cyan() {
+        let mut base = Canvas::new(1, 1, [255, 0, 0, 255]);
+        let mut stack = PaintLayerStack::new();
+        stack.add_layer(PaintLayer::new_effect(
+            "Hue 180",
+            PaintEffect::HueSaturation {
+                hue_shift_deg: 180.0,
+                saturation: 0.0,
+            },
+        ));
+        stack.composite(&mut base);
+        let c = base.get(0, 0).unwrap();
+        assert!(
+            c[1] > 200 && c[2] > 200 && c[0] < 60,
+            "vermelho +180° ≈ ciano: {c:?}"
+        );
+    }
+
+    #[test]
+    fn new_effects_serialize_roundtrip() {
+        for e in [
+            PaintEffect::Grain {
+                intensity: 0.4,
+                seed: 9,
+            },
+            PaintEffect::Levels {
+                in_min: 0.1,
+                in_max: 0.9,
+                gamma: 1.5,
+                out_min: 0.0,
+                out_max: 1.0,
+            },
+            PaintEffect::BrightnessContrast {
+                brightness: 0.2,
+                contrast: 0.5,
+            },
+            PaintEffect::HueSaturation {
+                hue_shift_deg: 30.0,
+                saturation: -0.4,
+            },
+        ] {
+            let json = serde_json::to_string(&e).expect("serializa");
+            let back: PaintEffect = serde_json::from_str(&json).expect("desserializa");
+            assert_eq!(e, back);
+        }
     }
 }
