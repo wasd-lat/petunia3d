@@ -49,6 +49,57 @@ impl BrushType {
     pub const fn is_shape(self) -> bool {
         matches!(self, Self::Line | Self::Rectangle)
     }
+
+    /// Forma canônica do cursor de preview (iniciativa Paint).
+    pub const fn preview_kind(self) -> BrushPreviewKind {
+        match self {
+            Self::Pixel | Self::Soft | Self::Airbrush => BrushPreviewKind::Ring,
+            Self::Eraser => BrushPreviewKind::HollowRing,
+            Self::Eyedropper => BrushPreviewKind::Crosshair,
+            Self::Fill | Self::Line | Self::Rectangle => BrushPreviewKind::None,
+        }
+    }
+}
+
+/// Como o cursor de preview deve ser desenhado na viewport.
+///
+/// Contrato puro entre core e UI (iniciativa Paint): o motor decide a
+/// **semântica** (o que o pincel faz); a UI decide apenas o traço/pintura.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrushPreviewKind {
+    /// Anel com preenchimento translúcido na cor do pincel
+    /// (Pixel/Soft/Airbrush: o anel é exatamente a pegada do dab).
+    Ring,
+    /// Anel vazado (Borracha: apaga, não deposita).
+    HollowRing,
+    /// Cruz de precisão (Conta-gotas: amostra, não pinta).
+    Crosshair,
+    /// Sem cursor de área (Fill/Line/Rectangle: a própria forma é o preview).
+    None,
+}
+
+/// Estilo derivado do descriptor para renderizar o cursor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrushPreviewStyle {
+    pub kind: BrushPreviewKind,
+    /// Cor do anel/cruz em [r,g,b] 0..=1.
+    pub tint: [f32; 3],
+    /// Alpha do preenchimento interno do anel (força × fluxo).
+    pub fill_alpha: f32,
+}
+
+impl BrushPreviewStyle {
+    /// Deriva o estilo a partir do descriptor e da cor ativa do pincel.
+    /// O raio real (mundo ou pixels) sai de `AppState::brush_world_radius`
+    /// / `BrushSettings::radius_px` — a UI nunca recalcula por conta própria.
+    pub fn from_settings(settings: BrushSettings, color: [f32; 3]) -> Self {
+        let s = settings.sanitized();
+        Self {
+            kind: s.kind.preview_kind(),
+            tint: color,
+            fill_alpha: (s.strength * s.flow).clamp(0.0, 1.0),
+        }
+    }
 }
 
 /// Mapeamento legado do índice de UI (`paint_brush_kind`) → [`BrushType`].
@@ -240,5 +291,36 @@ mod tests {
         assert_eq!(fast.first(), Some(&(0, 0)));
         assert_eq!(fast.last(), Some(&(100, 100)));
         assert!((fast.len() as i32 - slow.len() as i32).abs() <= 2);
+    }
+
+    #[test]
+    fn preview_kind_matches_brush_semantics() {
+        use BrushPreviewKind as K;
+        for (kind, expected) in [
+            (BrushType::Pixel, K::Ring),
+            (BrushType::Soft, K::Ring),
+            (BrushType::Airbrush, K::Ring),
+            (BrushType::Eraser, K::HollowRing),
+            (BrushType::Eyedropper, K::Crosshair),
+            (BrushType::Fill, K::None),
+            (BrushType::Line, K::None),
+            (BrushType::Rectangle, K::None),
+        ] {
+            assert_eq!(kind.preview_kind(), expected);
+        }
+    }
+
+    #[test]
+    fn preview_style_derives_tint_and_alpha() {
+        let s = BrushSettings {
+            kind: BrushType::Soft,
+            strength: 0.8,
+            flow: 0.5,
+            ..Default::default()
+        };
+        let style = BrushPreviewStyle::from_settings(s, [0.2, 0.4, 0.9]);
+        assert_eq!(style.kind, BrushPreviewKind::Ring);
+        assert_eq!(style.tint, [0.2, 0.4, 0.9]);
+        assert!((style.fill_alpha - 0.4).abs() < 1e-6);
     }
 }

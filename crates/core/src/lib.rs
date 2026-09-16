@@ -60,7 +60,10 @@ pub use command::{
 };
 pub use project_service::{ProjectService, ProjectServiceError, sanitize_filename};
 
-pub use brush::{BrushSettings, BrushType, brush_type_from_kind, kind_from_brush_type};
+pub use brush::{
+    BrushPreviewKind, BrushPreviewStyle, BrushSettings, BrushType, brush_type_from_kind,
+    kind_from_brush_type,
+};
 pub use camera::{Camera, Projection, ViewPreset};
 pub use events::{AppEvent, EventBus};
 pub use modal_feedback::ToolFeedback;
