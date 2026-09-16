@@ -1,6 +1,7 @@
 //! Petunia3D core neutro: tipos compartilhados, eventos e contrato de módulo.
 //! Features conhecem estas abstrações — nunca umas às outras (§22).
 
+pub mod brush;
 pub mod camera;
 pub mod command;
 pub mod cutting_session;
@@ -59,6 +60,7 @@ pub use command::{
 };
 pub use project_service::{ProjectService, ProjectServiceError, sanitize_filename};
 
+pub use brush::{BrushSettings, BrushType, brush_type_from_kind, kind_from_brush_type};
 pub use camera::{Camera, Projection, ViewPreset};
 pub use events::{AppEvent, EventBus};
 pub use modal_feedback::ToolFeedback;
