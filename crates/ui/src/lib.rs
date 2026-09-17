@@ -500,20 +500,24 @@ pub(crate) fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(egui::Color32::TRANSPARENT))
         .show(ui, |ui| {
-            if state.workspace == Workspace::Uv {
-                uv_workspace_center(ui, state);
-            } else {
-                let rect = ui.available_rect_before_wrap();
-                viewport_3d(ui, state, rect);
-            }
+            let rect = ui.available_rect_before_wrap();
+            viewport_3d(ui, state, rect);
         });
 }
 
-/// Centro do workspace UV (Wave 3 — §6.3): editor UV 2D + prévia 3D.
+// O centro do PAINT (viewport 3D + tela 2D lado a lado) **não** é composto
+// aqui: ele é o paine `PetuniaPane::PaintCanvas` do `adapters::tile_layout`
+// (§31), que é dono da divisória, dos mínimos das duas superfícies e da largura
+// persistida. O produto só declara o perfil do workspace
+// (`workspaces::profile_for(..).paints_on_canvas()`) e desenha cada paine.
+
+/// Centro UV legado mantido apenas para compatibilidade de código antigo; não é
+/// alcançável pela UI V1.
 ///
 /// Janela larga: lado a lado. Janela estreita (<760px): alternador, nunca os
 /// dois esmagados. A prévia 3D registra o `viewport_rect` que posiciona a
 /// superfície GPU — nenhum acoplamento novo com o app.
+#[allow(dead_code)]
 fn uv_workspace_center(ui: &mut egui::Ui, state: &mut AppState) {
     puffin::profile_function!();
     let total = ui.available_rect_before_wrap();
@@ -603,7 +607,20 @@ fn viewport_3d(ui: &mut egui::Ui, state: &mut AppState, rect: egui::Rect) {
             );
         }
         let resp = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-        if viewport_interaction::draw(&ctx, state, rect, &p, &resp) {
+        // No PAINT a interação desenha a pincelada e reivindica a cena. O cartão
+        // da ferramenta não é cena, é chrome do usuário: nasce **antes** da
+        // interação para (a) continuar visível durante o traço e (b) publicar o
+        // retângulo medido que impede a pincelada de começar sob os controles.
+        let paint_viewport = state.workspace == Workspace::Paint;
+        let paint_chrome = if paint_viewport {
+            tool_properties_popover::draw(ui, state, rect)
+        } else {
+            None
+        };
+        if let Some(chrome) = paint_chrome {
+            regions::record(&ctx, regions::RegionSlot::ToolProperties, chrome);
+        }
+        if viewport_interaction::draw(&ctx, state, rect, &p, &resp) && !paint_viewport {
             return;
         }
 
@@ -627,7 +644,9 @@ fn viewport_3d(ui: &mut egui::Ui, state: &mut AppState, rect: egui::Rect) {
         }
         // Avoid flashing a second contextual surface on the same frame that a
         // primitive card confirms/cancels itself.
-        let tool_properties_rect = if had_primitive_session {
+        let tool_properties_rect = if paint_viewport {
+            paint_chrome
+        } else if had_primitive_session {
             None
         } else {
             tool_properties_popover::draw(ui, state, rect)

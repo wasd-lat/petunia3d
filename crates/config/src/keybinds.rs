@@ -97,6 +97,8 @@ fn parse_key(name: &str) -> Option<KeyCode> {
         "End" => KeyCode::End,
         "Escape" | "Esc" => KeyCode::Escape,
         "Enter" => KeyCode::Enter,
+        "BracketLeft" | "[" => KeyCode::BracketLeft,
+        "BracketRight" | "]" => KeyCode::BracketRight,
         _ => return None,
     })
 }
@@ -407,6 +409,10 @@ impl Keybinds {
             ("model.delete", "Delete"),
             ("model.duplicate", "Shift+D"),
             ("paint.paint", "B"),
+            ("paint.size_decrease", "["),
+            ("paint.size_increase", "]"),
+            ("paint.hardness_decrease", "Shift+["),
+            ("paint.hardness_increase", "Shift+]"),
         ];
         let mut kb = Self::default();
         for (a, s) in pairs {
@@ -510,6 +516,8 @@ pub mod winit_keys {
         End,
         Escape,
         Enter,
+        BracketLeft,
+        BracketRight,
     }
 
     impl KeyCode {
@@ -571,6 +579,8 @@ pub mod winit_keys {
                 KeyCode::End => "End",
                 KeyCode::Escape => "Escape",
                 KeyCode::Enter => "Enter",
+                KeyCode::BracketLeft => "[",
+                KeyCode::BracketRight => "]",
             }
         }
     }

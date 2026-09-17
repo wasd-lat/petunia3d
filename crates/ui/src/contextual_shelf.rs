@@ -527,10 +527,9 @@ fn build_shelf(state: &AppState) -> (Vec<ShelfCommand>, Vec<ShelfWidget>) {
         }
         Workspace::Uv => {
             let cmds = [
-                ("uv_select", ShelfPriority::Primary),
-                ("uv_unwrap", ShelfPriority::Primary),
-                ("uv_project", ShelfPriority::Secondary),
-                ("uv_seam", ShelfPriority::Secondary),
+                ("paint", ShelfPriority::Primary),
+                ("eraser", ShelfPriority::Primary),
+                ("picker", ShelfPriority::Primary),
             ]
             .into_iter()
             .map(|(id, priority)| {
@@ -705,15 +704,15 @@ fn draw_shelf_widget(ui: &mut Ui, state: &mut AppState, widget: ShelfWidget) {
     match widget {
         ShelfWidget::PaintRadius => {
             ui.label(
-                RichText::new(state.t_id(text_id::PAINT_RADIUS))
+                RichText::new(state.t("paint.size"))
                     .size(10.5)
                     .color(tokens::TEXT_SECONDARY),
             );
             ui.add_sized(
                 vec2(64.0, 18.0),
-                egui::DragValue::new(&mut state.paint_radius)
-                    .range(0.01..=5.0)
-                    .speed(0.02),
+                egui::DragValue::new(&mut state.canvas_brush)
+                    .range(1..=512)
+                    .speed(1.0),
             );
         }
         ShelfWidget::PaintColor => {

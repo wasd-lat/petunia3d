@@ -44,7 +44,10 @@ pub fn draw(
         }
         _ => {}
     }
-    if state.workspace != Workspace::Model {
+    // PAINT usa o mesmo inspector do MODEL: no layout de pintura o pincel mora no
+    // cartão flutuante da ferramenta (§34) e a coluna do dock mostra camadas
+    // (topo) + inspector do objeto (base). Só o UV legado tem painel próprio.
+    if !matches!(state.workspace, Workspace::Model | Workspace::Paint) {
         draw_workspace_inspector(ui, state);
         return;
     }
@@ -1118,19 +1121,12 @@ fn draw_workspace_inspector(ui: &mut Ui, state: &mut AppState) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_enabled_ui(!state.is_interacting(), |ui| {
-                let ctx = ui.ctx().clone();
                 match state.workspace {
-                    Workspace::Paint => {
-                        let mut canvas_tex: Option<egui::TextureHandle> =
-                            ctx.data_mut(|d| d.get_temp(egui::Id::new("paint.canvas_tex")));
-                        crate::modules_ui::paint_ui::draw_paint_panel(ui, state, &mut canvas_tex);
-                        if let Some(tex) = canvas_tex {
-                            ctx.data_mut(|d| d.insert_temp(egui::Id::new("paint.canvas_tex"), tex));
-                        }
-                    }
-                    Workspace::Uv => {
-                        // Editor interativo no centro (§6.3); aqui só o resumo.
-                        crate::modules_ui::uv_ui::draw_uv_summary(ui, state);
+                    // PAINT e o UV legado mostram a seção Pincel. No dock essa
+                    // seção já é desenhada pelo shell; aqui ela atende o
+                    // inspector destacado — conteúdo único, sem segunda cópia.
+                    Workspace::Paint | Workspace::Uv => {
+                        crate::modules_ui::paint_ui::draw_brush_contents(ui, state);
                     }
                     #[cfg(feature = "animation-workspace")]
                     Workspace::Animate => {

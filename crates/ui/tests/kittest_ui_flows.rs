@@ -636,16 +636,20 @@ fn test_kittest_workspace_switch_preserves_dock_layout() {
 #[test]
 fn test_kittest_workspace_profiles_compose_shell() {
     // Cada workspace compõe o shell de forma visivelmente distinta (§6.5).
+    //
+    // Baseline emendada (adendo de 2026-09-16 em foundations/36): o workspace UV
+    // saiu da UI V1 — nenhum workspace expõe editor UV interativo — e o PAINT
+    // **divide** o centro entre viewport 3D e tela 2D (lado a lado).
     #[allow(unused_mut)]
     let mut cases = vec![
         (Workspace::Model, false, false),
-        (Workspace::Paint, false, false),
-        (Workspace::Uv, false, true),
+        (Workspace::Paint, false, true),
+        (Workspace::Uv, false, false),
     ];
     #[cfg(feature = "animation-workspace")]
     cases.push((Workspace::Animate, true, false));
 
-    for (workspace, expect_bottom, expect_uv) in cases {
+    for (workspace, expect_bottom, expect_canvas) in cases {
         let state = std::rc::Rc::new(std::cell::RefCell::new(AppState::new("en")));
         state.borrow_mut().workspace = workspace;
         let tools = ToolRegistry::new();
@@ -679,28 +683,45 @@ fn test_kittest_workspace_profiles_compose_shell() {
             expect_bottom,
             "bottom pane for {workspace:?}"
         );
+        assert!(
+            regions.uv_editor.is_none(),
+            "o editor UV não faz parte da UI V1 ({workspace:?})"
+        );
         assert_eq!(
-            regions.uv_editor.is_some(),
-            expect_uv,
-            "uv editor for {workspace:?}"
+            regions.paint_canvas.is_some(),
+            expect_canvas,
+            "tela 2D no centro em {workspace:?}"
         );
         assert!(
             regions.viewport.is_some(),
-            "3D viewport present for {workspace:?}"
+            "a viewport 3D existe em todo workspace com cena ({workspace:?})"
         );
+        if expect_canvas {
+            let canvas = regions.paint_canvas.expect("tela 2D registrada");
+            let viewport = regions.viewport.expect("viewport registrada");
+            assert!(
+                canvas.min.x >= viewport.min.x,
+                "a tela fica à direita da viewport ({workspace:?})"
+            );
+        }
         assert!(
             regions.status_overlaps().is_empty(),
             "panes overlap status bar for {workspace:?}: {:?}",
             regions.status_overlaps()
         );
-        assert!(regions.shelf_within_viewport() || workspace == Workspace::Uv);
+        assert!(
+            regions.shelf_within_viewport(),
+            "shelf fora da viewport em {workspace:?}"
+        );
     }
 }
-
 #[test]
-fn test_kittest_uv_narrow_window_toggles_editor_or_preview() {
+fn test_kittest_paint_tool_floats_the_brush_card() {
+    // O pincel não ocupa seção do dock: ele flutua sobre a coluna 3D, no mesmo
+    // cartão de ferramenta dos outros tools (§34).
     let state = std::rc::Rc::new(std::cell::RefCell::new(AppState::new("en")));
-    state.borrow_mut().workspace = Workspace::Uv;
+    state.borrow_mut().workspace = Workspace::Paint;
+    state.borrow_mut().active_tool = "paint".into();
     let tools = ToolRegistry::new();
     let mut registry = petunia_core::ModuleRegistry::new();
     let mut action = petunia_ui::UiAction::none();
@@ -708,9 +729,8 @@ fn test_kittest_uv_narrow_window_toggles_editor_or_preview() {
     let seen_clone = seen.clone();
     let state_clone = state.clone();
 
-    // Janela estreita: mostra a prévia 3D por padrão, sem editor esmagado.
     let mut harness = Harness::builder()
-        .with_size(egui::Vec2::new(700.0, 600.0))
+        .with_size(egui::Vec2::new(1280.0, 800.0))
         .build_ui(move |ui| {
             petunia_ui::draw(
                 ui,
@@ -722,36 +742,67 @@ fn test_kittest_uv_narrow_window_toggles_editor_or_preview() {
             *seen_clone.borrow_mut() = petunia_ui::regions::load(ui.ctx());
         });
     harness.run_steps(6);
-
-    let regions = seen.borrow().clone().expect("regions recorded");
-    assert!(regions.viewport.is_some());
-    assert!(regions.uv_editor.is_none());
     drop(harness);
 
-    // Alterna para o editor: viewport some, editor aparece.
-    state.borrow_mut().ui.uv_show_preview = false;
-    let state_clone2 = state.clone();
-    let seen2 = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let seen2_clone = seen2.clone();
-    let tools2 = ToolRegistry::new();
-    let mut registry2 = petunia_core::ModuleRegistry::new();
-    let mut action2 = petunia_ui::UiAction::none();
-    let mut harness2 = Harness::builder()
-        .with_size(egui::Vec2::new(700.0, 600.0))
+    let regions = seen.borrow().clone().expect("regions recorded");
+    let card = regions.tool_properties.unwrap_or_else(|| {
+        panic!(
+            "o cartão do pincel precisa estar flutuando: {regions:?} tool={:?}",
+            state.borrow().active_tool
+        )
+    });
+    assert!(card.width() > 0.0 && card.height() > 0.0);
+    assert!(
+        regions.viewport_overlays_within_viewport(),
+        "o cartão flutuante não pode escapar da viewport"
+    );
+}
+
+#[test]
+fn test_kittest_paint_center_splits_3d_and_canvas() {
+    // O centro do PAINT tem as duas superfícies ao mesmo tempo: viewport 3D à
+    // esquerda e tela 2D à direita, com divisória arrastável. Prévia escondida
+    // atrás de aba é prévia que ninguém olha.
+    let state = std::rc::Rc::new(std::cell::RefCell::new(AppState::new("en")));
+    state.borrow_mut().workspace = Workspace::Paint;
+    let tools = ToolRegistry::new();
+    let mut registry = petunia_core::ModuleRegistry::new();
+    let mut action = petunia_ui::UiAction::none();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let seen_clone = seen.clone();
+    let state_clone = state.clone();
+
+    let mut harness = Harness::builder()
+        .with_size(egui::Vec2::new(1280.0, 800.0))
         .build_ui(move |ui| {
             petunia_ui::draw(
                 ui,
-                &mut state_clone2.borrow_mut(),
-                &tools2,
-                &mut registry2,
-                &mut action2,
+                &mut state_clone.borrow_mut(),
+                &tools,
+                &mut registry,
+                &mut action,
             );
-            *seen2_clone.borrow_mut() = petunia_ui::regions::load(ui.ctx());
+            *seen_clone.borrow_mut() = petunia_ui::regions::load(ui.ctx());
         });
-    harness2.run_steps(6);
-    drop(harness2);
-    let regions2 = seen2.borrow().clone().expect("regions recorded");
-    assert!(regions2.uv_editor.is_some());
+    harness.run_steps(6);
+    drop(harness);
+
+    let regions = seen.borrow().clone().expect("regions recorded");
+    let viewport = regions.viewport.expect("a viewport 3D divide o centro");
+    let canvas = regions.paint_canvas.expect("a tela 2D divide o centro");
+    assert!(canvas.width() > 0.0 && viewport.width() > 0.0);
+    assert!(
+        canvas.min.x >= viewport.min.x,
+        "a tela fica à direita da viewport: {canvas:?} vs {viewport:?}"
+    );
+    assert!(
+        viewport.width() > 100.0,
+        "o divisor não pode deixar a viewport sem largura útil: {viewport:?}"
+    );
+    assert!(regions.status_overlaps().is_empty());
+    assert!(regions.dock_sections_disjoint());
+    // A barra de contexto pertence à coluna 3D, então continua sendo registrada.
+    assert!(regions.viewport_toolbar.is_some());
 }
 
 #[cfg(feature = "animation-workspace")]

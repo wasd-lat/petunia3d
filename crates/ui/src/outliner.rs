@@ -54,11 +54,7 @@ pub fn draw_body(ui: &mut Ui, state: &mut AppState) {
     ui.separator();
 
     // Cena totalmente vazia: atalhos de criação em vez de árvore vazia.
-    if state.project.assets.is_empty()
-        && state.project.collections.is_empty()
-        && state.project.annotations.is_empty()
-        && state.project.measurements.is_empty()
-    {
+    if scene_is_empty(state) {
         ui.add_space(6.0);
         crate::properties_panel::draw_quick_add(ui, state);
         return;
@@ -74,6 +70,29 @@ pub fn draw_body(ui: &mut Ui, state: &mut AppState) {
         .show(ui, |ui| {
             draw_tree_nodes(ui, state);
         });
+}
+
+/// Árvore do Outliner **sem** cabeçalho e **sem** área de rolagem própria.
+///
+/// O chamador decide a moldura: no workspace PAINT a árvore é a seção Scene
+/// embutida na lista de camadas (um único `ScrollArea` para as duas), e no
+/// workspace MODEL o [`draw_body`] continua dono do cabeçalho, da busca e do
+/// scroll. Duas rolagens aninhadas seriam o defeito clássico desse painel.
+pub fn draw_tree_only(ui: &mut Ui, state: &mut AppState) {
+    if scene_is_empty(state) {
+        ui.add_space(6.0);
+        crate::properties_panel::draw_quick_add(ui, state);
+        return;
+    }
+    draw_tree_nodes(ui, state);
+}
+
+/// Nada criado ainda na cena (a árvore não tem o que mostrar).
+fn scene_is_empty(state: &AppState) -> bool {
+    state.project.assets.is_empty()
+        && state.project.collections.is_empty()
+        && state.project.annotations.is_empty()
+        && state.project.measurements.is_empty()
 }
 
 fn outliner_node_icon(ui: &mut Ui, icon: &PetuniaIcon, fg: Color32) {

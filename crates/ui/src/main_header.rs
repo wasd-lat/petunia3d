@@ -425,8 +425,9 @@ fn draw_menus(ui: &mut Ui, state: &mut AppState, action: &mut UiAction) {
 fn draw_workspace_pills(ui: &mut Ui, state: &mut AppState) {
     // Derivado do enum de workspaces compilados: a lista de pílulas nunca
     // diverge do contrato (V1 = MODEL / PAINT / UV).
-    let canonical_workspaces: Vec<(Workspace, String)> = Workspace::all()
-        .into_iter()
+    let canonical_workspaces: Vec<(Workspace, String)> = crate::workspaces::visible_workspaces()
+        .iter()
+        .copied()
         .map(|ws| (ws, state.t(ws.key())))
         .collect();
 

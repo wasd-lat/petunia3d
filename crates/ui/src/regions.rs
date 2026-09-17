@@ -23,6 +23,8 @@ pub enum RegionSlot {
     RightOutliner,
     RightInspector,
     UvEditor,
+    /// Tela 2D do workspace PAINT (centro, quando a aba 3D não está ativa).
+    PaintCanvas,
     Viewport,
     Shelf,
     ToolProperties,
@@ -42,6 +44,7 @@ pub struct UiRegions {
     pub right_outliner: Option<egui::Rect>,
     pub right_inspector: Option<egui::Rect>,
     pub uv_editor: Option<egui::Rect>,
+    pub paint_canvas: Option<egui::Rect>,
     pub viewport: Option<egui::Rect>,
     pub shelf: Option<egui::Rect>,
     pub tool_properties: Option<egui::Rect>,
@@ -61,6 +64,7 @@ impl UiRegions {
             RegionSlot::RightOutliner => &mut self.right_outliner,
             RegionSlot::RightInspector => &mut self.right_inspector,
             RegionSlot::UvEditor => &mut self.uv_editor,
+            RegionSlot::PaintCanvas => &mut self.paint_canvas,
             RegionSlot::Viewport => &mut self.viewport,
             RegionSlot::Shelf => &mut self.shelf,
             RegionSlot::ToolProperties => &mut self.tool_properties,
@@ -79,6 +83,7 @@ impl UiRegions {
             ("bottom_dock", self.bottom_dock),
             ("right_dock", self.right_dock),
             ("uv_editor", self.uv_editor),
+            ("paint_canvas", self.paint_canvas),
             ("viewport", self.viewport),
         ]
         .into_iter()

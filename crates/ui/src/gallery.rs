@@ -1291,6 +1291,12 @@ const PENDING: &[(&str, &str)] = &[
         "`PetuniaForm` existe (contrato Petunia sobre o taffy); falta o backend \
          `egui_form` para erro por campo e estado de validação.",
     ),
+    (
+        "section header",
+        "Cabeçalho colapsável (chevron + rótulo forte + ações à direita) é montado \
+         à mão em outliner.rs, properties_panel.rs e paint_ui.rs; extrair para \
+         `PetuniaSectionHeader` quando a terceira cópia divergir.",
+    ),
 ];
 
 // ------------------------------------------------------------------ helpers

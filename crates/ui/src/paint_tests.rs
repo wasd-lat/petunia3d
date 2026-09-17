@@ -131,10 +131,14 @@ fn idle_redraw_during_held_brush_does_not_repaint_or_request_render() {
 }
 
 #[test]
-fn paint_radius_escape_restores_radius_and_ends_adjustment() {
+fn size_drag_escape_restores_size_and_ends_adjustment() {
+    // O arrasto com F ajusta o **tamanho em pixels** (`canvas_brush`, o campo que
+    // `brush_settings().size_px` lê), não o raio de mundo legado: o anel de
+    // preview e o carimbo usam o mesmo número, então o que o usuário vê é o que
+    // o pincel pinta.
     let ctx = egui::Context::default();
     let mut state = state();
-    let original = state.paint_radius;
+    let original = state.canvas_brush;
     frame(&ctx, &mut state, vec![Event::PointerMoved(rect().center())]);
     frame(&ctx, &mut state, vec![key(Key::F)]);
     frame(
@@ -142,9 +146,9 @@ fn paint_radius_escape_restores_radius_and_ends_adjustment() {
         &mut state,
         vec![Event::PointerMoved(rect().center() + egui::vec2(50.0, 0.0))],
     );
-    assert!(state.paint_radius > original);
+    assert!(state.canvas_brush > original);
     frame(&ctx, &mut state, vec![key(Key::Escape)]);
-    assert_eq!(state.paint_radius, original);
+    assert_eq!(state.canvas_brush, original);
     frame(
         &ctx,
         &mut state,
@@ -152,7 +156,7 @@ fn paint_radius_escape_restores_radius_and_ends_adjustment() {
             rect().center() + egui::vec2(100.0, 0.0),
         )],
     );
-    assert_eq!(state.paint_radius, original);
+    assert_eq!(state.canvas_brush, original);
     assert_eq!(state.project.undo.depth(), (0, 0));
     let mut release = key(Key::F);
     if let Event::Key { pressed, .. } = &mut release {
@@ -168,7 +172,7 @@ fn paint_radius_escape_restores_radius_and_ends_adjustment() {
         )],
     );
     assert!(
-        state.paint_radius > original,
-        "radius can be adjusted again without a mouse click"
+        state.canvas_brush > original,
+        "size can be adjusted again without a mouse click"
     );
 }

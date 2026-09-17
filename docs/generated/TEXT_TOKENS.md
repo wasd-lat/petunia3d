@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **529**.
+Total de chaves de localização cadastradas: **589**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -216,7 +216,12 @@ Total de chaves de localização cadastradas: **529**.
 | `modifiers.enable` | Enable modifier | Ativar modificador |
 | `modifiers.remove` | Remove modifier | Remover modificador |
 | `modifiers.title` | Modifiers | Modificadores |
+| `paint.blend_add` | Add | Adicionar |
+| `paint.blend_multiply` | Multiply | Multiplicar |
+| `paint.blend_normal` | Normal | Normal |
+| `paint.blend_screen` | Screen | Tela |
 | `paint.brush` | Brush | Pincel |
+| `paint.brush_airbrush` | Airbrush | Aerógrafo |
 | `paint.brush_eraser` | Eraser | Borracha |
 | `paint.brush_fill` | Fill | Preencher |
 | `paint.brush_line` | Line | Linha |
@@ -238,22 +243,58 @@ Total de chaves de localização cadastradas: **529**.
 | `paint.channel_roughness` | Roughness | Rugosidade |
 | `paint.clear` | Clear | Limpar |
 | `paint.color` | Color | Cor |
+| `paint.color_current` | Current color | Cor atual |
+| `paint.color_current_tip` | Color used by the brush and the bucket. Adding it to the palette is explicit (+). | Cor usada pelo pincel e pelo balde. Adicionar à paleta é explícito (+). |
+| `paint.effect_add` | Add Effect | Adicionar efeito |
+| `paint.effect_add_tip` | Adds a new layer with a non-destructive effect | Cria uma camada nova com efeito não-destrutivo |
+| `paint.effect_brightness` | Brightness | Brilho |
+| `paint.effect_brightness_contrast` | Brightness / Contrast | Brilho / Contraste |
+| `paint.effect_cell_size` | Cell size | Tamanho da célula |
+| `paint.effect_contrast` | Contrast | Contraste |
+| `paint.effect_gamma` | Gamma | Gama |
+| `paint.effect_grain` | Grain | Grão |
+| `paint.effect_hue` | Hue | Matiz |
+| `paint.effect_hue_saturation` | Hue / Saturation | Matiz / Saturação |
+| `paint.effect_in_max` | Input max | Máx. de entrada |
+| `paint.effect_in_min` | Input min | Mín. de entrada |
+| `paint.effect_intensity` | Intensity | Intensidade |
+| `paint.effect_invert` | Invert | Inverter |
+| `paint.effect_levels` | Levels | Níveis |
+| `paint.effect_levels_count` | Levels | Níveis |
+| `paint.effect_no_parameters` | No parameters | Sem parâmetros |
+| `paint.effect_out_max` | Output max | Máx. de saída |
+| `paint.effect_out_min` | Output min | Mín. de saída |
+| `paint.effect_pixelate` | Pixelate | Pixelizar |
+| `paint.effect_posterize` | Posterize | Posterizar |
+| `paint.effect_saturation` | Saturation | Saturação |
 | `paint.eraser` | Eraser (hold Ctrl) | Borracha (segure Ctrl) |
 | `paint.eraser_hint` | Hold Ctrl while painting to erase | Segure Ctrl pintando p/ apagar |
 | `paint.fill` | Fill | Preencher |
 | `paint.fill_done` | filled {n} faces | {n} faces preenchidas |
 | `paint.fill_sel` | Fill sel | Preencher sel |
+| `paint.fill_sel_tip` | Fill the selected faces with the current color | Preenche as faces selecionadas com a cor atual |
+| `paint.flow` | Flow | Fluxo |
+| `paint.flow_tip` | Paint delivered per dab over time (Airbrush) | Tinta depositada por dab ao longo do tempo (Airbrush) |
+| `paint.hardness` | Hardness | Dureza |
+| `paint.hardness_tip` | Solid core as a fraction of the radius (0 = fully soft) | Núcleo sólido como fração do raio (0 = totalmente suave) |
 | `paint.isolate_faces` | Isolate faces (mask) | Isolar faces (máscara) |
 | `paint.isolate_faces_tip` | Confine 3D strokes to the selected faces only | Confinar traço 3D exclusivamente às faces selecionadas |
+| `paint.layer_blend` | Blend | Mistura |
+| `paint.layer_copy_name` | {name} copy | cópia de {name} |
 | `paint.layer_default_name` | Layer {n} | Camada {n} |
 | `paint.layer_delete` | Delete layer | Apagar camada |
 | `paint.layer_down` | Move down | Descer |
+| `paint.layer_duplicate` | Duplicate layer | Duplicar camada |
 | `paint.layer_empty` | Single base layer. Add layers for non-destructive detail. | Camada base única. Adicione camadas p/ detalhe não destrutivo. |
+| `paint.layer_hide` | Hide layer | Ocultar camada |
+| `paint.layer_kind_hint` | Raster layer: the brush paints into this layer. | Camada raster: o pincel pinta dentro dela. |
 | `paint.layer_new` | New layer | Nova camada |
 | `paint.layer_opacity` | Opacity | Opacidade |
+| `paint.layer_show` | Show layer | Mostrar camada |
 | `paint.layer_up` | Move up | Subir |
 | `paint.layers` | Layers | Camadas |
 | `paint.new_canvas` | New 256² | Novo 256² |
+| `paint.new_canvas_tip` | Replaces the texture with a new 256² canvas and clears the layers | Substitui a textura por uma tela 256² nova e limpa as camadas |
 | `paint.palette_add` | Add | Adicionar |
 | `paint.palette_add_tip` | Add current color to palette | Adicionar a cor atual à paleta |
 | `paint.palette_clear` | Clear | Limpar |
@@ -263,14 +304,33 @@ Total de chaves de localização cadastradas: **529**.
 | `paint.palette_import_tip` | Import .hex or .gpl palette | Importar paleta .hex ou .gpl |
 | `paint.palette_loaded_gameboy` | Game Boy palette loaded | Paleta Game Boy carregada |
 | `paint.palette_loaded_pico8` | PICO-8 palette loaded | Paleta PICO-8 carregada |
+| `paint.palette_remove` | Remove | Remover |
+| `paint.palette_remove_tip` | Remove the current color from the palette | Remove a cor atual da paleta |
+| `paint.palette_use` | Use this color | Usar esta cor |
 | `paint.pick` | Pick? | Pegar? |
 | `paint.pick_hint` | Alt+click the mesh to pick a color | Alt+clique na malha p/ pegar cor |
 | `paint.picked` | color picked | cor capturada |
 | `paint.pixel_grid` | Pixel grid | Grade de pixels |
 | `paint.pixel_grid_tip` | Pixel grid on the 2D canvas (only when zoomed in) | Grade de pixels no canvas 2D (só com zoom suficiente) |
+| `paint.prepare_surface` | Prepare surface | Preparar superfície |
+| `paint.prepare_surface_hint` | Projection used by the 3D brush when the mesh has no usable UVs. | Projeção usada pelo pincel 3D quando a malha não tem UVs utilizáveis. |
 | `paint.radius` | Radius | Raio |
 | `paint.size` | Size px | Tam px |
+| `paint.size_tip` | Brush diameter in pixels, on the 2D canvas and on the model | Diâmetro do pincel em pixels, na tela 2D e no modelo |
+| `paint.spacing` | Spacing | Espaçamento |
+| `paint.spacing_tip` | Distance between dabs as a fraction of the diameter | Distância entre dabs como fração do diâmetro |
 | `paint.strength` | Strength | Força |
+| `paint.strength_tip` | Opacity of each dab | Opacidade de cada dab |
+| `paint.surface_auto_unwrap` | Auto Unwrap | Auto Unwrap |
+| `paint.surface_auto_unwrap_tip` | Cut the mesh into charts automatically (angle-based) | Corta a malha em charts automaticamente (por ângulo) |
+| `paint.surface_box` | Box | Box |
+| `paint.surface_box_tip` | Project the six box faces (fastest for hard-surface props) | Projeta as seis faces da caixa (mais rápido para props de hard-surface) |
+| `paint.surface_planar` | Planar | Planar |
+| `paint.surface_planar_tip` | Re-project the selection from the current view | Reprojeta a seleção a partir da vista atual |
+| `paint.surface_unwrapped` | Surface prepared: {n} charts | Superfície preparada: {n} ilhas |
+| `paint.tool_section_brushes` | Brushes | Pincéis |
+| `paint.tool_section_sample` | Sample | Amostra |
+| `paint.tool_section_shapes` | Shapes | Formas |
 | `paint.vertex` | Paint on model | Pintura no modelo |
 | `prims.body_length` | Body Length | Comprimento do Corpo |
 | `prims.bottom_radius` | Bottom Radius | Raio da Base |

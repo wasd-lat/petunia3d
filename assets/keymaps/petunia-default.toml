@@ -13,6 +13,13 @@ reset_camera = "Home"
 toggle_projection = "Numpad 5"
 cycle_mode = "Tab"
 
+[paint]
+paint = "B"
+size_decrease = "["
+size_increase = "]"
+hardness_decrease = "Shift+["
+hardness_increase = "Shift+]"
+
 [model]
 select_vertex = "1"
 select_edge = "2"

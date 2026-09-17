@@ -12,7 +12,8 @@
 //! └── shell::draw
 //!     └── árvore do macro-layout
 //!         ├── Tools      (esquerda)
-//!         ├── Viewport   (centro: barra de contexto + viewport/UV)
+//!         ├── Viewport   (centro: barra de contexto + viewport 3D)
+//!         ├── PaintCanvas (centro, à direita da viewport: só no PAINT)
 //!         ├── DockHeader ┐
 //!         ├── Parts      │ coluna do dock de contexto
 //!         ├── Context    ┘
@@ -34,7 +35,7 @@
 
 use egui::{Context, Ui};
 use petunia_config::text_id;
-use petunia_core::{AppState, DockOrientation, DockSide, ModuleRegistry, Workspace};
+use petunia_core::{AppState, DockOrientation, DockSide, ModuleRegistry};
 use petunia_module_model::ToolRegistry;
 
 use crate::adapters::tile_layout::{
@@ -62,7 +63,11 @@ pub fn layout_for(state: &AppState) -> PetuniaShellLayout {
         right_dock_split: state.ui.right_dock_split,
         right_dock_orientation: state.ui.dock_orientation,
         dock_auto: state.ui.scene_split_auto,
-        parts_content_height: scene_content_height(state),
+        parts_content_height: dock_top_content_height(state),
+        // O perfil do workspace decide se o centro tem duas superfícies; a largura
+        // arrastada pelo usuário entra depois, em [`draw`] (memória do adapter).
+        canvas_enabled: profile.paints_on_canvas(),
+        canvas_width: tokens::PAINT_CANVAS_DEFAULT_WIDTH,
         bottom_enabled: profile.bottom != workspaces::BottomPaneKind::None,
         parts_collapsed: state.ui.outliner_collapsed,
         context_collapsed: state.ui.inspector_collapsed,
@@ -70,19 +75,39 @@ pub fn layout_for(state: &AppState) -> PetuniaShellLayout {
     }
 }
 
-/// Estimativa barata do conteúdo do Scene (contagens O(1), sem montar árvore).
+/// Estimativa barata do conteúdo da seção **superior** do dock (O(1), sem
+/// montar árvore).
 ///
 /// Alimenta o dimensionamento AUTO: o paine cresce com o conteúdo em vez de
-/// reservar meio dock para um objeto só.
-fn scene_content_height(state: &AppState) -> f32 {
-    let rows = state.project.assets.len()
-        + state.project.collections.len()
-        + state.project.annotation_groups.len()
-        + state.project.annotations.len()
-        + state.project.measurements.len()
-        + state.project.refs.len()
-        + 4;
+/// reservar meio dock para um objeto só. A seção superior depende do workspace:
+/// no MODEL é a árvore da cena, no PAINT é a pilha de camadas — as duas crescem
+/// com o número de linhas, então a mesma política AUTO serve para as duas.
+fn dock_top_content_height(state: &AppState) -> f32 {
+    let profile = workspaces::profile_for(state.workspace);
+    let rows = match profile.dock_top {
+        workspaces::DockSectionKind::Layers => active_layer_rows(state) + 1,
+        _ => {
+            state.project.assets.len()
+                + state.project.collections.len()
+                + state.project.annotation_groups.len()
+                + state.project.annotations.len()
+                + state.project.measurements.len()
+                + state.project.refs.len()
+                + 4
+        }
+    };
     regions::estimate_scene_content(rows, crate::inspector_widgets::row_h(state.ui.density))
+}
+
+/// Camadas do ativo no frame (contagem barata para o dimensionamento AUTO).
+fn active_layer_rows(state: &AppState) -> usize {
+    state
+        .project
+        .assets
+        .get(state.project.active)
+        .and_then(|object| object.paint_stack.as_ref())
+        .map(|stack| stack.layers.len())
+        .unwrap_or(1)
 }
 
 /// Desenha o macro-layout do shell e persiste o que o usuário mexeu.
@@ -93,7 +118,11 @@ pub fn draw(
     registry: &mut ModuleRegistry,
 ) {
     puffin::profile_function!();
-    let layout = layout_for(state);
+    let mut layout = layout_for(state);
+    let adapter = PetuniaLayoutAdapter::new(SHELL_ID);
+    if let Some(remembered) = adapter.canvas_width(ui.ctx()) {
+        layout.canvas_width = remembered;
+    }
     // Rótulos resolvidos **antes** dos closures: o callback de desenho empresta
     // `state` mutavelmente, então ele não pode ler i18n por conta própria.
     let labels: Vec<(PetuniaPane, String)> = PetuniaPane::ALL
@@ -101,7 +130,6 @@ pub fn draw(
         .map(|pane| (*pane, pane_label(state, *pane)))
         .collect();
 
-    let adapter = PetuniaLayoutAdapter::new(SHELL_ID);
     let response = adapter.show(
         ui,
         &layout,
@@ -119,7 +147,7 @@ pub fn draw(
 
     record_regions(ui.ctx(), &response);
     paint_dock_edge(ui, state, &response);
-    persist(state, &layout, &response);
+    persist(ui.ctx(), &adapter, state, &layout, &response);
     draw_detached_inspector(ui.ctx(), state, tools, registry);
 }
 
@@ -153,6 +181,7 @@ fn record_regions(ctx: &Context, response: &PetuniaLayoutResponse) {
         }
     };
     record(PetuniaPane::Tools, RegionSlot::LeftTools);
+    record(PetuniaPane::PaintCanvas, RegionSlot::PaintCanvas);
     record(PetuniaPane::Parts, RegionSlot::RightOutliner);
     record(PetuniaPane::Context, RegionSlot::RightInspector);
     record(PetuniaPane::Bottom, RegionSlot::BottomDock);
@@ -168,7 +197,13 @@ fn record_regions(ctx: &Context, response: &PetuniaLayoutResponse) {
 /// espaço apagaria a escolha do usuário. A memória por workspace é atualizada na
 /// troca de workspace ([`AppState::switch_workspace`]), então o valor persistido
 /// aqui é a fonte da memória.
-fn persist(state: &mut AppState, layout: &PetuniaShellLayout, response: &PetuniaLayoutResponse) {
+fn persist(
+    ctx: &Context,
+    adapter: &PetuniaLayoutAdapter,
+    state: &mut AppState,
+    layout: &PetuniaShellLayout,
+    response: &PetuniaLayoutResponse,
+) {
     if response.split_equalize {
         // Duplo-clique na divisória: volta ao dimensionamento automático e
         // reabre as duas seções (gesto documentado do dock).
@@ -192,6 +227,17 @@ fn persist(state: &mut AppState, layout: &PetuniaShellLayout, response: &Petunia
         && (measured - layout.right_width).abs() > 1.0
     {
         state.ui.right_width = measured;
+        dirty = true;
+    }
+    if let Some(measured) = response.canvas_width
+        && measured >= tokens::PAINT_CANVAS_MIN_WIDTH - 1.0
+        && (measured - layout.canvas_width).abs() > 1.0
+    {
+        // O piso evita gravar o valor **encolhido** por falta de espaço numa
+        // janela estreita como se fosse escolha do usuário.
+        // A largura da tela 2D vive na memória do adapter (o DTO não tem onde
+        // persistir): arrastar a divisória do centro é o gesto que a grava.
+        adapter.remember_canvas_width(ctx, measured);
         dirty = true;
     }
     if let Some(split) = response.right_dock_split
@@ -221,15 +267,44 @@ fn draw_pane(
     match pane {
         PetuniaPane::Tools => toolbar::draw_contents(ui, state, tools),
         PetuniaPane::Viewport => viewport_region(ui, state),
+        PetuniaPane::PaintCanvas => {
+            egui::Frame::new()
+                .fill(tokens::bg_canvas(state))
+                .show(ui, |ui| {
+                    crate::modules_ui::paint_ui::draw_canvas_surface(ui, state)
+                });
+        }
         PetuniaPane::DockHeader => pane_surface(ui, tokens::bg_panel(state), 4.0, |ui| {
             dock_header(ui, state)
         }),
-        PetuniaPane::Parts => pane_surface(ui, tokens::bg_panel(state), 6.0, |ui| {
-            outliner::draw_body(ui, state)
-        }),
-        PetuniaPane::Context => pane_surface(ui, tokens::bg_panel(state), 6.0, |ui| {
-            properties_panel::draw(ui, state, tools, registry)
-        }),
+        PetuniaPane::Parts => {
+            pane_surface(
+                ui,
+                tokens::bg_panel(state),
+                6.0,
+                |ui| match workspaces::profile_for(state.workspace).dock_top {
+                    workspaces::DockSectionKind::Layers => {
+                        crate::modules_ui::paint_ui::draw_layers_section(ui, state)
+                    }
+                    _ => outliner::draw_body(ui, state),
+                },
+            )
+        }
+        PetuniaPane::Context => {
+            pane_surface(
+                ui,
+                tokens::bg_panel(state),
+                6.0,
+                |ui| match workspaces::profile_for(state.workspace).dock_bottom {
+                    // O workspace legado de UV não tem cartão flutuante: a seção
+                    // inferior dele é o conteúdo de pincel (a V1 não expõe o UV).
+                    workspaces::DockSectionKind::Brush => {
+                        crate::modules_ui::paint_ui::draw_brush_contents(ui, state)
+                    }
+                    _ => properties_panel::draw(ui, state, tools, registry),
+                },
+            )
+        }
         PetuniaPane::Bottom => bottom_region(ui, state),
     }
 }
@@ -254,10 +329,12 @@ fn pane_surface<R>(
         .inner
 }
 
-/// Região central: barra de contexto (topo) + conteúdo do workspace.
+/// Região central: barra de contexto (topo) + viewport.
 ///
 /// A barra vive **dentro** do paine central — é o que a mantém restrita à
-/// coluna do meio em vez de atravessar o dock e a paleta.
+/// coluna do meio em vez de atravessar o dock e a paleta. No PAINT a tela 2D é
+/// outro paine do centro (à direita daqui), então a barra continua pertencendo só
+/// à coluna 3D: a tela não carrega controles de câmera que não a afetam.
 fn viewport_region(ui: &mut Ui, state: &mut AppState) {
     crate::viewport_bar_panel(ui, state);
     crate::viewport(ui, state);
@@ -379,15 +456,16 @@ fn draw_detached_inspector(
 /// Rótulo do paine (abas do motor, telemetria e a11y). Nunca é texto novo: vem
 /// do i18n.
 fn pane_label(state: &AppState, pane: PetuniaPane) -> String {
+    let profile = workspaces::profile_for(state.workspace);
     match pane {
         PetuniaPane::Tools => state.t("ui.tools"),
-        PetuniaPane::Viewport => match state.workspace {
-            Workspace::Uv => state.t("uv.title"),
-            _ => state.t("ui.viewport"),
-        },
+        PetuniaPane::Viewport => state.t("ui.viewport"),
+        PetuniaPane::PaintCanvas => state.t("paint.canvas"),
         PetuniaPane::DockHeader => state.t("dock.orientation"),
-        PetuniaPane::Parts => state.t_id(text_id::UI_OUTLINER),
-        PetuniaPane::Context => state.t_id(text_id::UI_PROPERTIES),
+        // As seções do dock têm o nome do **conteúdo** do workspace: Scene e
+        // Properties no MODEL, Layers e Brush no PAINT.
+        PetuniaPane::Parts => state.t(profile.dock_top_label),
+        PetuniaPane::Context => state.t(profile.dock_bottom_label),
         PetuniaPane::Bottom => state.t("ui.timeline"),
     }
 }
@@ -560,8 +638,14 @@ mod tests {
         );
     }
 
+    /// Contexto + adapter do shell para exercitar `persist` sem montar a árvore.
+    fn persist_env() -> (Context, PetuniaLayoutAdapter) {
+        (Context::default(), PetuniaLayoutAdapter::new(SHELL_ID))
+    }
+
     #[test]
     fn drag_persists_the_split_and_leaves_auto() {
+        let (ctx, adapter) = persist_env();
         let mut state = state();
         state.ui.scene_split_auto = true;
         let layout = layout_for(&state);
@@ -570,7 +654,7 @@ mod tests {
             right_dock_split: Some(0.62),
             ..Default::default()
         };
-        persist(&mut state, &layout, &response);
+        persist(&ctx, &adapter, &mut state, &layout, &response);
         assert!((state.ui.right_dock_split - 0.62).abs() < f32::EPSILON);
         assert!(!state.ui.scene_split_auto, "arrastar sai do AUTO");
         assert!(!state.ui.outliner_collapsed);
@@ -579,6 +663,7 @@ mod tests {
 
     #[test]
     fn double_click_returns_to_auto_without_touching_the_split() {
+        let (ctx, adapter) = persist_env();
         let mut state = state();
         state.ui.scene_split_auto = false;
         state.ui.right_dock_split = 0.7;
@@ -586,6 +671,8 @@ mod tests {
         state.ui.inspector_collapsed = true;
         let layout = layout_for(&state);
         persist(
+            &ctx,
+            &adapter,
             &mut state,
             &layout,
             &PetuniaLayoutResponse {
@@ -604,11 +691,14 @@ mod tests {
 
     #[test]
     fn a_frame_without_resize_preserves_the_user_preference() {
+        let (ctx, adapter) = persist_env();
         let mut state = state();
         state.ui.left_width = 64.0;
         state.ui.right_width = 320.0;
         let layout = layout_for(&state);
         persist(
+            &ctx,
+            &adapter,
             &mut state,
             &layout,
             &PetuniaLayoutResponse {
@@ -620,6 +710,59 @@ mod tests {
         );
         assert_eq!(state.ui.left_width, 64.0);
         assert_eq!(state.ui.right_width, 320.0);
+    }
+
+    /// Arrastar a divisória do centro grava a largura da tela 2D na memória do
+    /// adapter; um frame sem arrasto preserva o que o usuário escolheu.
+    #[test]
+    fn dragging_the_center_divider_remembers_the_canvas_width() {
+        let (ctx, adapter) = persist_env();
+        let mut state = state();
+        state.switch_workspace(petunia_core::Workspace::Paint);
+        let layout = layout_for(&state);
+        assert!(
+            layout.canvas_enabled,
+            "o PAINT tem duas superfícies no centro"
+        );
+        persist(
+            &ctx,
+            &adapter,
+            &mut state,
+            &layout,
+            &PetuniaLayoutResponse {
+                resized: true,
+                canvas_width: Some(360.0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(adapter.canvas_width(&ctx), Some(360.0));
+        // Frame seguinte sem arrasto: a preferência continua onde estava.
+        persist(
+            &ctx,
+            &adapter,
+            &mut state,
+            &layout,
+            &PetuniaLayoutResponse {
+                resized: false,
+                canvas_width: Some(120.0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(adapter.canvas_width(&ctx), Some(360.0));
+    }
+
+    /// O paine da tela 2D só entra no layout quando o perfil do workspace pinta
+    /// no canvas: no MODEL o centro é uma superfície só.
+    #[test]
+    fn the_canvas_pane_belongs_to_the_paint_profile() {
+        let model = layout_for(&state());
+        assert!(!model.canvas_enabled, "MODEL não divide o centro");
+        assert!(!model.is_visible(PetuniaPane::PaintCanvas));
+        let mut painting = state();
+        painting.switch_workspace(petunia_core::Workspace::Paint);
+        let paint = layout_for(&painting);
+        assert!(paint.is_visible(PetuniaPane::PaintCanvas));
+        assert_eq!(paint.canvas_width, tokens::PAINT_CANVAS_DEFAULT_WIDTH);
     }
 
     /// Wave 5b: a Timeline deixou de ser uma faixa dentro da área central e
@@ -639,6 +782,31 @@ mod tests {
             "a timeline não pode roubar altura da viewport: {viewport:?} vs {bottom:?}"
         );
         assert!(regions.status_overlaps().is_empty());
+    }
+    /// O workspace PAINT divide o **centro** entre viewport 3D e tela 2D (lado a
+    /// lado, divisória arrastável) e troca o conteúdo da seção superior do dock
+    /// (Layers). A geometria continua sendo do adapter: aqui só se verifica que
+    /// cada região existe no lugar certo e que ninguém invade a barra de status.
+    #[test]
+    fn paint_workspace_splits_the_center_between_3d_and_canvas() {
+        let mut state = state();
+        state.switch_workspace(petunia_core::Workspace::Paint);
+        let regions = run_shell(&mut state, egui::vec2(1_280.0, 800.0), 3);
+        let viewport = regions.viewport.expect("a viewport 3D divide o centro");
+        let canvas = regions.paint_canvas.expect("a tela 2D divide o centro");
+        assert!(
+            canvas.min.x >= viewport.min.x,
+            "a tela fica à direita da viewport: {canvas:?} vs {viewport:?}"
+        );
+        assert!(
+            regions.viewport_toolbar.is_some(),
+            "a barra de contexto é chrome da coluna 3D"
+        );
+        assert!(regions.left_tools.is_some(), "paleta de pintura ausente");
+        assert!(regions.right_dock.is_some(), "dock de camadas ausente");
+        assert!(regions.status_overlaps().is_empty());
+        assert!(regions.dock_sections_disjoint());
+        assert!(regions.viewport_overlays_within_viewport());
     }
 
     #[test]

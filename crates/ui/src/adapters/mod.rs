@@ -44,6 +44,7 @@
 //! | [`tool_grid`] | `egui_taffy` | grade da paleta lateral, colunas derivadas (§48) |
 //! | [`form`] | `egui_taffy` + `egui_form` | campos rotulados de Settings e validação por campo (§48, §51) |
 //! | [`drag_drop`] | `egui_dnd` | reordenação por arrasto em listas ordenáveis (§49) |
+//! | [`popup`] | `egui` (`Window`) | superfícies flutuantes com perda de foco (§34) |
 //!
 //! Ainda **não** existentes (dependência não instalada — ver
 //! `docs/dependencies/ui-ecosystem-lock.md`): `table` (`egui_table`),
@@ -62,6 +63,7 @@ pub mod form;
 pub mod gizmo;
 pub mod icons;
 pub mod inbox;
+pub mod popup;
 pub mod taffy_layout;
 pub mod tile_layout;
 pub mod tool_grid;
@@ -72,6 +74,7 @@ pub mod twill_tokens;
 
 pub use drag_drop::{PetuniaDragList, PetuniaDragRow, PetuniaDragSpec};
 pub use form::{PetuniaForm, PetuniaFormPlacement, PetuniaFormRow, PetuniaFormSpec};
+pub use popup::{PetuniaPopup, PetuniaPopupLabels, PetuniaPopupMode, PetuniaPopupStyle};
 pub use taffy_layout::{
     PetuniaAlign, PetuniaCentering, PetuniaGap, PetuniaJustify, PetuniaLayoutMode,
 };

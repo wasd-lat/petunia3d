@@ -68,6 +68,12 @@ pub enum PetuniaPane {
     Tools,
     /// Área central: viewport 3D ou editor UV.
     Viewport,
+    /// Tela 2D de pintura, ao lado da viewport no centro (workspace PAINT).
+    ///
+    /// É um paine de primeira classe, não um `Panel::right` do produto: a
+    /// divisória, os mínimos das duas superfícies e a largura persistida saem
+    /// daqui, junto com o resto do macro-layout (§31).
+    PaintCanvas,
     /// Cabeçalho do dock de contexto (lado + orientação).
     DockHeader,
     /// Árvore Parts/Scene (dock).
@@ -80,9 +86,10 @@ pub enum PetuniaPane {
 
 impl PetuniaPane {
     /// Todos os paines, na ordem canônica do shell.
-    pub const ALL: [PetuniaPane; 6] = [
+    pub const ALL: [PetuniaPane; 7] = [
         PetuniaPane::Tools,
         PetuniaPane::Viewport,
+        PetuniaPane::PaintCanvas,
         PetuniaPane::DockHeader,
         PetuniaPane::Parts,
         PetuniaPane::Context,
@@ -94,6 +101,7 @@ impl PetuniaPane {
         match self {
             PetuniaPane::Tools => "tools",
             PetuniaPane::Viewport => "viewport",
+            PetuniaPane::PaintCanvas => "paint-canvas",
             PetuniaPane::DockHeader => "dock-header",
             PetuniaPane::Parts => "parts",
             PetuniaPane::Context => "context",
@@ -106,7 +114,7 @@ impl PetuniaPane {
     pub const fn slot(self) -> PetuniaPaneSlot {
         match self {
             PetuniaPane::Tools => PetuniaPaneSlot::Left,
-            PetuniaPane::Viewport => PetuniaPaneSlot::Center,
+            PetuniaPane::Viewport | PetuniaPane::PaintCanvas => PetuniaPaneSlot::Center,
             PetuniaPane::DockHeader | PetuniaPane::Parts | PetuniaPane::Context => {
                 PetuniaPaneSlot::Right
             }
@@ -170,6 +178,7 @@ impl PetuniaPaneSlot {
             (self, pane),
             (PetuniaPaneSlot::Left, PetuniaPane::Tools)
                 | (PetuniaPaneSlot::Center, PetuniaPane::Viewport)
+                | (PetuniaPaneSlot::Center, PetuniaPane::PaintCanvas)
                 | (PetuniaPaneSlot::Right, PetuniaPane::DockHeader)
                 | (PetuniaPaneSlot::Right, PetuniaPane::Parts)
                 | (PetuniaPaneSlot::Right, PetuniaPane::Context)
@@ -203,6 +212,14 @@ pub struct PetuniaShellLayout {
     pub dock_auto: bool,
     /// Altura estimada do conteúdo de Parts (usada quando [`Self::dock_auto`]).
     pub parts_content_height: f32,
+    /// O centro divide o espaço entre a viewport 3D e a tela 2D (workspace PAINT).
+    pub canvas_enabled: bool,
+    /// Largura desejada do pano da tela 2D, em pixels.
+    ///
+    /// O adapter prende à faixa de tokens ([`tokens::PAINT_CANVAS_MIN_WIDTH`]
+    /// ..=[`tokens::PAINT_CANVAS_MAX_WIDTH`]) e cede primeiro para a viewport
+    /// continuar com [`MIN_VIEWPORT_WIDTH`] — o produto nunca valida este valor.
+    pub canvas_width: f32,
     /// Há dock inferior neste workspace (V1: só com a feature de animação).
     pub bottom_enabled: bool,
     /// Seção Parts colapsada (fica só o cabeçalho).
@@ -225,6 +242,8 @@ impl Default for PetuniaShellLayout {
             right_dock_orientation: DockOrientation::Stacked,
             dock_auto: true,
             parts_content_height: 240.0,
+            canvas_enabled: false,
+            canvas_width: tokens::PAINT_CANVAS_DEFAULT_WIDTH,
             bottom_enabled: false,
             parts_collapsed: false,
             context_collapsed: false,
@@ -250,6 +269,7 @@ impl PetuniaShellLayout {
             | PetuniaPane::Viewport
             | PetuniaPane::DockHeader
             | PetuniaPane::Parts => true,
+            PetuniaPane::PaintCanvas => self.canvas_enabled,
             PetuniaPane::Context => !self.context_detached,
             PetuniaPane::Bottom => self.bottom_enabled,
         }
@@ -280,7 +300,19 @@ impl PetuniaShellLayout {
             .clamp(MIN_RIGHT_WIDTH, MAX_RIGHT_WIDTH)
             .max(dock_floor);
         out.right_width = out.right_width.clamp(dock_floor, dock_ceiling);
-        let mut overflow = out.left_width + out.right_width + MIN_VIEWPORT_WIDTH - available_w;
+        // Centro com duas superfícies: o piso do centro cresce com a tela 2D —
+        // viewport-first também aqui — e a largura da tela é presa à faixa dos
+        // tokens antes de qualquer conta, para o produto nunca validar o valor.
+        let center_floor = if out.canvas_enabled {
+            MIN_VIEWPORT_WIDTH + spacing::TIGHT + tokens::PAINT_CANVAS_MIN_WIDTH
+        } else {
+            MIN_VIEWPORT_WIDTH
+        };
+        out.canvas_width = out.canvas_width.clamp(
+            tokens::PAINT_CANVAS_MIN_WIDTH,
+            tokens::PAINT_CANVAS_MAX_WIDTH,
+        );
+        let mut overflow = out.left_width + out.right_width + center_floor - available_w;
         if overflow > 0.0 {
             // Encolhe primeiro o dock de contexto, depois a coluna de ferramentas,
             // nunca abaixo dos mínimos.
@@ -289,6 +321,15 @@ impl PetuniaShellLayout {
             overflow -= shrink;
             let shrink = (out.left_width - MIN_LEFT_WIDTH).max(0.0).min(overflow);
             out.left_width -= shrink;
+        }
+        if out.canvas_enabled {
+            // Sobrou menos que o mínimo das duas superfícies: a tela cede até o
+            // próprio piso em vez de comer a viewport.
+            let center_room =
+                (available_w - out.left_width - out.right_width - spacing::TIGHT).max(0.0);
+            out.canvas_width = out
+                .canvas_width
+                .min((center_room - MIN_VIEWPORT_WIDTH).max(tokens::PAINT_CANVAS_MIN_WIDTH));
         }
 
         // Eixo vertical: centro + dock inferior.
@@ -314,6 +355,36 @@ impl PetuniaShellLayout {
         let right = layout.right_width;
         let center = (available_w - left - right).max(MIN_VIEWPORT_WIDTH);
         (left, center, right)
+    }
+
+    /// Larguras das duas superfícies do centro: `(viewport, tela 2D)`.
+    ///
+    /// A tela 2D recebe a largura desejada presa entre o próprio mínimo e o que
+    /// sobra depois de a viewport ficar com [`MIN_VIEWPORT_WIDTH`]; com a tela
+    /// desabilitada o centro é uma superfície só (`canvas == 0`).
+    ///
+    /// Invariante: `viewport + canvas == center_w` — a soma nunca "sobra" para o
+    /// conteúdo, que então alargaria o painel ~1px por frame (mesma regra de
+    /// [`Self::dock_pane_sizes`]).
+    pub fn center_widths(&self, center_w: f32) -> (f32, f32) {
+        let center_w = center_w.max(0.0);
+        if !self.canvas_enabled {
+            return (center_w, 0.0);
+        }
+        let gap = spacing::TIGHT;
+        // A tela cede primeiro: o teto é o que sobra depois da viewport, então
+        // numa janela apertada (`ceiling < mínimo da tela`) ela sai menor que o
+        // próprio mínimo em vez de esmagar a viewport — a soma continua sendo a
+        // do centro, como no dock.
+        let ceiling = (center_w - MIN_VIEWPORT_WIDTH - gap).max(0.0);
+        let canvas = self
+            .canvas_width
+            .clamp(
+                tokens::PAINT_CANVAS_MIN_WIDTH,
+                tokens::PAINT_CANVAS_MAX_WIDTH,
+            )
+            .min(ceiling);
+        ((center_w - canvas).max(0.0), canvas)
     }
 
     /// Tamanhos das duas seções do dock, em pixels, na orientação corrente.
@@ -398,6 +469,8 @@ pub struct PetuniaLayoutResponse {
     pub bottom_height: Option<f32>,
     /// Fração final da primeira seção do dock (só quando o usuário mexeu).
     pub right_dock_split: Option<f32>,
+    /// Largura final da tela 2D no centro (só quando o workspace a habilita).
+    pub canvas_width: Option<f32>,
     /// `true` quando o divisor foi arrastado neste frame.
     pub resized: bool,
     /// Duplo-clique na divisória do dock: o produto lê como "voltar ao
@@ -444,6 +517,26 @@ impl PetuniaLayoutAdapter {
         Self { id: id.into() }
     }
 
+    /// Id da memória da largura da tela 2D desta árvore.
+    fn canvas_memory(&self) -> egui::Id {
+        self.id.with("canvas_width")
+    }
+
+    /// Largura da tela 2D a usar neste frame, quando o usuário já a arrastou.
+    ///
+    /// `UiState` (core) não carrega esta preferência, então ela vive na memória
+    /// do `Context` ao lado do estado das outras superfícies do shell — mesmo
+    /// contrato de `adapters::popup`. O DTO continua sendo o contrato do frame;
+    /// um campo em `UiState` é a evolução natural quando o core for tocado.
+    pub fn canvas_width(&self, ctx: &egui::Context) -> Option<f32> {
+        ctx.data(|d| d.get_temp::<f32>(self.canvas_memory()))
+    }
+
+    /// Persiste a largura arrastada da tela 2D (memória de [`Self::canvas_width`]).
+    pub fn remember_canvas_width(&self, ctx: &egui::Context, width: f32) {
+        ctx.data_mut(|d| d.insert_temp(self.canvas_memory(), width));
+    }
+
     /// Constrói a árvore de runtime a partir do DTO.
     ///
     /// A topologia é fixa por construção — é isso que impede docking livre:
@@ -453,6 +546,8 @@ impl PetuniaLayoutAdapter {
     /// ├── horizontal
     /// │   ├── Tools
     /// │   ├── Viewport
+    /// │   │   └── horizontal     (só com `canvas_enabled`, workspace PAINT)
+    /// │   │       └── PaintCanvas
     /// │   └── vertical            (coluna do dock)
     /// │       ├── DockHeader
     /// │       └── vertical|horizontal
@@ -462,7 +557,8 @@ impl PetuniaLayoutAdapter {
     /// ```
     ///
     /// O dock pode nascer à esquerda (`dock_side`): a ordem dentro do container
-    /// horizontal muda, a topologia não.
+    /// horizontal muda, a topologia não. A tela 2D vive **dentro** do centro (à
+    /// direita da viewport), então ela nunca atravessa a coluna do dock.
     pub fn tree(&self, layout: &PetuniaShellLayout, available: Vec2) -> Tree<PetuniaPane> {
         let layout = layout.clamped(available);
         let (left_w, center_w, right_w) = layout.horizontal_widths(available.x);
@@ -470,6 +566,7 @@ impl PetuniaLayoutAdapter {
         let mut tree = Tree::empty(self.id);
         let tools = tree.tiles.insert_pane(PetuniaPane::Tools);
         let viewport = tree.tiles.insert_pane(PetuniaPane::Viewport);
+        let canvas = tree.tiles.insert_pane(PetuniaPane::PaintCanvas);
         let header = tree.tiles.insert_pane(PetuniaPane::DockHeader);
         let parts = tree.tiles.insert_pane(PetuniaPane::Parts);
         let context = tree.tiles.insert_pane(PetuniaPane::Context);
@@ -499,9 +596,24 @@ impl PetuniaLayoutAdapter {
         set_share(&mut dock.shares, inner, second.max(0.0));
         let dock = tree.tiles.insert_container(dock);
 
+        // Centro: viewport + tela 2D lado a lado quando o perfil do workspace
+        // pinta no canvas (a tela fica **à direita** da viewport). O container
+        // existe sempre — com a tela desabilitada ela fica invisível e com share
+        // zero, em vez de sair da árvore: um paine que entra e sai do layout é um
+        // paine que perde o próprio controle de reabrir.
+        //
+        // As duas larguras vêm da mesma política pura (`center_widths`), então a
+        // soma é sempre a do centro.
+        let (viewport_w, canvas_w) = layout.center_widths(center_w);
+        let center_span = (viewport_w + canvas_w).max(f32::MIN_POSITIVE);
+        let mut center_row = Linear::new(LinearDir::Horizontal, vec![viewport, canvas]);
+        set_share(&mut center_row.shares, viewport, viewport_w / center_span);
+        set_share(&mut center_row.shares, canvas, canvas_w / center_span);
+        let center = tree.tiles.insert_container(center_row);
+
         let columns = match layout.dock_side {
-            DockSide::Right => vec![tools, viewport, dock],
-            DockSide::Left => vec![tools, dock, viewport],
+            DockSide::Right => vec![tools, center, dock],
+            DockSide::Left => vec![tools, dock, center],
         };
         let mut row = Linear::new(LinearDir::Horizontal, columns);
         let span = available
@@ -509,7 +621,7 @@ impl PetuniaLayoutAdapter {
             .max(left_w + center_w + right_w)
             .max(f32::MIN_POSITIVE);
         set_share(&mut row.shares, tools, left_w / span);
-        set_share(&mut row.shares, viewport, center_w / span);
+        set_share(&mut row.shares, center, center_w / span);
         set_share(&mut row.shares, dock, right_w / span);
         let row = tree.tiles.insert_container(row);
 
@@ -592,6 +704,7 @@ impl PetuniaLayoutAdapter {
             right_width: dock_rect.map(|rect| rect.width()),
             bottom_height: rect_of(PetuniaPane::Bottom).map(|rect| rect.height()),
             right_dock_split: split,
+            canvas_width: rect_of(PetuniaPane::PaintCanvas).map(|rect| rect.width()),
             resized: behavior.resized,
             split_equalize,
             pane_rects,
@@ -798,8 +911,8 @@ mod tests {
         }
         assert_eq!(
             tree.tiles.len(),
-            PetuniaPane::ALL.len() + 4,
-            "4 containers (raiz, linha, dock, seções)"
+            PetuniaPane::ALL.len() + 5,
+            "5 containers (raiz, linha, centro, dock, seções)"
         );
     }
 
@@ -1001,6 +1114,115 @@ mod tests {
         );
     }
 
+    /// A tela 2D é do centro, à direita da viewport — nunca uma coluna do shell
+    /// (ela não atravessa o dock) e nunca abaixo do próprio mínimo.
+    #[test]
+    fn paint_canvas_sits_right_of_the_viewport_inside_the_center() {
+        let adapter = PetuniaLayoutAdapter::new("shell");
+        let paint = PetuniaShellLayout {
+            workspace: Workspace::Paint,
+            canvas_enabled: true,
+            ..layout()
+        };
+        let response = run(&adapter, &paint);
+        let viewport = response
+            .rect(PetuniaPane::Viewport)
+            .expect("viewport no centro");
+        let canvas = response
+            .rect(PetuniaPane::PaintCanvas)
+            .expect("tela 2D no centro");
+        assert!(
+            canvas.min.x >= viewport.max.x - 1.0,
+            "a tela precisa nascer depois da viewport: {canvas:?} vs {viewport:?}"
+        );
+        assert!(
+            viewport.width() >= MIN_VIEWPORT_WIDTH - 1.0,
+            "viewport abaixo do mínimo: {viewport:?}"
+        );
+        assert!(
+            canvas.width() >= tokens::PAINT_CANVAS_MIN_WIDTH - 1.0,
+            "tela abaixo do mínimo: {canvas:?}"
+        );
+        assert!(
+            (paint.canvas_width - response.canvas_width.unwrap_or_default()).abs() < 40.0,
+            "largura medida longe da pedida"
+        );
+    }
+
+    /// Sem o perfil de pintura a tela continua na árvore (para não perder o
+    /// controle de reabrir), mas fora do layout e sem ocupar um pixel.
+    #[test]
+    fn the_canvas_pane_leaves_the_layout_when_the_workspace_does_not_paint() {
+        let adapter = PetuniaLayoutAdapter::new("shell");
+        let response = run(&adapter, &layout());
+        assert!(
+            response.rect(PetuniaPane::PaintCanvas).is_none(),
+            "tela fora do layout não devolve retângulo"
+        );
+        let tree = adapter.tree(&layout(), egui::vec2(1_280.0, 800.0));
+        let canvas = tree
+            .tiles
+            .find_pane(&PetuniaPane::PaintCanvas)
+            .expect("o paine existe na árvore");
+        assert!(!tree.tiles.is_visible_in_layout(canvas));
+    }
+
+    #[test]
+    fn center_widths_always_add_up_and_protect_the_viewport() {
+        let comfortable = MIN_VIEWPORT_WIDTH + spacing::TIGHT + tokens::PAINT_CANVAS_MIN_WIDTH;
+        for total in [0.0, 200.0, 460.0, 900.0, 2_000.0] {
+            for canvas_enabled in [false, true] {
+                for canvas_width in [0.0, 120.0, 420.0, 5_000.0] {
+                    let l = PetuniaShellLayout {
+                        canvas_enabled,
+                        canvas_width,
+                        ..layout()
+                    };
+                    let (viewport, canvas) = l.center_widths(total);
+                    assert!(
+                        (viewport + canvas - total).abs() < 0.01,
+                        "total {total}: {viewport} + {canvas}"
+                    );
+                    assert!(viewport >= 0.0 && canvas >= 0.0);
+                    if canvas_enabled && total >= comfortable {
+                        assert!(
+                            canvas >= tokens::PAINT_CANVAS_MIN_WIDTH - 0.01,
+                            "tela {canvas} abaixo do mínimo (total {total})"
+                        );
+                        assert!(
+                            viewport >= MIN_VIEWPORT_WIDTH - 0.01,
+                            "viewport {viewport} esmagada (total {total})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_canvas_never_starves_the_viewport_on_a_narrow_window() {
+        let l = PetuniaShellLayout {
+            canvas_enabled: true,
+            canvas_width: tokens::PAINT_CANVAS_MAX_WIDTH,
+            left_width: 400.0,
+            right_width: 400.0,
+            ..layout()
+        };
+        let clamped = l.clamped(egui::vec2(900.0, 700.0));
+        let (left, center, right) = clamped.horizontal_widths(900.0);
+        let (viewport, canvas) = clamped.center_widths(center);
+        assert!(
+            viewport >= MIN_VIEWPORT_WIDTH - 0.01,
+            "a tela não pode comer a viewport: {viewport}"
+        );
+        assert!(canvas >= tokens::PAINT_CANVAS_MIN_WIDTH - 0.01, "{canvas}");
+        assert!(canvas <= tokens::PAINT_CANVAS_MAX_WIDTH + 0.01);
+        assert!(
+            left + center + right <= 900.0 + 0.01,
+            "layout estourou: {left} + {center} + {right}"
+        );
+    }
+
     #[test]
     fn dock_pane_sizes_always_add_up_to_the_available_space() {
         let orientations = [DockOrientation::Stacked, DockOrientation::SideBySide];
@@ -1095,6 +1317,9 @@ mod tests {
                 assert!(!behavior.is_container_resizable(&tree.tiles, *tile_id));
             }
         }
-        assert_eq!(resizable_containers, 4, "quatro colunas lineares no shell");
+        assert_eq!(
+            resizable_containers, 5,
+            "cinco colunas lineares no shell (raiz, linha, centro, dock, seções)"
+        );
     }
 }

@@ -85,6 +85,16 @@ pub const STATUS_BAR_HEIGHT: f32 = 24.0;
 pub const TIMELINE_HEIGHT: f32 = 56.0;
 pub const PROPERTIES_DEFAULT_WIDTH: f32 = 290.0;
 pub const OUTLINER_DEFAULT_HEIGHT: f32 = 230.0;
+/// Lado de um botão de cor da paleta (alvo de clique visível a 1x).
+pub const SWATCH_SIZE: f32 = 18.0;
+/// Faixa de largura do pano da tela 2D no centro do workspace PAINT.
+///
+/// O piso é derivado do conteúdo mínimo (a tela precisa caber com o xadrez e a
+/// moldura) e o teto impede a tela de engolir a viewport — a divisória entre as
+/// duas é arrastável e mora na memória do motor de painéis (por id).
+pub const PAINT_CANVAS_DEFAULT_WIDTH: f32 = 420.0;
+pub const PAINT_CANVAS_MIN_WIDTH: f32 = 220.0;
+pub const PAINT_CANVAS_MAX_WIDTH: f32 = 1200.0;
 
 // -------------------------------------------------------------- Raios de Cantos
 pub const RADIUS_PILL: CornerRadius = CornerRadius::same(12);

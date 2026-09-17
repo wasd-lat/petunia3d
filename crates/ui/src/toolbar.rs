@@ -290,7 +290,7 @@ fn draw_palette(ui: &mut Ui, state: &mut AppState, tools: &ToolRegistry) {
     match state.workspace {
         Workspace::Model => draw_model_tools(ui, state, tools, grid),
         Workspace::Paint => draw_paint_tools(ui, state, grid),
-        Workspace::Uv => draw_uv_tools(ui, state, grid),
+        Workspace::Uv => draw_paint_tools(ui, state, grid),
         #[cfg(feature = "animation-workspace")]
         Workspace::Animate => draw_animate_tools(ui, state, grid),
     }
@@ -739,30 +739,15 @@ fn draw_animate_tools(ui: &mut egui::Ui, state: &mut AppState, grid: PetuniaTool
     );
 }
 
+/// Paleta do workspace PAINT: os pincéis, formas e o conta-gotas moram aqui
+/// (não no painel de propriedades). O conteúdo canônico é do módulo de pintura —
+/// [`crate::modules_ui::paint_ui::draw_tool_palette`] — e esta função só entrega
+/// a grade resolvida pelo adapter.
 fn draw_paint_tools(ui: &mut egui::Ui, state: &mut AppState, grid: PetuniaToolGridSpec) {
-    grid.show(
-        ui,
-        "petunia-tool-grid-paint",
-        1,
-        |_index, cell, ui| {
-            let active = state.active_tool == "paint";
-            let label = state.t("tools.paint");
-            if PetuniaToolbarButton::new(PetuniaIcon::PaintBrush, &label)
-                .selected(active)
-                .compact(!cell.labeled)
-                .width(cell.width)
-                .tooltip(&label)
-                .show(ui)
-                .clicked()
-            {
-                state.active_tool = "paint".into();
-                state.mark_dirty();
-            }
-        },
-        |_ui| (),
-    );
+    crate::modules_ui::paint_ui::draw_tool_palette(ui, state, grid);
 }
 
+#[allow(dead_code)]
 fn draw_uv_tools(ui: &mut egui::Ui, state: &mut AppState, grid: PetuniaToolGridSpec) {
     grid.show(
         ui,

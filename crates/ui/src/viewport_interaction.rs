@@ -7,7 +7,10 @@ use crate::{
 use egui::{Color32, PointerButton, Pos2, Rect};
 use glam::{Vec2, Vec3};
 use petunia_core::picking::{PickComponent, pick_mesh};
-use petunia_core::{AppState, EditMode, ModalConstraint, ModalKind, SelectMode, Workspace};
+use petunia_core::{
+    AppState, BrushPreviewKind, BrushPreviewStyle, EditMode, ModalConstraint, ModalKind,
+    SelectMode, Workspace,
+};
 use uuid::Uuid;
 
 pub fn draw(
@@ -127,6 +130,16 @@ pub fn draw(
     // Pintura é decidida pelo workspace/pela tool — nunca por um "modo" paralelo.
     let paint = state.workspace == Workspace::Paint || state.active_tool == "paint";
     if paint {
+        // O ponteiro sobre o chrome da viewport (cartão flutuante de ferramenta,
+        // barra contextual, cartão de primitiva) pertence ao controle: a
+        // pincelada não começa ali, senão clicar num slider de cor também
+        // pintaria a malha. O traço **em andamento** continua válido — só a
+        // abertura de um traço novo é bloqueada.
+        if !ctx.input(|i| i.pointer.button_down(PointerButton::Primary))
+            && pointer.is_some_and(|p| pointer_on_viewport_chrome(ctx, p))
+        {
+            return false;
+        }
         return paint_preview(ctx, state, rect, painter, response);
     }
     if state.workspace != Workspace::Model || state.active_tool == "draw_profile" {
@@ -396,13 +409,13 @@ fn paint_preview(
     painter: &egui::Painter,
     response: &egui::Response,
 ) -> bool {
-    let radius_id = egui::Id::new("paint.radius");
+    let radius_id = egui::Id::new("paint.size_drag");
     let cancelled_id = egui::Id::new("paint.cancelled_until_release");
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.finish_paint_stroke(true);
         ctx.data_mut(|d| d.remove::<([f32; 2], [f32; 2])>(egui::Id::new("paint.shape3d")));
         if let Some((_, radius)) = ctx.data_mut(|d| d.get_temp::<(Pos2, f32)>(radius_id)) {
-            state.paint_radius = radius;
+            state.canvas_brush = radius.round().max(1.0) as u32;
             ctx.data_mut(|d| d.remove::<(Pos2, f32)>(radius_id));
         }
         if ctx.input(|i| i.pointer.button_down(PointerButton::Primary)) {
@@ -414,7 +427,10 @@ fn paint_preview(
     }
     if ctx.input(|i| i.pointer.button_released(PointerButton::Primary)) {
         state.finish_paint_stroke(false);
-        ctx.data_mut(|d| d.remove::<bool>(cancelled_id));
+        ctx.data_mut(|d| {
+            d.remove::<bool>(cancelled_id);
+            d.remove::<(f32, f32)>(egui::Id::new("paint.3d_previous_uv"));
+        });
     }
     if ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary)) {
         ctx.data_mut(|d| d.remove::<bool>(cancelled_id));
@@ -429,14 +445,14 @@ fn paint_preview(
         return true;
     };
     if ctx.input(|i| i.key_pressed(egui::Key::F)) {
-        ctx.data_mut(|d| d.insert_temp(radius_id, (pos, state.paint_radius)));
+        ctx.data_mut(|d| d.insert_temp(radius_id, (pos, state.brush_settings().size_px)));
     }
     if let Some((anchor, radius)) = ctx.data_mut(|d| d.get_temp::<(Pos2, f32)>(radius_id)) {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            state.paint_radius = radius;
+            state.canvas_brush = radius.round().max(1.0) as u32;
             ctx.data_mut(|d| d.remove::<(Pos2, f32)>(radius_id));
         } else {
-            state.paint_radius = (radius + (pos.x - anchor.x) * 0.01).clamp(0.01, 100.0);
+            state.canvas_brush = (radius + (pos.x - anchor.x) * 0.5).clamp(1.0, 512.0) as u32;
             if ctx.input(|i| {
                 i.pointer.button_pressed(PointerButton::Primary) || i.key_pressed(egui::Key::Enter)
             }) {
@@ -446,9 +462,9 @@ fn paint_preview(
         painter.text(
             pos + egui::vec2(18.0, 18.0),
             egui::Align2::LEFT_TOP,
-            format!("Raio: {:.2} m", state.paint_radius),
+            format!("{}: {} px", state.t("paint.size"), state.canvas_brush),
             egui::FontId::monospace(14.0),
-            egui::Color32::WHITE,
+            tokens::TEXT_PRIMARY,
         );
         return true;
     }
@@ -466,39 +482,41 @@ fn paint_preview(
     if let Some(hit) = hit
         && let PickComponent::Face(face) = hit.component
     {
-        let normal = state
-            .project
-            .active_mesh()
-            .map(|m| m.face_normal(face))
-            .unwrap_or(Vec3::Y);
-        let tangent = normal
-            .cross(if normal.y.abs() < 0.9 {
-                Vec3::Y
-            } else {
-                Vec3::X
-            })
-            .normalize_or_zero();
-        let bitangent = normal.cross(tangent);
-        for step in 0..48 {
-            let a = step as f32 / 48.0 * std::f32::consts::TAU;
-            let b = (step + 1) as f32 / 48.0 * std::f32::consts::TAU;
-            painter.line_segment(
-                [
-                    screen(
-                        state,
-                        rect,
-                        hit.position
-                            + (tangent * a.cos() + bitangent * a.sin()) * state.paint_radius,
-                    ),
-                    screen(
-                        state,
-                        rect,
-                        hit.position
-                            + (tangent * b.cos() + bitangent * b.sin()) * state.paint_radius,
-                    ),
-                ],
-                egui::Stroke::new(1.5_f32, egui::Color32::WHITE),
-            );
+        let settings = state.brush_settings();
+        let style = BrushPreviewStyle::from_settings(settings, state.paint_color);
+        let center = screen(state, rect, hit.position);
+        let radius = state.brush_world_radius(hit.position);
+        let radius_px = (screen(state, rect, hit.position + Vec3::X * radius).x - center.x).abs();
+        match style.kind {
+            BrushPreviewKind::Ring => {
+                let tint = egui::Color32::from_rgba_unmultiplied(
+                    (style.tint[0].clamp(0.0, 1.0) * 255.0) as u8,
+                    (style.tint[1].clamp(0.0, 1.0) * 255.0) as u8,
+                    (style.tint[2].clamp(0.0, 1.0) * 255.0) as u8,
+                    (style.fill_alpha * 80.0) as u8,
+                );
+                painter.circle_filled(center, radius_px, tint);
+                painter.circle_stroke(center, radius_px, egui::Stroke::new(1.5, tint));
+            }
+            BrushPreviewKind::HollowRing => {
+                painter.circle_stroke(
+                    center,
+                    radius_px,
+                    egui::Stroke::new(1.5, tokens::TEXT_PRIMARY),
+                );
+            }
+            BrushPreviewKind::Crosshair => {
+                let arm = radius_px.max(8.0);
+                painter.line_segment(
+                    [center - egui::vec2(arm, 0.0), center + egui::vec2(arm, 0.0)],
+                    egui::Stroke::new(1.5, tokens::TEXT_PRIMARY),
+                );
+                painter.line_segment(
+                    [center - egui::vec2(0.0, arm), center + egui::vec2(0.0, arm)],
+                    egui::Stroke::new(1.5, tokens::TEXT_PRIMARY),
+                );
+            }
+            BrushPreviewKind::None => {}
         }
         let sample = ctx.input(|i| i.modifiers.alt || i.key_pressed(egui::Key::G));
         if sample {
@@ -524,15 +542,7 @@ fn paint_preview(
             && ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO))
             || ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary))
         {
-            let brush_type = match state.paint_brush_kind {
-                1 => petunia_module_paint::BrushType::Soft,
-                2 => petunia_module_paint::BrushType::Eraser,
-                3 => petunia_module_paint::BrushType::Fill,
-                4 => petunia_module_paint::BrushType::Eyedropper,
-                5 => petunia_module_paint::BrushType::Line,
-                6 => petunia_module_paint::BrushType::Rectangle,
-                _ => petunia_module_paint::BrushType::Pixel,
-            };
+            let brush_type = petunia_core::brush_type_from_kind(state.paint_brush_kind);
             // Formas 3D: press ancora o UV, release confirma o segmento.
             // Transação própria (checkpoint no press; sem sessão de stroke
             // para o finish do topo não carimbar em duplicidade).
@@ -608,20 +618,63 @@ fn paint_preview(
             } else {
                 state.begin_paint_stroke();
                 state.paint_at(hit.position);
-                petunia_module_paint::PaintModule::paint_mesh_3d(
+                let settings = state.brush_settings();
+                let previous_id = egui::Id::new("paint.3d_previous_uv");
+                if let Some(uv) = petunia_module_paint::PaintModule::face_hit_uv(
                     state,
                     face,
                     hit.position,
-                    brush_type,
-                    state.canvas_brush.max(1),
-                    state.paint_strength,
                     state.paint_isolate_selection,
-                );
+                ) {
+                    if let Some((x, y)) = petunia_module_paint::PaintModule::uv_to_px(state, uv) {
+                        let previous = ctx
+                            .data(|d| d.get_temp::<(f32, f32)>(previous_id))
+                            .unwrap_or((x as f32, y as f32));
+                        for (dab_x, dab_y) in
+                            settings.stroke_dabs(previous.0, previous.1, x as f32, y as f32)
+                        {
+                            petunia_module_paint::PaintModule::canvas_brush_with_settings(
+                                state, dab_x, dab_y, settings,
+                            );
+                        }
+                        ctx.data_mut(|d| {
+                            d.insert_temp(previous_id, (x as f32, y as f32));
+                        });
+                    }
+                } else {
+                    let _ = petunia_module_paint::PaintModule::paint_mesh_3d_with_settings(
+                        state,
+                        face,
+                        hit.position,
+                        settings,
+                        state.paint_isolate_selection,
+                    );
+                }
             }
         }
     }
     true
 }
+/// O ponteiro está sobre um chrome de viewport **medido**?
+///
+/// A fonte é a mesma dos testes de QA: [`crate::regions`], alimentada pelo
+/// retângulo real que cada superfície devolveu — não uma estimativa por largura.
+/// Numa eventual defasagem de um frame (a superfície nasce depois), o pior caso
+/// é uma pincelada começar sob o cartão por um frame; preferimos isso a pintar
+/// por cima do controle do usuário.
+fn pointer_on_viewport_chrome(ctx: &egui::Context, pos: Pos2) -> bool {
+    crate::regions::load(ctx).is_some_and(|regions| {
+        [
+            regions.tool_properties,
+            regions.shelf,
+            regions.primitive_card,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|chrome| chrome.contains(pos))
+    })
+}
+
 fn ndc(rect: Rect, p: Pos2) -> Vec2 {
     Vec2::new(
         (p.x - rect.left()) / rect.width() * 2.0 - 1.0,

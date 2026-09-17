@@ -7,7 +7,14 @@
 use egui::{RichText, Ui, Vec2};
 use petunia_core::{AppState, Workspace};
 
+use crate::adapters::popup::{PetuniaPopup, PetuniaPopupLabels, PetuniaPopupStyle};
 use crate::tokens;
+
+/// Id canônico do cartão flutuante de pincel.
+///
+/// Quem reabre o cartão depois de ele perder o foco é a paleta de pintura
+/// (`paint_ui::draw_paint_tool`), via [`PetuniaPopup::reveal`].
+pub const PAINT_CARD_ID: &str = "viewport.paint_brush_card";
 
 const VIEWPORT_MARGIN: f32 = 12.0;
 const MIN_USABLE_WIDTH: f32 = 112.0;
@@ -62,11 +69,18 @@ pub fn layout_for_viewport(viewport: egui::Rect) -> Option<PopoverLayout> {
 
 /// Draws canonical Tool Properties and returns the occupied viewport rectangle.
 pub fn draw(ui: &mut Ui, state: &mut AppState, viewport: egui::Rect) -> Option<egui::Rect> {
-    if state.workspace != Workspace::Model
-        || state.is_active_locked()
-        || state.session.primitive_session.is_some()
-        || !crate::modeling_tool_properties::supports(state)
-    {
+    if state.is_active_locked() || state.session.primitive_session.is_some() {
+        return None;
+    }
+    // O pincel tem cartão próprio: flutuante e **recolhível** (perde o foco no
+    // clique fora, §34), com o corpo vindo do módulo de pintura.
+    if state.active_tool == "paint" {
+        return draw_paint_card(ui, state, viewport);
+    }
+    if state.workspace != Workspace::Model && state.workspace != Workspace::Paint {
+        return None;
+    }
+    if !crate::modeling_tool_properties::supports(state) {
         return None;
     }
     let layout = layout_for_viewport(viewport)?;
@@ -146,6 +160,31 @@ pub fn draw(ui: &mut Ui, state: &mut AppState, viewport: egui::Rect) -> Option<e
         });
 
     window.map(|window| window.response.rect.intersect(viewport))
+}
+
+/// Cartão flutuante do pincel (mesma arquitetura do cartão de ferramenta).
+///
+/// O corpo é o do módulo de pintura ([`crate::modules_ui::paint_ui`]) — não há
+/// segunda cópia dos controles de pincel no produto.
+fn draw_paint_card(ui: &mut Ui, state: &mut AppState, viewport: egui::Rect) -> Option<egui::Rect> {
+    let layout = layout_for_viewport(viewport)?;
+    let title = state.t("paint.brush");
+    let labels = PetuniaPopupLabels {
+        expand: state.t("ui.expand"),
+        collapse: state.t("ui.collapse"),
+    };
+    let popup = PetuniaPopup::panel(PAINT_CARD_ID, title, PetuniaPopupStyle::from_state(state))
+        .at(layout.position)
+        .within(viewport)
+        .width(layout.content_width.max(240.0))
+        .max_height(layout.max_height)
+        .labels(labels);
+    let ctx = ui.ctx().clone();
+    popup
+        .show(&ctx, |ui| {
+            crate::modules_ui::paint_ui::draw_brush_contents(ui, state)
+        })
+        .map(|response| response.rect)
 }
 
 #[cfg(test)]

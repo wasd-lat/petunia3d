@@ -3,6 +3,31 @@
 Todas as alterações notáveis deste projeto são documentadas neste arquivo.
 O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [Unreleased] — Iniciativa Paint (decisões canônicas 2026-09-16)
+
+### Documentação — emenda canônica no Livro Vivo
+- **Paint Workspace (P3D-055)**: registrada a decisão de redesenhar o Paint como "mini Photoshop" dentro do shell congelado do cap. 36 — canvas 2D central + prévia 3D, painel direito com Layers (drag-and-drop), Brush e Effects; `module-uv` preservado como utilitário de "Preparar superfície" (fluxo paint-first, P3D-065).
+- **BrushSettings unificado**: novo descriptor único (`size_px` em pixels de tela, `hardness`, `strength`, `flow`, `spacing`) substituindo a dualidade `canvas_brush` (px) × `paint_radius` (metros); novo pincel **Airbrush** (aditivo contínuo). Stroke engine baseado em dabs (P3D-056, P3D-057).
+- **Effect Stack (P3D-134)**: UX de presets "Add Effect" na pilha de camadas; nodes iniciais consolidados — Pixelate/Posterize/Invert (já no modelo) + Grain/Noise, Levels/Threshold, Brightness/Contrast, Hue/Saturation (lista do cap. 42, a implementar).
+- **Surface Recipe graph (P3D-113)**: modelo de dados começa headless (DAG, sockets, avaliador determinístico, cache); editor visual de nodes adiado para o ciclo pós-Paint.
+- **UV Workspace congelado (P3D-063/064/065)**: edição UV sai da UI V1 durante a iniciativa Paint (conflito de `f.selected` com máscaras P3D-132; P3D-063 já exigia design conjunto com Materials/Paint); redesign completo marcado para pós-Paint. Shell `MODEL / PAINT` preservado; capítulo 36 não reaberto.
+- **Branches de implementação**: `paint/core-engine` (motor, descriptors, effects, graph headless) e `paint/ui-redesign` (layout mini-Photoshop, painel Layers/Brush/Effects).
+- **Drift conhecido no mapa de componentes**: `docs/public/ui-map.json` (site congelado) aponta sete nós para símbolos extintos desde o commit base `cbc267c` (não é deste trabalho); `docs-check` para nesse passo e a decisão de descongelar está registrada em `docs/audits/paint/00-ui-map-drift.md`.
+
+### Implementado — workspace PAINT (layout mini Photoshop)
+
+O módulo de pintura deixou de ser "um painel na coluna da direita" e passou a ser uma **superfície fatiada pelas regiões do shell** (`workspaces::WorkspaceLayoutProfile` diz o que cada região mostra).
+
+- **Ferramentas na coluna esquerda**: os oito pincéis (Pixel, Soft, Airbrush, Eraser, Line, Rectangle, Fill, Eyedropper) saem do painel de propriedades e viram a paleta do workspace, em três grupos (Pincéis · Formas · Amostra) desenhados pela mesma grade do adapter do Model.
+- **Centro lado a lado**: viewport 3D à esquerda e tela 2D à direita, com **divisória arrastável** — a tela 2D é o paine `PetuniaPane::PaintCanvas` do `adapters::tile_layout` (o produto não compõe mais o centro com `egui::Panel`), então a divisória, os mínimos das duas superfícies (a viewport nunca cede abaixo de `MIN_VIEWPORT_WIDTH`; numa janela estreita quem cede é a tela) e a largura persistida saem do adapter, junto com o resto do macro-layout; o produto só declara o perfil do workspace. As duas visíveis ao mesmo tempo — pinta-se no 2D vendo o resultado no 3D — e a barra de contexto continua sendo chrome da coluna 3D. A tela tem xadrez de transparência, grade de pixels contextual, traço interpolado por `stroke_dabs`, balde e conta-gotas no clique.
+- **Pincel em cartão flutuante (§34)**: o novo adapter `adapters::popup::PetuniaPopup` cria a superfície flutuante com o contrato que faltava — **perde o foco no clique fora e no Escape**, sem exigir Enter/Espaço. Dois modos: `Panel` (recolhe para o cabeçalho e volta pelo chevron) e `Menu` (fecha). O cartão do pincel usa `Panel`: recolhe quando o usuário toca a tela/canvas, e a paleta o reabre ao escolher a ferramenta (`PetuniaPopup::reveal`). O corpo vem do módulo de pintura — não há segunda cópia dos controles.
+- **Dock do PAINT = Camadas (topo) + Inspector (base)**: as seções passam a ter o rótulo do conteúdo do workspace, e a árvore de objetos (Outliner) vira uma seção *Scene* recolhível dentro da lista de camadas — uma rolagem só para as duas.
+- **Camadas como camadas de pintura**: modo de mistura (Normal/Multiply/Add/Screen) e opacidade da camada ativa em um bloco de propriedades, lista reordenável por arrasto (`PetuniaDragList`, sem setas ↑/↓), olho por linha, duplicar (com id novo) e resumo inline quando opacidade/mistura saem do padrão; os parâmetros do efeito aparecem só para a camada ativa.
+- **Hierarquia de cor**: em cima a **cor atual** (um seletor, com o hex ao lado), embaixo a **paleta curada**, com `+`/`Remover` explícitos. Mudar a cor não escreve na paleta — antes cada quadro com o seletor aberto empurrava um tom intermediário (`changed()` dispara a cada arrasto) e a paleta virava um borrão de tons que o usuário nunca escolheu; os botões da paleta são botões de cor, não um seletor em cascata por cor.
+- **Preparar superfície**: as projeções (Planar · Box · Auto Unwrap) ficam no cartão de pincel, no lugar do editor UV que a V1 aposentou; o workspace UV legado cai na mesma composição, sem editor interativo.
+- **Traço e preview coerentes**: o anel na viewport é a pegada real do dab (`BrushPreviewStyle` + `brush_world_radius`) e o arrasto com F ajusta o **tamanho em pixels** — o mesmo número que o carimbo usa.
+- **Atalhos por keymap**: `[`/`]` ajustam tamanho e `Shift+[`/`Shift+]` a dureza; nada de tecla física no código de UI.
+
 ## [Unreleased] — UI/UX, Responsiveness, Performance & Architecture Remediation (Waves 0–9)
 
 ### Adicionado

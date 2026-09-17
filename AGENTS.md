@@ -209,7 +209,7 @@ Cada função tem **um único modelo autorizado**. Os agentes de função vivem 
 | Função | Modelo exigido | Agente |
 |---|---|---|
 | Matemática/engenharia (algoritmos, malha, UV math, WGSL, compositing, graph) | `opencode-go/deepseek-v4-pro` | `math-core` |
-| UI/UX (painéis, tokens, componentes, layout, i18n de interface) | `opencode-go/grok-4.6` | `ui-ux` |
+| UI/UX (painéis, tokens, componentes, layout, i18n de interface) | `opencode-go/grok-4.6` or `openai/gpt-5.6-luna`| `ui-ux` |
 | Review visual (screenshots, regressão visual) | `opencode-go/minimax-m3` | `vision` |
 | Execução mecânica (testes, migrações, scaffolding, gates locais) | `opencode-go/deepseek-v4-flash` | `worker` |
 | Revisão crítica (correctness, segurança, arquitetura, vereditos) | `opencode-go/gpt-5.6-luna` | `reviewer` |

@@ -1,10 +1,19 @@
-//! Perfis de composição por workspace (Wave 3 — §6).
+//! Perfis de composição por workspace (Wave 3 — §6; Wave 8 — perfil PAINT).
 //!
 //! Fonte única da verdade sobre o que muda quando o usuário troca de workspace.
-//! A V1 congela `MODEL / PAINT / UV` (capítulo 36); o workspace de animação de
-//! P3D-066 só entra com a feature `animation-workspace`. Workspaces compartilham
-//! projeto, seleção e undo; só a composição do shell muda: paleta de ferramentas,
-//! centro, painel inferior, aba padrão do inspector e overlays da viewport.
+//! A V1 congela `MODEL / PAINT` (capítulo 36, adendo 2026-09-16); o workspace de
+//! animação de P3D-066 só entra com a feature `animation-workspace`. Workspaces
+//! compartilham projeto, seleção e undo; só a composição do shell muda: paleta de
+//! ferramentas, centro, seções do dock e overlays da viewport.
+//!
+//! ## Centro e dock por workspace
+//!
+//! O perfil não descreve apenas a paleta esquerda: ele diz **o que cada seção do
+//! dock mostra** e **se o centro é a tela 2D**. É esse campo que permite o
+//! workspace PAINT ser um ambiente de pintura (tela no centro, ferramentas na
+//! esquerda, camadas e pincel no dock) sem criar um segundo shell: o
+//! `adapters::tile_layout` continua dono da geometria, e o desenho de cada seção
+//! é escolhido aqui.
 
 use petunia_core::Workspace;
 
@@ -13,13 +22,24 @@ use petunia_core::Workspace;
 pub enum ToolPaletteKind {
     /// Modelagem: seleção, transform, inspeção + malha (Edit).
     Modeling,
-    /// Pintura: pincel, apagador, conta-gotas.
+    /// Pintura: pincéis, formas e conta-gotas.
     Paint,
-    /// UV: seleção + projeção.
-    Uv,
     /// Animação: seleção + transform de pose (feature `animation-workspace`).
     #[allow(dead_code)]
     Animation,
+}
+
+/// Conteúdo de uma seção do dock (topo ou base).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DockSectionKind {
+    /// Árvore de objetos/coleções do projeto.
+    Scene,
+    /// Pilha de camadas de pintura (efeitos, opacidade, blend, DnD).
+    Layers,
+    /// Inspector do objeto (transform, geometria, modificadores, display).
+    Properties,
+    /// Controles de pincel, cor, canal e tela.
+    Brush,
 }
 
 /// Composição da área central por workspace.
@@ -27,8 +47,8 @@ pub enum ToolPaletteKind {
 pub enum CenterKind {
     /// Viewport 3D único em toda a área central.
     Viewport3D,
-    /// Editor UV 2D + prévia 3D lado a lado (ou alternados em janela estreita).
-    UvSplit,
+    /// Tela 2D protagonista com a viewport 3D em aba alternativa (PAINT).
+    Canvas2D,
 }
 
 /// Painel inferior fixo por workspace (além da overlay flutuante).
@@ -46,10 +66,25 @@ pub struct WorkspaceLayoutProfile {
     pub left_tools: ToolPaletteKind,
     pub center: CenterKind,
     pub bottom: BottomPaneKind,
+    /// Conteúdo da seção superior do dock.
+    pub dock_top: DockSectionKind,
+    /// Conteúdo da seção inferior do dock.
+    pub dock_bottom: DockSectionKind,
+    /// Chave i18n do rótulo da seção superior (abas do dock e a11y).
+    pub dock_top_label: &'static str,
+    /// Chave i18n do rótulo da seção inferior.
+    pub dock_bottom_label: &'static str,
     /// Aba do inspector quando o workspace usa abas persistentes (Model).
     pub default_inspector_tab: &'static str,
     /// Shelf contextual flutuante sobre a viewport.
     pub overlay_shelf: bool,
+}
+
+impl WorkspaceLayoutProfile {
+    /// O centro deste workspace é a tela 2D (com a 3D em aba alternativa)?
+    pub fn paints_on_canvas(&self) -> bool {
+        self.center == CenterKind::Canvas2D
+    }
 }
 
 const PROFILES: [WorkspaceLayoutProfile; Workspace::COUNT] = [
@@ -58,35 +93,64 @@ const PROFILES: [WorkspaceLayoutProfile; Workspace::COUNT] = [
         left_tools: ToolPaletteKind::Modeling,
         center: CenterKind::Viewport3D,
         bottom: BottomPaneKind::None,
+        dock_top: DockSectionKind::Scene,
+        dock_bottom: DockSectionKind::Properties,
+        dock_top_label: "ui.outliner",
+        dock_bottom_label: "ui.properties",
         default_inspector_tab: "object",
         overlay_shelf: true,
     },
     WorkspaceLayoutProfile {
         id: Workspace::Paint,
         left_tools: ToolPaletteKind::Paint,
-        center: CenterKind::Viewport3D,
+        center: CenterKind::Canvas2D,
         bottom: BottomPaneKind::None,
-        default_inspector_tab: "object",
-        overlay_shelf: true,
-    },
-    WorkspaceLayoutProfile {
-        id: Workspace::Uv,
-        left_tools: ToolPaletteKind::Uv,
-        center: CenterKind::UvSplit,
-        bottom: BottomPaneKind::None,
+        dock_top: DockSectionKind::Layers,
+        // O pincel mora no cartão flutuante da ferramenta (§34), não no dock:
+        // a coluna da direita é a pilha de camadas + o inspector do objeto.
+        dock_bottom: DockSectionKind::Properties,
+        dock_top_label: "paint.layers",
+        dock_bottom_label: "ui.properties",
         default_inspector_tab: "object",
         overlay_shelf: false,
     },
+    // Workspace UV mantido só para projetos legados: a edição UV saiu da UI V1
+    // (adendo de foundations/36) e o antigo `CenterKind::UvSplit` morreu junto.
+    // O perfil continua existindo porque todo workspace compilado tem um.
+    WorkspaceLayoutProfile {
+        id: Workspace::Uv,
+        left_tools: ToolPaletteKind::Paint,
+        center: CenterKind::Viewport3D,
+        bottom: BottomPaneKind::None,
+        dock_top: DockSectionKind::Layers,
+        dock_bottom: DockSectionKind::Brush,
+        dock_top_label: "paint.layers",
+        dock_bottom_label: "paint.brush",
+        default_inspector_tab: "object",
+        overlay_shelf: false,
+    },
+    // Nota: o UV legado mantém o conteúdo de pintura nas duas seções porque ele
+    // não tem cartão flutuante (não é um workspace de trabalho da V1).
     #[cfg(feature = "animation-workspace")]
     WorkspaceLayoutProfile {
         id: Workspace::Animate,
         left_tools: ToolPaletteKind::Animation,
         center: CenterKind::Viewport3D,
         bottom: BottomPaneKind::Timeline,
+        dock_top: DockSectionKind::Scene,
+        dock_bottom: DockSectionKind::Properties,
+        dock_top_label: "ui.outliner",
+        dock_bottom_label: "ui.properties",
         default_inspector_tab: "object",
         overlay_shelf: true,
     },
 ];
+
+/// Workspaces expostos no chrome atual. UV permanece disponível no domínio para
+/// compatibilidade de projetos, mas sua edição não faz parte da UI V1.
+pub fn visible_workspaces() -> &'static [Workspace] {
+    &[Workspace::Model, Workspace::Paint]
+}
 
 /// Perfil canônico do workspace (existe um perfil para cada workspace compilado).
 pub fn profile_for(workspace: Workspace) -> &'static WorkspaceLayoutProfile {
@@ -108,13 +172,30 @@ mod tests {
     }
 
     #[test]
-    fn uv_is_the_only_split_center() {
-        for ws in Workspace::all() {
-            assert_eq!(
-                profile_for(ws).center == CenterKind::UvSplit,
-                ws == Workspace::Uv
-            );
-        }
+    fn legacy_uv_uses_the_normal_viewport() {
+        assert_eq!(profile_for(Workspace::Uv).center, CenterKind::Viewport3D);
+        assert!(!profile_for(Workspace::Uv).paints_on_canvas());
+    }
+
+    #[test]
+    fn paint_is_the_canvas_workspace() {
+        let paint = profile_for(Workspace::Paint);
+        assert!(paint.paints_on_canvas(), "a tela 2D divide o centro");
+        assert_eq!(paint.dock_top, DockSectionKind::Layers);
+        assert_eq!(
+            paint.dock_bottom,
+            DockSectionKind::Properties,
+            "o pincel é cartão flutuante: o dock fica com camadas + inspector"
+        );
+        assert_eq!(paint.left_tools, ToolPaletteKind::Paint);
+    }
+
+    #[test]
+    fn model_keeps_the_scene_and_the_inspector() {
+        let model = profile_for(Workspace::Model);
+        assert_eq!(model.dock_top, DockSectionKind::Scene);
+        assert_eq!(model.dock_bottom, DockSectionKind::Properties);
+        assert!(!model.paints_on_canvas());
     }
 
     #[cfg(feature = "animation-workspace")]
@@ -129,22 +210,13 @@ mod tests {
     }
 
     #[test]
-    fn v1_core_workspaces_are_always_present() {
-        // Contrato congelado do capítulo 36: MODEL / PAINT / UV sempre existem.
-        // O workspace de animação (P3D-066) só aparece com a feature.
-        let all = Workspace::all();
-        for ws in [Workspace::Model, Workspace::Paint, Workspace::Uv] {
-            assert!(all.contains(&ws), "{ws:?} deve existir na V1");
-        }
-        #[cfg(not(feature = "animation-workspace"))]
-        assert_eq!(all.len(), 3, "sem a feature, só os três workspaces da V1");
-        #[cfg(feature = "animation-workspace")]
-        assert_eq!(all.len(), 4, "com a feature, o workspace de animação entra");
+    fn v1_visible_workspaces_are_model_and_paint() {
+        assert_eq!(visible_workspaces(), &[Workspace::Model, Workspace::Paint]);
     }
 
     #[test]
     fn tool_palettes_are_distinct_per_workspace() {
-        let kinds: Vec<ToolPaletteKind> = Workspace::all()
+        let kinds: Vec<ToolPaletteKind> = visible_workspaces()
             .iter()
             .map(|ws| profile_for(*ws).left_tools)
             .collect();

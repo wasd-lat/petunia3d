@@ -155,11 +155,14 @@ uma árvore de layout:
 PetuniaShellLayout  →  PetuniaLayoutAdapter::tree  →  egui_tiles::Tree
 ```
 
-- `PetuniaPane` são os cinco painéis reais (`Tools`, `Viewport`, `Parts`,
-  `Context`, `Bottom`); cada um tem um **slot autorizado**.
+- `PetuniaPane` são os painéis reais (`Tools`, `Viewport`, `PaintCanvas`,
+  `DockHeader`, `Parts`, `Context`, `Bottom`); cada um tem um **slot autorizado**.
 - Nada fecha e nada arrasta: não existe docking livre, por construção e por teste.
 - `clamped(available)` garante o mínimo da viewport **antes** de a árvore nascer:
-  as laterais cedem primeiro (viewport-first).
+  as laterais cedem primeiro (viewport-first) e, com a tela 2D habilitada
+  (`canvas_enabled`, workspace PAINT), quem cede à viewport é a **tela**
+  (`center_widths`); numa janela estreita a divisória do centro nunca esmaga a
+  coluna 3D.
 - `show` devolve as larguras finais **em pixels** para o produto persistir — nunca
   a árvore da crate.
 

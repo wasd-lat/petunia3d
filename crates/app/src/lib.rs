@@ -562,6 +562,42 @@ impl Core {
                 let _ = self.state.dispatch(&petunia_core::SelectLinkedCmd);
             }
             "paint.paint" => self.set_tool("paint", None),
+            "paint.size_decrease"
+            | "paint.size_increase"
+            | "paint.hardness_decrease"
+            | "paint.hardness_increase"
+                if self.state.workspace == petunia_core::Workspace::Paint
+                    || self.state.active_tool == "paint" =>
+            {
+                let size_step = 1.0;
+                let hardness_step = 0.05;
+                match action.as_str() {
+                    "paint.size_decrease" => {
+                        self.state.canvas_brush = self
+                            .state
+                            .canvas_brush
+                            .saturating_sub(size_step as u32)
+                            .max(1);
+                    }
+                    "paint.size_increase" => {
+                        self.state.canvas_brush = self
+                            .state
+                            .canvas_brush
+                            .saturating_add(size_step as u32)
+                            .min(512);
+                    }
+                    "paint.hardness_decrease" => {
+                        self.state.brush_hardness =
+                            (self.state.brush_hardness - hardness_step).clamp(0.0, 1.0);
+                    }
+                    "paint.hardness_increase" => {
+                        self.state.brush_hardness =
+                            (self.state.brush_hardness + hardness_step).clamp(0.0, 1.0);
+                    }
+                    _ => {}
+                }
+                self.state.mark_dirty();
+            }
             _ => {}
         }
     }
@@ -657,6 +693,8 @@ fn to_config_key(p: PhysicalKey) -> Option<petunia_config::keybinds::winit_keys:
         PhysicalKey::Code(WKey::End) => C::End,
         PhysicalKey::Code(WKey::Escape) => C::Escape,
         PhysicalKey::Code(WKey::Enter) => C::Enter,
+        PhysicalKey::Code(WKey::BracketLeft) => C::BracketLeft,
+        PhysicalKey::Code(WKey::BracketRight) => C::BracketRight,
         _ => return None,
     };
     Some(c)
