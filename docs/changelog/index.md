@@ -13,6 +13,7 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 - **UV Workspace congelado (P3D-063/064/065)**: edição UV sai da UI V1 durante a iniciativa Paint (conflito de `f.selected` com máscaras P3D-132; P3D-063 já exigia design conjunto com Materials/Paint); redesign completo marcado para pós-Paint. Shell `MODEL / PAINT` preservado; capítulo 36 não reaberto.
 - **Branches de implementação**: `paint/core-engine` (motor, descriptors, effects, graph headless) e `paint/ui-redesign` (layout mini-Photoshop, painel Layers/Brush/Effects).
 - **Drift conhecido no mapa de componentes**: `docs/public/ui-map.json` (site congelado) aponta sete nós para símbolos extintos desde o commit base `cbc267c` (não é deste trabalho); `docs-check` para nesse passo e a decisão de descongelar está registrada em `docs/audits/paint/00-ui-map-drift.md`.
+- **Integração no `main`**: as branches de Paint entraram em `main` por fast-forward (`cbc267c` → `d8bbf57`) — `paint/core-engine` já era ancestral e o commit do redesenho de UI veio junto. Na árvore integrada a suíte completa passa: `cargo test --workspace` (61 alvos, 789 testes, 0 falhas), `clippy --workspace --all-targets -D warnings`, `fmt --check`, `arch-check`, `ui-guard --strict` e `bible-check`; só `docs-check` segue vermelho no passo do mapa congelado.
 
 ### Implementado — workspace PAINT (layout mini Photoshop)
 
