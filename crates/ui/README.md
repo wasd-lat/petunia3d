@@ -1,4 +1,8 @@
-# Crate `petunia_ui` (`crates/ui/`)
+# Crate `petunia_ui` (`crates/ui/`) — [ARQUIVADA / LEGACY]
+
+> ⚠️ **Status: Interface legada arquivada.**  
+> A interface principal do Petunia3D foi promovida para o frontend declarativo moderno em Slint (`crates/ui-slint`).  
+> Esta crate permanece no repositório como implementação de referência histórica e fallback acessível via `--legacy-egui` ou variável de ambiente `PETUNIA_LEGACY_EGUI=1`.
 
 Camada de apresentação e interface gráfica construída com `egui`:
 - Barra de cabeçalho superior com seleção de workspaces por pílulas (MODEL, PAINT, UV, EXPORT).

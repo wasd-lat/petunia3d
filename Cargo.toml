@@ -16,6 +16,7 @@ members = [
     "crates/module-uv",
     "crates/module-assets",
     "crates/ui",
+    "crates/ui-slint",
     "crates/app",
     "crates/xtask",
     "crates/cli",
@@ -93,6 +94,7 @@ petunia_module_paint = { path = "crates/module-paint" }
 petunia_module_uv = { path = "crates/module-uv" }
 petunia_module_assets = { path = "crates/module-assets" }
 petunia_ui = { path = "crates/ui" }
+petunia_ui_slint = { path = "crates/ui-slint" }
 petunia_app = { path = "crates/app" }
 petunia_cli = { path = "crates/cli" }
 petunia_ffi = { path = "crates/ffi" }
@@ -124,6 +126,7 @@ default = []
 animation-workspace = ["petunia_app/animation-workspace"]
 
 [dependencies]
+petunia_ui_slint = { workspace = true }
 petunia_app = { workspace = true }
 petunia_mcp = { workspace = true }
 env_logger = "0.11"

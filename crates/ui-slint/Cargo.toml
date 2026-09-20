@@ -1,0 +1,48 @@
+[package]
+name = "petunia_ui_slint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+petunia_config = { workspace = true }
+petunia_core = { workspace = true }
+petunia_project = { workspace = true }
+petunia_render = { workspace = true }
+petunia_render_wgpu = { path = "../render-wgpu" }
+uuid = { workspace = true }
+glam = { workspace = true }
+wgpu = { workspace = true }
+pollster = "0.4"
+rfd = "=0.17.2"
+slint = { version = "~1.18", default-features = false, features = [
+    "compat-1-18",
+    "std",
+    "accessibility",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-femtovg-wgpu",
+    "renderer-software",
+    "unstable-wgpu-30",
+    "raw-window-handle-06",
+] }
+[build-dependencies]
+slint-build = { version = "~1.18", default-features = false, features = ["compat-1-18"] }
+lucide-slint = "=1.47.0"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+default = []
+animation-workspace = ["petunia_core/animation-workspace"]
+# Mantém a dependência GPL do viewport-lib fora do build padrão até a integração real.
+viewport-lib-backend = ["dep:viewport-lib"]
+
+[dependencies.viewport-lib]
+version = "=0.22.0"
+default-features = false
+features = ["wgpu30"]
+optional = true

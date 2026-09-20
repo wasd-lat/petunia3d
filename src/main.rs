@@ -46,5 +46,13 @@ fn main() {
         }
         i += 1;
     }
-    petunia_app::run();
+
+    // A interface moderna em Slint é a UI principal. A interface egui foi arquivada
+    // e permanece acessível para transição via flag --legacy-egui ou env PETUNIA_LEGACY_EGUI=1.
+    if std::env::var("PETUNIA_LEGACY_EGUI").is_ok() || args.iter().any(|a| a == "--legacy-egui") {
+        petunia_app::run();
+    } else if let Err(e) = petunia_ui_slint::run() {
+        eprintln!("petunia3d: {e}");
+        std::process::exit(1);
+    }
 }
