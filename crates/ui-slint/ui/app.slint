@@ -542,6 +542,13 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-duplicate: "";
     in-out property <string> label-theme: "";
     in-out property <string> label-place-in-scene: "";
+    in-out property <bool> recovery-open: false;
+    in-out property <string> recovery-title: "";
+    in-out property <string> recovery-body: "";
+    in-out property <string> recovery-detail: "";
+    in-out property <string> recovery-recover: "";
+    in-out property <string> recovery-keep: "";
+    in-out property <string> recovery-discard: "";
     in-out property <string> label-asset-library: "";
     in-out property <string> label-preferences: "";
     in-out property <string> shell-info: "";
@@ -613,6 +620,9 @@ export component PetuniaSlintShell inherits Window {
     callback reset-camera-requested;
     callback save-active-as-asset-requested;
     callback place-asset-requested(string);
+    callback recovery-recover-requested;
+    callback recovery-keep-requested;
+    callback recovery-discard-requested;
     callback paint-color-changed(float, float, float);
     callback brush-size-changed(float);
     callback brush-opacity-changed(float);
@@ -2115,6 +2125,81 @@ export component PetuniaSlintShell inherits Window {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Overlay: recuperação de autosave (P3D-002 §Recuperação segura).
+        if recovery-open: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            background: DesignTokens.scrim;
+
+            Rectangle {
+                width: 460px;
+                height: recovery-layout.preferred-height;
+                x: (parent.width - self.width) / 2;
+                y: 96px;
+                border-radius: 8px;
+                background: DesignTokens.surface-raised;
+                border-width: 1px;
+                border-color: DesignTokens.border;
+
+                recovery-layout := VerticalLayout {
+                    padding: 18px;
+                    spacing: 10px;
+
+                    Text {
+                        text: root.recovery-title;
+                        color: DesignTokens.text-primary;
+                        font-size: 14px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.recovery-body;
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: root.recovery-detail;
+                        color: DesignTokens.text-muted;
+                        font-size: 10px;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 30px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 4px;
+                            background: DesignTokens.surface;
+                            border-width: 1px;
+                            border-color: DesignTokens.border;
+                            Text { text: root.recovery-discard; color: DesignTokens.danger; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.recovery-discard-requested(); } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 4px;
+                            background: DesignTokens.surface;
+                            border-width: 1px;
+                            border-color: DesignTokens.border;
+                            Text { text: root.recovery-keep; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.recovery-keep-requested(); } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 4px;
+                            background: DesignTokens.accent;
+                            Text { text: root.recovery-recover; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.recovery-recover-requested(); } }
                         }
                     }
                 }

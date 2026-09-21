@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **599**.
+Total de chaves de localização cadastradas: **604**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -583,6 +583,11 @@ Total de chaves de localização cadastradas: **599**.
 | `ui.place_in_scene` | Place in scene | Colocar na cena |
 | `ui.project_asset_library` | Project Asset Library | Biblioteca de Assets do Projeto |
 | `ui.properties` | Properties | Propriedades |
+| `ui.recovery_body` | Petunia3D found an autosave snapshot that is newer than the saved project. The previous session did not close cleanly. | O Petunia3D encontrou um snapshot de autosave mais recente que o projeto salvo. A sessão anterior não foi encerrada corretamente. |
+| `ui.recovery_discard` | Discard snapshots | Descartar snapshots |
+| `ui.recovery_keep` | Open saved project | Abrir projeto salvo |
+| `ui.recovery_recover` | Recover snapshot | Recuperar snapshot |
+| `ui.recovery_title` | Recover unsaved work? | Recuperar trabalho não salvo? |
 | `ui.redock` | Re-dock the Properties panel into the sidebar | Reancorar o Painel de Propriedades na barra lateral |
 | `ui.refs` | Reference images | Imagens de referência |
 | `ui.rename` | Rename | Renomear |

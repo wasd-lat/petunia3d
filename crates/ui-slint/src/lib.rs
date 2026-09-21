@@ -298,6 +298,13 @@ pub struct ShellViewModel {
     pub label_albedo_base_color: String,
     pub label_theme: String,
     pub label_place_in_scene: String,
+    pub recovery_open: bool,
+    pub recovery_title: String,
+    pub recovery_body: String,
+    pub recovery_detail: String,
+    pub recovery_recover: String,
+    pub recovery_keep: String,
+    pub recovery_discard: String,
     pub label_asset_library: String,
     pub label_preferences: String,
     pub shell_info: String,
@@ -441,6 +448,13 @@ impl ShellViewModel {
             label_albedo_base_color: String::new(),
             label_theme: String::new(),
             label_place_in_scene: String::new(),
+            recovery_open: false,
+            recovery_title: String::new(),
+            recovery_body: String::new(),
+            recovery_detail: String::new(),
+            recovery_recover: String::new(),
+            recovery_keep: String::new(),
+            recovery_discard: String::new(),
             label_asset_library: String::new(),
             label_preferences: String::new(),
             shell_info: String::new(),
@@ -570,6 +584,10 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub context_menu: Option<ContextMenuState>,
     /// Menu da barra superior aberto, se houver.
     pub menu_open: Option<MenuKind>,
+    /// Autosave rotativo do shell (P3D-002). Nunca sobrescreve o arquivo oficial.
+    pub autosave: petunia_core::AutosaveService,
+    /// Snapshot de recuperação detectado no arranque, aguardando decisão.
+    pub pending_recovery: Option<petunia_core::RecoveryInfo>,
 }
 
 /// Menu de contexto do Outliner aberto sobre uma linha do painel Parts.
@@ -680,6 +698,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             rename_draft: None,
             context_menu: None,
             menu_open: None,
+            autosave: petunia_core::AutosaveService::default(),
+            pending_recovery: None,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -1232,6 +1252,57 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             other => self.execute_core_command(other).is_ok(),
         }
+    }
+
+    /// Um passo de autosave, respeitando intervalo e dirty state do domínio.
+    ///
+    /// Retorna `true` quando um snapshot foi gravado. Autosave nunca limpa o
+    /// dirty state nem toca no arquivo oficial.
+    pub fn autosave_tick(&mut self) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let dirty = self.state.is_document_dirty();
+        let path = self.state.project.project_path.clone();
+        let path_ref = path.as_deref().map(std::path::Path::new);
+        matches!(
+            self.autosave
+                .tick(now, dirty, &self.state.project.project, path_ref),
+            Some(Ok(_))
+        )
+    }
+
+    /// Carrega o snapshot de recuperação detectado no arranque.
+    pub fn recover_pending(&mut self) -> bool {
+        let Some(info) = self.pending_recovery.take() else {
+            return false;
+        };
+        self.apply(UiIntent::OpenProjectFrom(info.snapshot_path));
+        self.state
+            .set_status(format!("Recovered snapshot of '{}'", info.project_name));
+        true
+    }
+
+    /// Mantém o projeto oficial e encerra o aviso de recuperação.
+    pub fn keep_saved_project(&mut self) -> bool {
+        self.pending_recovery.take().is_some()
+    }
+
+    /// Descarta os snapshots de recuperação e o marcador de sessão.
+    pub fn discard_pending_recovery(&mut self) -> bool {
+        if self.pending_recovery.take().is_none() {
+            return false;
+        }
+        let path = self.state.project.project_path.clone();
+        let path_ref = path.as_deref().map(std::path::Path::new);
+        match petunia_core::AutosaveService::discard_recovery(path_ref) {
+            Ok(()) => self.state.set_status("Recovery snapshots discarded"),
+            Err(error) => self
+                .state
+                .set_status(format!("Failed to discard snapshots: {error}")),
+        }
+        true
     }
 
     /// Instancia uma cópia do asset da biblioteca no cursor 3D.
@@ -1979,6 +2050,20 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_albedo_base_color = translated(petunia_config::text_id::UI_ALBEDO_BASE_COLOR);
         vm.label_theme = translated(petunia_config::text_id::UI_THEME);
         vm.label_place_in_scene = translated(petunia_config::text_id::UI_PLACE_IN_SCENE);
+        if let Some(info) = &self.pending_recovery {
+            vm.recovery_open = true;
+            vm.recovery_title = translated(petunia_config::text_id::UI_RECOVERY_TITLE);
+            vm.recovery_body = translated(petunia_config::text_id::UI_RECOVERY_BODY);
+            vm.recovery_detail = format!(
+                "{}  ·  snapshot {}  ·  {}",
+                info.project_name,
+                info.snapshot_time,
+                info.snapshot_path.display()
+            );
+            vm.recovery_recover = translated(petunia_config::text_id::UI_RECOVERY_RECOVER);
+            vm.recovery_keep = translated(petunia_config::text_id::UI_RECOVERY_KEEP);
+            vm.recovery_discard = translated(petunia_config::text_id::UI_RECOVERY_DISCARD);
+        }
         vm.label_asset_library = translated(petunia_config::text_id::UI_ASSETS);
         vm.label_preferences = translated(petunia_config::text_id::MENU_PREFERENCES);
         // A linha de rodapé das preferências informa o keymap e o idioma REAIS em uso.
@@ -2243,14 +2328,65 @@ pub fn run() -> Result<(), slint::PlatformError> {
     window.set_has_gpu_viewport(has_gpu_viewport);
 
     let bridge = Arc::new(Mutex::new(SlintUiBridge::new(state, viewport)));
+
+    // Ciclo de vida do autosave (P3D-002): marcador de sessão no arranque,
+    // detecção de encerramento sujo e remoção no fechamento limpo.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    {
+        let mut bridge = bridge
+            .lock()
+            .expect("Slint bridge mutex poisoned during startup");
+        bridge.pending_recovery = petunia_core::AutosaveService::detect_recovery(None);
+        let project_name = bridge
+            .state
+            .project
+            .project_path
+            .clone()
+            .unwrap_or_else(|| "Untitled".to_string());
+        let path = bridge.state.project.project_path.clone();
+        if let Err(error) = petunia_core::AutosaveService::create_session_lock(
+            path.as_deref().map(std::path::Path::new),
+            &project_name,
+            now_secs,
+        ) {
+            eprintln!("petunia3d: falha ao gravar marcador de sessão: {error}");
+        }
+    }
+
     connect_callbacks(&window, Arc::clone(&bridge));
     let vm = bridge
         .lock()
         .expect("Slint bridge mutex poisoned during startup")
         .view_model();
     sync_window_properties(&window, &vm);
+
+    // Um passo de autosave a cada 30s; o intervalo real (120s) e o dirty state
+    // são decididos pelo domínio, então o timer só oferece a oportunidade.
+    let autosave_bridge = Arc::clone(&bridge);
+    let autosave_timer = slint::Timer::default();
+    autosave_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_secs(30),
+        move || {
+            if let Ok(mut bridge) = autosave_bridge.lock() {
+                bridge.autosave_tick();
+            }
+        },
+    );
+
     println!("Petunia3D window ready");
-    window.run()
+    let result = window.run();
+
+    drop(autosave_timer);
+    let path = bridge
+        .lock()
+        .map(|bridge| bridge.state.project.project_path.clone())
+        .unwrap_or(None);
+    petunia_core::AutosaveService::remove_session_lock(path.as_deref().map(std::path::Path::new));
+    result
 }
 
 fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
@@ -2359,6 +2495,13 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_label_albedo_base_color(vm.label_albedo_base_color.as_str().into());
     window.set_label_theme(vm.label_theme.as_str().into());
     window.set_label_place_in_scene(vm.label_place_in_scene.as_str().into());
+    window.set_recovery_open(vm.recovery_open);
+    window.set_recovery_title(vm.recovery_title.as_str().into());
+    window.set_recovery_body(vm.recovery_body.as_str().into());
+    window.set_recovery_detail(vm.recovery_detail.as_str().into());
+    window.set_recovery_recover(vm.recovery_recover.as_str().into());
+    window.set_recovery_keep(vm.recovery_keep.as_str().into());
+    window.set_recovery_discard(vm.recovery_discard.as_str().into());
     window.set_label_asset_library(vm.label_asset_library.as_str().into());
     window.set_label_preferences(vm.label_preferences.as_str().into());
     window.set_shell_info(vm.shell_info.as_str().into());
@@ -3100,6 +3243,46 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 if let Some(frame) = new_frame {
                     window.set_viewport_image(frame);
                 }
+            }
+        }
+    });
+
+    let recover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_recovery_recover_requested(move || {
+        if let Ok(mut bridge) = recover_bridge.lock() {
+            bridge.recover_pending();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let keep_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_recovery_keep_requested(move || {
+        if let Ok(mut bridge) = keep_bridge.lock() {
+            bridge.keep_saved_project();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let discard_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_recovery_discard_requested(move || {
+        if let Ok(mut bridge) = discard_bridge.lock() {
+            bridge.discard_pending_recovery();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
             }
         }
     });
@@ -4728,6 +4911,67 @@ mod tests {
         assert!(!bridge.place_asset("not-a-uuid"));
         assert_eq!(bridge.state.project.assets.len(), before);
         assert_eq!(bridge.state.ui.status, "Asset not found in project library");
+    }
+
+    #[test]
+    fn autosave_respects_interval_and_dirty_state() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.autosave = petunia_core::AutosaveService::new(petunia_core::AutosaveConfig {
+            enabled: true,
+            interval_secs: 0,
+            keep_n: 2,
+            only_when_dirty: true,
+        });
+
+        assert!(
+            !bridge.autosave_tick(),
+            "documento limpo não deve gerar snapshot"
+        );
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.checkpoint("dirty");
+        assert!(
+            bridge.autosave_tick(),
+            "documento sujo dentro do intervalo precisa gerar snapshot"
+        );
+        assert!(
+            bridge.state.is_document_dirty(),
+            "autosave nunca limpa o dirty state"
+        );
+    }
+
+    #[test]
+    fn recovery_prompt_only_appears_when_a_snapshot_was_detected() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.view_model().recovery_open);
+        assert!(!bridge.recover_pending());
+        assert!(!bridge.keep_saved_project());
+        assert!(!bridge.discard_pending_recovery());
+
+        bridge.pending_recovery = Some(petunia_core::RecoveryInfo {
+            snapshot_path: std::path::PathBuf::from("/tmp/nao-existe/autosave-1.petunia"),
+            project_name: "Turret".to_string(),
+            snapshot_time: 1_700_000_000,
+            main_project_path: None,
+            is_newer_than_main: true,
+        });
+        let vm = bridge.view_model();
+        assert!(vm.recovery_open);
+        assert!(
+            vm.recovery_title.contains("Recover"),
+            "veio: {}",
+            vm.recovery_title
+        );
+        assert!(
+            vm.recovery_detail.contains("Turret"),
+            "veio: {}",
+            vm.recovery_detail
+        );
+        assert!(!vm.recovery_discard.is_empty());
+
+        assert!(bridge.keep_saved_project(), "abrir o salvo fecha o aviso");
+        assert!(!bridge.view_model().recovery_open);
+        assert!(!bridge.state.project.assets[0].name.is_empty());
     }
 
     #[test]

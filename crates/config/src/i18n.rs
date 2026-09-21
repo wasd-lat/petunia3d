@@ -186,6 +186,13 @@ pub mod text_id {
     pub const UI_ALBEDO_BASE_COLOR: TextId = TextId::new("ui.albedo_base_color");
     pub const UI_THEME: TextId = TextId::new("ui.theme");
     pub const UI_PLACE_IN_SCENE: TextId = TextId::new("ui.place_in_scene");
+
+    // Diálogo de recuperação de autosave (P3D-002).
+    pub const UI_RECOVERY_TITLE: TextId = TextId::new("ui.recovery_title");
+    pub const UI_RECOVERY_BODY: TextId = TextId::new("ui.recovery_body");
+    pub const UI_RECOVERY_RECOVER: TextId = TextId::new("ui.recovery_recover");
+    pub const UI_RECOVERY_KEEP: TextId = TextId::new("ui.recovery_keep");
+    pub const UI_RECOVERY_DISCARD: TextId = TextId::new("ui.recovery_discard");
     pub const ACTIONS_APPLY: TextId = TextId::new("actions.apply");
     pub const ACTIONS_CANCEL: TextId = TextId::new("actions.cancel");
     pub const ACTIONS_DELETE: TextId = TextId::new("actions.delete");
@@ -337,6 +344,11 @@ pub mod text_id {
         UI_ALBEDO_BASE_COLOR,
         UI_THEME,
         UI_PLACE_IN_SCENE,
+        UI_RECOVERY_TITLE,
+        UI_RECOVERY_BODY,
+        UI_RECOVERY_RECOVER,
+        UI_RECOVERY_KEEP,
+        UI_RECOVERY_DISCARD,
         ACTIONS_APPLY,
         ACTIONS_CANCEL,
         ACTIONS_DELETE,
