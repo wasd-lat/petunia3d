@@ -556,6 +556,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> operation-hud-subject: "";
     in-out property <string> operation-hud-hint: "";
     in-out property <string> context-hint: "";
+    in-out property <string> hover-label: "";
     in-out property <int> gizmo-hover-axis: -1;
     in-out property <int> gizmo-active-axis: -1;
     in-out property <bool> show-xray: false;
@@ -743,6 +744,8 @@ export component PetuniaSlintShell inherits Window {
     callback xray-opacity-set(float);
     callback shading-popover-toggled(bool);
     callback gizmo-hover(float, float);
+    callback viewport-hover(float, float);
+    callback viewport-hover-clear;
     callback gizmo-drag-begin(float, float);
     callback gizmo-drag-end;
     callback toggle-xray-requested;
@@ -1251,14 +1254,20 @@ export component PetuniaSlintShell inherits Window {
                                     root.gizmo-drag-end();
                                     is-gizmo-drag = false;
                                 }
+                                root.viewport-hover(self.mouse-x / self.width, self.mouse-y / self.height);
                             }
                         }
 
                         moved => {
                             if !self.pressed {
-                                // Preselection: o handle sob o cursor destaca
-                                // antes do clique.
+                                // Preselection: o handle do gizmo e o componente
+                                // sob o cursor destacam antes do clique.
                                 root.gizmo-hover(self.mouse-x / 1px, self.mouse-y / 1px);
+                                if root.gizmo-hover-axis < 0 {
+                                    root.viewport-hover(self.mouse-x / self.width, self.mouse-y / self.height);
+                                } else {
+                                    root.viewport-hover-clear();
+                                }
                             }
                             if is-gizmo-drag {
                                 moved-since-down = true;

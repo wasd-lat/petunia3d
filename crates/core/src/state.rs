@@ -413,6 +413,39 @@ impl ToolActivation {
     }
 }
 
+/// Componente sob o cursor (preselection).
+///
+/// Vive na sessão, nunca no documento: passar o mouse não pode alterar o
+/// projeto nem entrar no histórico. É o que responde "o que eu vou clicar"
+/// antes do clique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HoverTarget {
+    #[default]
+    None,
+    Vertex(u32),
+    Edge(u32, u32),
+    Face(usize),
+    /// Índice do asset ativo sob o cursor, no domínio Object.
+    Object(usize),
+}
+
+impl HoverTarget {
+    pub const fn is_some(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// Descrição curta para a barra de status.
+    pub fn label(self) -> String {
+        match self {
+            Self::None => String::new(),
+            Self::Vertex(index) => format!("Point {index}"),
+            Self::Edge(a, b) => format!("Edge {a}-{b}"),
+            Self::Face(index) => format!("Face {index}"),
+            Self::Object(index) => format!("Object {index}"),
+        }
+    }
+}
+
 pub struct ToolState {
     pub active_tool: String,
     pub gizmo_mode: crate::ModalKind,
@@ -480,6 +513,8 @@ pub struct ToolState {
 
     /// Modo de confirmação das ferramentas paramétricas.
     pub tool_activation: ToolActivation,
+    /// Componente sob o cursor (preselection).
+    pub hover: HoverTarget,
 }
 
 impl Default for ToolState {
@@ -517,6 +552,7 @@ impl ToolState {
             brush_lock: crate::brush::BrushLock::None,
             paint_lock_face: None,
             tool_activation: ToolActivation::Drag,
+            hover: HoverTarget::None,
             fill_scope: crate::brush::FillScope::ConnectedPixels,
             paint_channel: petunia_project::TextureChannel::Albedo,
             paint_pixel_grid: true,

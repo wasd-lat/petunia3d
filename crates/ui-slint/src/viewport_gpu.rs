@@ -149,6 +149,7 @@ impl WgpuViewport {
             state.textured,
             state.show_wireframe_overlay,
             state.selection_domain,
+            state.hover,
         );
         self.renderer.set_xray_opacity(state.xray_opacity);
         self.renderer.set_overlays(true, state.show_grid);
@@ -261,6 +262,7 @@ mod tests {
                         selection_domain: petunia_core::SelectionDomain::Object,
                         xray_opacity: 0.42,
                         show_grid: true,
+                        hover: petunia_core::HoverTarget::None,
                     },
                 );
                 assert!(img.is_ok());

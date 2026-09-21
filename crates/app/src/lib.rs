@@ -1060,6 +1060,7 @@ impl WgpuApp {
             self.core.state.textured,
             self.core.state.show_wireframe_overlay,
             self.core.state.selection_domain(),
+            self.core.state.session.tools.hover,
         );
         gfx.renderer3d
             .set_xray_opacity(self.core.state.session.xray_opacity);

@@ -60,6 +60,8 @@ pub struct ViewportRenderState {
     pub xray_opacity: f32,
     /// Overlays: grade e wireframe opcional sobre as faces.
     pub show_grid: bool,
+    /// Componente sob o cursor (preselection).
+    pub hover: petunia_core::HoverTarget,
 }
 
 impl Default for ViewportRenderState {
@@ -73,6 +75,7 @@ impl Default for ViewportRenderState {
             selection_domain: petunia_core::SelectionDomain::Object,
             xray_opacity: 0.42,
             show_grid: true,
+            hover: petunia_core::HoverTarget::None,
         }
     }
 }
@@ -286,6 +289,7 @@ pub struct ShellViewModel {
     pub operation_hud_subject: String,
     /// Barra de status contextual.
     pub context_hint: String,
+    pub hover_label: String,
     pub gizmo_hover_axis: i32,
     pub gizmo_active_axis: i32,
     pub asset_library_visible: bool,
@@ -466,6 +470,7 @@ impl ShellViewModel {
             operation_hud_hint: String::new(),
             operation_hud_subject: String::new(),
             context_hint: String::new(),
+            hover_label: String::new(),
             gizmo_hover_axis: -1,
             gizmo_active_axis: -1,
             asset_library_visible: false,
@@ -656,7 +661,6 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub menu_open: Option<MenuKind>,
     /// Popover de opções de shading aberto.
     pub shading_popover_open: bool,
-    /// Handle do gizmo sob o cursor (preselection, sem clique).
     pub gizmo_hover: Option<GizmoHandle>,
     /// Handle do gizmo sendo arrastado, se houver.
     pub gizmo_drag: Option<GizmoHandle>,
@@ -1217,6 +1221,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             selection_domain: self.state.selection_domain(),
             xray_opacity: self.state.session.xray_opacity,
             show_grid: self.state.session.show_grid,
+            hover: self.state.session.tools.hover,
         };
         self.viewport.render_frame(
             &self.state.project,
@@ -1553,6 +1558,105 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
     }
 
+    /// Atualiza a preselection de componente sob o cursor.
+    ///
+    /// Sem X-Ray um componente atrás da geometria não é selecionável, então
+    /// também não pode ser destacado: o hover valida profundidade contra a
+    /// face frontal antes de aceitar o alvo.
+    pub fn hover_component(&mut self, normalized_x: f32, normalized_y: f32) -> bool {
+        if self.state.workspace == Workspace::Paint {
+            return false;
+        }
+        let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
+        let ndc_y = 1.0 - normalized_y.clamp(0.0, 1.0) * 2.0;
+        let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
+
+        let next = match self.state.selection_domain() {
+            SelectionDomain::Object => {
+                // Objeto: o mesmo teste do clique, sem alterar seleção.
+                let mut best: Option<(usize, f32)> = None;
+                for (index, asset) in self.state.project.assets.iter().enumerate() {
+                    if !asset.visible || asset.locked || asset.mesh.verts.is_empty() {
+                        continue;
+                    }
+                    let center = glam::Vec3::from_array(asset.mesh.selection_center());
+                    let along = (center - origin).dot(direction);
+                    if along < 0.0 {
+                        continue;
+                    }
+                    let distance = (center - (origin + direction * along)).length();
+                    let radius = asset
+                        .mesh
+                        .verts
+                        .iter()
+                        .map(|vertex| (vertex.vec() - center).length())
+                        .fold(0.0_f32, f32::max)
+                        .max(0.15);
+                    if distance <= radius && best.is_none_or(|(_, depth)| along < depth) {
+                        best = Some((index, along));
+                    }
+                }
+                best.map(|(index, _)| petunia_core::HoverTarget::Object(index))
+                    .unwrap_or(petunia_core::HoverTarget::None)
+            }
+            SelectionDomain::Vertex => match self.state.pick_vertex(origin, direction) {
+                Some((index, position)) if !self.is_occluded(origin, direction, position) => {
+                    petunia_core::HoverTarget::Vertex(index as u32)
+                }
+                _ => petunia_core::HoverTarget::None,
+            },
+            SelectionDomain::Edge => match self.state.pick_edge(origin, direction) {
+                Some((edge, position)) if !self.is_occluded(origin, direction, position) => {
+                    petunia_core::HoverTarget::Edge(edge.0, edge.1)
+                }
+                _ => petunia_core::HoverTarget::None,
+            },
+            SelectionDomain::Face => match pick_face_hit(&self.state, origin, direction) {
+                Some((face, _)) => petunia_core::HoverTarget::Face(face),
+                None => petunia_core::HoverTarget::None,
+            },
+        };
+
+        if next == self.state.session.tools.hover {
+            return false;
+        }
+        self.state.session.tools.hover = next;
+        true
+    }
+
+    /// Um componente está atrás de geometria frontal?
+    ///
+    /// Com X-Ray ligado nada é considerado ocluído: é exatamente o que o modo
+    /// habilita para o usuário.
+    fn is_occluded(
+        &self,
+        origin: glam::Vec3,
+        direction: glam::Vec3,
+        position: glam::Vec3,
+    ) -> bool {
+        if self.state.session.show_xray {
+            return false;
+        }
+        let target_depth = (position - origin).dot(direction);
+        match pick_face_hit(&self.state, origin, direction) {
+            Some((_, hit)) => {
+                let face_depth = (hit - origin).dot(direction);
+                face_depth < target_depth - 1.0e-3
+            }
+            None => false,
+        }
+    }
+
+    /// Limpa a preselection (ponteiro saiu da viewport).
+    pub fn clear_hover(&mut self) -> bool {
+        if !self.state.session.tools.hover.is_some() {
+            return false;
+        }
+        self.state.session.tools.hover = petunia_core::HoverTarget::None;
+        true
+    }
+
+    /// Handle do gizmo sob o cursor (preselection, sem clique).
     /// Handle do gizmo sob um ponto de tela, dentro de um raio de tolerância.
     ///
     /// O teste é em espaço de tela porque o gizmo tem tamanho fixo em pixels:
@@ -3585,6 +3689,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.shading_popover_open = self.shading_popover_open;
         vm.gizmo_hover_axis = self.gizmo_hover.map_or(-1, |h| h.axis() as i32);
         vm.gizmo_active_axis = self.gizmo_drag.map_or(-1, |h| h.axis() as i32);
+        vm.hover_label = self.state.session.tools.hover.label();
         self.fill_operation_hud(&mut vm);
         if let Some(menu) = self.context_menu {
             vm.context_menu_open = true;
@@ -3708,7 +3813,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             .and_then(|asset| asset.paint_stack.as_ref())
             .and_then(|stack| stack.active())
             .and_then(|layer| match &layer.kind {
-                petunia_project::paint_layers::LayerKind::Effect(effect) => Some(*effect),
+                petunia_project::paint_layers::LayerKind::Effect(effect) => Some(effect.clone()),
                 _ => None,
             })
         {
@@ -4267,6 +4372,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         selection_domain: state.selection_domain(),
         xray_opacity: state.session.xray_opacity,
         show_grid: state.session.show_grid,
+        hover: state.session.tools.hover,
     };
     if let Some(frame) = viewport.render_frame(&state.project, &state.session.camera, render_state)
     {
@@ -4408,6 +4514,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_operation_hud_subject(vm.operation_hud_subject.as_str().into());
     window.set_operation_hud_hint(vm.operation_hud_hint.as_str().into());
     window.set_context_hint(vm.context_hint.as_str().into());
+    window.set_hover_label(vm.hover_label.as_str().into());
     let hud_lines: Vec<slint::SharedString> = vm
         .operation_hud_lines
         .iter()
@@ -5459,6 +5566,40 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                     window.set_viewport_image(frame);
                 }
                 bridge.publish_canvas_image(&window);
+            }
+        }
+    });
+
+    let component_hover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_hover(move |x, y| {
+        if let Ok(mut bridge) = component_hover_bridge.lock()
+            && bridge.hover_component(x, y)
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let hover_clear_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_hover_clear(move || {
+        if let Ok(mut bridge) = hover_clear_bridge.lock()
+            && bridge.clear_hover()
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -9183,6 +9324,71 @@ mod tests {
         assert!(vm.operation_hud_subject.contains("Y axis"));
         assert!(vm.context_hint.contains("Move"));
         bridge.end_gizmo_drag();
+    }
+
+    #[test]
+    fn hovering_preselects_a_component_without_touching_the_document() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+
+        // O centro da viewport acerta a face frontal do cubo.
+        assert!(bridge.hover_component(0.5, 0.5));
+        assert!(matches!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::Face(_)
+        ));
+        assert!(!bridge.view_model().hover_label.is_empty());
+        // Passar o mouse não seleciona nem empilha histórico.
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert!(
+            !bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .faces
+                .iter()
+                .any(|face| face.selected)
+        );
+
+        // Sair da geometria limpa a preselection.
+        assert!(bridge.hover_component(0.02, 0.02));
+        assert_eq!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::None
+        );
+        assert!(bridge.clear_hover() == false, "já estava limpo");
+    }
+
+    #[test]
+    fn hover_respects_occlusion_unless_xray_is_on() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+
+        // Raio do olho até o vértice traseiro do cubo (z = -1): atravessa a
+        // face frontal, então o alvo está ocluído.
+        let origin = bridge.state.session.camera.eye();
+        let position = glam::Vec3::new(-1.0, -1.0, -1.0);
+        let direction = (position - origin).normalize();
+        assert!(
+            bridge.is_occluded(origin, direction, position),
+            "o vértice traseiro precisa estar atrás da face frontal"
+        );
+
+        // Um vértice frontal não está ocluído.
+        let front = glam::Vec3::new(1.0, 1.0, 1.0);
+        let front_dir = (front - origin).normalize();
+        assert!(!bridge.is_occluded(origin, front_dir, front));
+
+        bridge.state.session.show_xray = true;
+        assert!(
+            !bridge.is_occluded(origin, direction, position),
+            "X-Ray existe justamente para alcançar o que está atrás"
+        );
     }
 
     #[test]

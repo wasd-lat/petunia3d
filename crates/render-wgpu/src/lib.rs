@@ -139,6 +139,8 @@ pub struct Renderer {
     last_domain: Option<petunia_core::SelectionDomain>,
     /// Passo do grid atualmente na GPU, para reconstruir só ao cruzar degrau.
     grid_step: f32,
+    /// Último alvo de preselection desenhado.
+    last_hover: petunia_core::HoverTarget,
     mesh_rebuilds: u64,
     skipped_frames: u64,
 }
@@ -1031,6 +1033,7 @@ impl Renderer {
             last_fingerprint: None,
             last_domain: None,
             grid_step: 1.0,
+            last_hover: petunia_core::HoverTarget::None,
             mesh_rebuilds: 0,
             skipped_frames: 0,
         }
@@ -1102,12 +1105,19 @@ impl Renderer {
         textured: bool,
         show_wireframe_overlay: bool,
         edit_domain: petunia_core::SelectionDomain,
+        hover: petunia_core::HoverTarget,
     ) {
         puffin::profile_function!();
         self.xray = xray;
         // Trocar de domínio muda a camada de seleção, não só a malha.
         if self.last_domain != Some(edit_domain) {
             self.last_domain = Some(edit_domain);
+            self.last_fingerprint = None;
+        }
+        // Preselection entra no fingerprint: mover o mouse sobre a geometria
+        // precisa redesenhar a camada, mas nada mais.
+        if self.last_hover != hover {
+            self.last_hover = hover;
             self.last_fingerprint = None;
         }
         // Grid adaptativo: reconstrói só quando a escala visível cruza um degrau.
@@ -1378,6 +1388,63 @@ impl Renderer {
                         });
                     }
                 }
+            }
+        }
+        // Preselection: mesma linguagem da seleção, porém mais fraca — o
+        // usuário vê o que vai clicar sem confundir com o que já selecionou.
+        let hover_line = [0.62f32, 0.72, 0.88, 0.85];
+        let hover_tri = [0.62f32, 0.72, 0.88, 0.18];
+        if let Some(asset) = scene.assets.get(scene.active) {
+            let mesh = asset.evaluated_mesh();
+            match hover {
+                petunia_core::HoverTarget::Vertex(index) => {
+                    if let Some(vertex) = mesh.verts.get(index as usize) {
+                        let marker = 0.030f32 * scene.assets.len().max(1) as f32;
+                        for axis in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z] {
+                            let point = vertex.vec();
+                            sel_line.push(SelectionVertex {
+                                pos: (point - axis * marker).to_array(),
+                                color: hover_line,
+                            });
+                            sel_line.push(SelectionVertex {
+                                pos: (point + axis * marker).to_array(),
+                                color: hover_line,
+                            });
+                        }
+                    }
+                }
+                petunia_core::HoverTarget::Edge(a, b) => {
+                    if let (Some(va), Some(vb)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    {
+                        sel_line.push(SelectionVertex {
+                            pos: va.pos,
+                            color: hover_line,
+                        });
+                        sel_line.push(SelectionVertex {
+                            pos: vb.pos,
+                            color: hover_line,
+                        });
+                    }
+                }
+                petunia_core::HoverTarget::Face(index) => {
+                    if let Some(face) = mesh.faces.get(index) {
+                        if face.verts.len() >= 3 {
+                            let p0 = mesh.verts[face.verts[0] as usize].vec();
+                            for i in 1..face.verts.len() - 1 {
+                                let p1 = mesh.verts[face.verts[i] as usize].vec();
+                                let p2 = mesh.verts[face.verts[i + 1] as usize].vec();
+                                for point in [p0, p1, p2] {
+                                    sel_tri.push(SelectionVertex {
+                                        pos: point.to_array(),
+                                        color: hover_tri,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                petunia_core::HoverTarget::Object(_) | petunia_core::HoverTarget::None => {}
             }
         }
         self.selection_tri_count = sel_tri.len() as u32;
