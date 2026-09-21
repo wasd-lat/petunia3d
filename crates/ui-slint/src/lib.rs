@@ -728,6 +728,10 @@ pub struct SelectionOverlayModel {
     pub outline_commands: String,
     /// Marcadores preenchidos dos vértices selecionados.
     pub point_commands: String,
+    /// Elementos não selecionados do domínio atual, para o usuário ver o que
+    /// pode clicar. Sem isso a viewport mostra um sólido sem alvos visíveis.
+    pub unselected_outline_commands: String,
+    pub unselected_point_commands: String,
     /// Cor semântica: seleção normal ou ativo em modo componente.
     pub accent: bool,
 }
@@ -3474,6 +3478,8 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
 
     let mut outline = String::new();
     let mut points = String::new();
+    let mut unselected_outline = String::new();
+    let mut unselected_points = String::new();
     let mut segments = 0usize;
     let push_segment = |commands: &mut String, a: [f32; 2], b: [f32; 2]| {
         commands.push_str(&format!(
@@ -3530,7 +3536,7 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
             }
         }
         SelectionDomain::Vertex => {
-            for vertex in mesh.verts.iter().filter(|vertex| vertex.selected) {
+            for vertex in &mesh.verts {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
                     break;
@@ -3538,7 +3544,12 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
                 let Some(sp) = project(vertex.vec()) else {
                     continue;
                 };
-                points.push_str(&format!(
+                let target = if vertex.selected {
+                    &mut points
+                } else {
+                    &mut unselected_points
+                };
+                target.push_str(&format!(
                     "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
                     sp[0],
                     sp[1] - MARKER,
@@ -3553,7 +3564,7 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
             }
         }
         SelectionDomain::Edge => {
-            for &(a, b) in &mesh.selected_edges {
+            for (a, b) in mesh.edges_unique() {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
                     break;
@@ -3562,8 +3573,15 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
                 else {
                     continue;
                 };
+                let selected =
+                    mesh.selected_edges.contains(&(a, b)) || mesh.selected_edges.contains(&(b, a));
                 if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
-                    push_segment(&mut outline, pa, pb);
+                    let target = if selected {
+                        &mut outline
+                    } else {
+                        &mut unselected_outline
+                    };
+                    push_segment(target, pa, pb);
                     segments += 1;
                 }
             }
@@ -3590,11 +3608,16 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
     }
 
     let _ = truncated;
-    let visible = !outline.is_empty() || !points.is_empty();
+    let visible = !outline.is_empty()
+        || !points.is_empty()
+        || !unselected_outline.is_empty()
+        || !unselected_points.is_empty();
     SelectionOverlayModel {
         visible,
         outline_commands: outline,
         point_commands: points,
+        unselected_outline_commands: unselected_outline,
+        unselected_point_commands: unselected_points,
         accent: domain != SelectionDomain::Object,
     }
 }
@@ -3868,6 +3891,18 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_selection_overlay_visible(vm.selection_overlay.visible);
     window.set_selection_outline_commands(vm.selection_overlay.outline_commands.as_str().into());
     window.set_selection_point_commands(vm.selection_overlay.point_commands.as_str().into());
+    window.set_selection_unselected_outline_commands(
+        vm.selection_overlay
+            .unselected_outline_commands
+            .as_str()
+            .into(),
+    );
+    window.set_selection_unselected_point_commands(
+        vm.selection_overlay
+            .unselected_point_commands
+            .as_str()
+            .into(),
+    );
     window.set_selection_overlay_accent(vm.selection_overlay.accent);
     window.set_gizmo_visible(vm.gizmo.visible);
     window.set_gizmo_origin_x(vm.gizmo.origin_x);
@@ -7867,11 +7902,16 @@ mod tests {
         bridge.resize_viewport(1024, 768);
         bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
 
-        // Point: só marcadores dos vértices selecionados.
+        // Point: todos os vértices aparecem como alvos clicáveis, mesmo sem
+        // seleção, para o usuário ver onde pode clicar.
         bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
-        assert!(
-            !bridge.view_model().selection_overlay.visible,
-            "sem vértice selecionado não há o que desenhar"
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.visible);
+        assert!(overlay.point_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            8,
+            "os 8 vértices aparecem como alvos"
         );
         bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
         bridge.state.sync_selection();
@@ -7935,6 +7975,51 @@ mod tests {
 
         bridge.apply(UiIntent::SetActiveTool("select".to_string()));
         assert!(!bridge.view_model().gizmo.visible);
+    }
+
+    #[test]
+    fn selection_overlay_draws_every_pickable_element_of_the_domain() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+
+        // Point: os 8 vértices aparecem mesmo sem seleção, para o usuário ver
+        // onde pode clicar; o selecionado vai para a camada de destaque.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert_eq!(overlay.point_commands.matches('M').count(), 1);
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            7,
+            "os outros 7 vértices precisam aparecer como alvos"
+        );
+
+        // Edge: todas as 12 arestas do cubo aparecem; a selecionada destaca.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .selected_edges
+            .insert((0, 1));
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert_eq!(overlay.outline_commands.matches('M').count(), 1);
+        assert_eq!(
+            overlay.unselected_outline_commands.matches('M').count(),
+            11,
+            "as outras 11 arestas precisam aparecer como alvos"
+        );
+
+        // Object: só a caixa do ativo, sem camada de não selecionados.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Object));
+        let overlay = bridge.view_model().selection_overlay;
+        assert_eq!(overlay.outline_commands.matches('M').count(), 12);
+        assert!(overlay.unselected_outline_commands.is_empty());
+        assert!(overlay.unselected_point_commands.is_empty());
     }
 
     #[test]

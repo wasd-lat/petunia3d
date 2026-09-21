@@ -550,6 +550,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> gizmo-visible: false;
     in-out property <bool> selection-overlay-visible: false;
     in-out property <string> selection-outline-commands: "";
+    in-out property <string> selection-unselected-outline-commands: "";
+    in-out property <string> selection-unselected-point-commands: "";
     in-out property <string> selection-point-commands: "";
     in-out property <bool> selection-overlay-accent: false;
     in-out property <length> gizmo-origin-x: 0px;
@@ -1070,9 +1072,20 @@ export component PetuniaSlintShell inherits Window {
                     // desenha seleção, então o shell projeta e desenha aqui.
                     if selection-overlay-visible: Path {
                         fill: transparent;
+                        stroke: selection-overlay-accent ? DesignTokens.text-muted : DesignTokens.selection;
+                        stroke-width: 1px;
+                        commands: root.selection-unselected-outline-commands;
+                    }
+                    if selection-overlay-visible: Path {
+                        fill: transparent;
                         stroke: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
                         stroke-width: 1.5px;
                         commands: root.selection-outline-commands;
+                    }
+                    if selection-overlay-visible: Path {
+                        fill: DesignTokens.text-muted;
+                        stroke: transparent;
+                        commands: root.selection-unselected-point-commands;
                     }
                     if selection-overlay-visible: Path {
                         fill: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
@@ -1230,7 +1243,7 @@ export component PetuniaSlintShell inherits Window {
                     viewport-bar := Rectangle {
                         x: (parent.width - self.width) / 2;
                         y: 14px;
-                        width: min(viewport-bar-row.preferred-width + 20px, parent.width * 0.6);
+                        width: min(max(viewport-bar-row.preferred-width + 20px, 320px), parent.width * 0.6);
                         height: 34px;
                         border-radius: 8px;
                         background: DesignTokens.surface-raised;
@@ -1240,12 +1253,15 @@ export component PetuniaSlintShell inherits Window {
                         viewport-bar-row := HorizontalLayout {
                             x: 10px;
                             y: 4px;
-                            width: min(self.preferred-width, parent.width - 20px);
+                            width: parent.width - 20px;
                             height: self.preferred-height;
                             spacing: 4px;
-                            alignment: center;
+                            alignment: start;
 
                             // --- Visão (esquerda) ---
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
                             Text {
                                 text: is-orthographic ? "Ortho" : "Persp";
                                 color: DesignTokens.text-primary;
@@ -1279,10 +1295,14 @@ export component PetuniaSlintShell inherits Window {
                                 active: false;
                                 clicked => { root.reset-camera-requested(); }
                             }
+                            }
 
-                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+                            Rectangle { horizontal-stretch: 1; }
 
                             // --- Domínio de seleção (centro) ---
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: center;
                             for domain in [
                                 { id: "OBJECT", icon: IconSet.Box, label: "Object" },
                                 { id: "POINT", icon: IconSet.CircleDot, label: "Point" },
@@ -1294,6 +1314,9 @@ export component PetuniaSlintShell inherits Window {
                                 active: selection-domain == domain.id;
                                 clicked => { root.selection-domain-changed(domain.id); }
                             }
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
                         }
                     }
 
