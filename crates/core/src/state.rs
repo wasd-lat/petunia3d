@@ -332,7 +332,8 @@ impl ProjectState {
 }
 
 /// 2. FERRAMENTAS E SESSÕES INTERATIVAS: contexto operacional de modelagem.
-/// Como uma ferramenta paramétrica recebe o gesto de confirmação.
+///
+/// Como uma ferramenta paramétrica recebe o gesto de confirmação:
 ///
 /// - `Drag`: a sessão abre no atalho e o valor vem do arrasto do ponteiro na
 ///   viewport; soltar confirma.

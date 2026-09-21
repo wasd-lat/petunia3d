@@ -4630,17 +4630,17 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let tool_hover_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_tool_modal_hovered(move |delta| {
-        if let Ok(mut bridge) = tool_hover_bridge.lock() {
-            if bridge.is_instant_tool_mode() && bridge.tool_modal.is_some() {
-                let fine = false;
-                bridge.scrub_tool_modal(delta, fine);
-                let vm = bridge.view_model();
-                let new_frame = bridge.render_viewport();
-                if let Some(window) = window_weak.upgrade() {
-                    sync_window_properties(&window, &vm);
-                    if let Some(frame) = new_frame {
-                        window.set_viewport_image(frame);
-                    }
+        if let Ok(mut bridge) = tool_hover_bridge.lock()
+            && bridge.is_instant_tool_mode()
+            && bridge.tool_modal.is_some()
+        {
+            bridge.scrub_tool_modal(delta, false);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
                 }
             }
         }
