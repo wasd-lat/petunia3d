@@ -269,6 +269,8 @@ pub struct ShellViewModel {
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
     pub add_menu_open: bool,
+    pub inspector_width: f32,
+    pub asset_library_height: f32,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -375,6 +377,8 @@ impl ShellViewModel {
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
             add_menu_open: false,
+            inspector_width: state.ui.right_width,
+            asset_library_height: state.ui.shell_asset_library_height,
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -988,6 +992,18 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         self.state.finish_paint_stroke(true);
         true
+    }
+
+    /// Redimensiona o dock de contexto pelo divisor vertical.
+    ///
+    /// Layout é estado de apresentação: não marca o documento como alterado.
+    pub fn set_inspector_width(&mut self, width: f32) -> bool {
+        self.state.ui.set_right_width(width)
+    }
+
+    /// Redimensiona a Asset Library pelo divisor horizontal.
+    pub fn set_asset_library_height(&mut self, height: f32) -> bool {
+        self.state.ui.set_shell_asset_library_height(height)
     }
 
     /// Abre a sessão modal de uma ferramenta paramétrica com preview próprio.
@@ -1835,6 +1851,8 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_gizmo_z_end_x(vm.gizmo.z_end_x);
     window.set_gizmo_z_end_y(vm.gizmo.z_end_y);
     window.set_add_menu_open(vm.add_menu_open);
+    window.set_inspector_width(vm.inspector_width);
+    window.set_asset_library_height(vm.asset_library_height);
     window.set_tool_modal_active(vm.tool_modal_active);
     window.set_tool_modal_title(vm.tool_modal_title.as_str().into());
     window.set_tool_modal_label(vm.tool_modal_label.as_str().into());
@@ -2427,6 +2445,32 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 if let Some(frame) = new_frame {
                     window.set_viewport_image(frame);
                 }
+            }
+        }
+    });
+
+    let inspector_width_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_inspector_width_changed(move |width| {
+        if let Ok(mut bridge) = inspector_width_bridge.lock()
+            && bridge.set_inspector_width(width)
+        {
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let asset_height_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_asset_library_height_changed(move |height| {
+        if let Ok(mut bridge) = asset_height_bridge.lock()
+            && bridge.set_asset_library_height(height)
+        {
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
             }
         }
     });
@@ -3601,6 +3645,65 @@ mod tests {
         bridge.execute_core_command("uv.unwrap").unwrap();
         let stats = bridge.view_model().uv_stats;
         assert!(stats.contains("Islands: 1"), "unwrap real: {stats}");
+    }
+
+    #[test]
+    fn inspector_splitter_clamps_and_never_dirties_the_document() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let saved = bridge.view_model().saved;
+
+        assert!(bridge.set_inspector_width(384.0));
+        assert_eq!(bridge.view_model().inspector_width, 384.0);
+        assert_eq!(bridge.view_model().saved, saved);
+
+        assert!(bridge.set_inspector_width(1.0));
+        assert_eq!(
+            bridge.view_model().inspector_width,
+            petunia_core::PROPERTIES_MIN_WIDTH
+        );
+        assert!(bridge.set_inspector_width(9_999.0));
+        assert_eq!(
+            bridge.view_model().inspector_width,
+            petunia_core::PROPERTIES_MAX_WIDTH
+        );
+        assert!(
+            !bridge.set_inspector_width(f32::NAN),
+            "NaN não pode alterar o layout"
+        );
+    }
+
+    #[test]
+    fn asset_library_splitter_clamps_its_height() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_asset_library_height(320.0));
+        assert_eq!(bridge.view_model().asset_library_height, 320.0);
+
+        assert!(bridge.set_asset_library_height(0.0));
+        assert_eq!(
+            bridge.view_model().asset_library_height,
+            petunia_core::SHELL_ASSET_LIBRARY_MIN_HEIGHT
+        );
+        assert!(bridge.set_asset_library_height(5_000.0));
+        assert_eq!(
+            bridge.view_model().asset_library_height,
+            petunia_core::SHELL_ASSET_LIBRARY_MAX_HEIGHT
+        );
+    }
+
+    #[test]
+    fn switching_workspace_remembers_the_resized_inspector() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_inspector_width(420.0));
+
+        bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Paint));
+        assert_ne!(
+            bridge.view_model().inspector_width,
+            420.0,
+            "Paint deve restaurar a própria largura, não herdar a de Model"
+        );
+
+        bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Model));
+        assert_eq!(bridge.view_model().inspector_width, 420.0);
     }
 
     #[test]

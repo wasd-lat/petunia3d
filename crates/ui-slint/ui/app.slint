@@ -21,6 +21,68 @@ export struct SceneItem {
     tris: int,
 }
 
+/// Divisor vertical: arrasta na horizontal e devolve a largura desejada.
+component SplitterVertical inherits Rectangle {
+    in property <length> value;
+    in property <float> direction: 1.0;
+    callback moved(length);
+
+    width: 6px;
+    height: 100%;
+    background: touch-area.has-hover || touch-area.pressed ? DesignTokens.accent : DesignTokens.border;
+    accessible-role: slider;
+    accessible-label: "Resize panel width";
+    accessible-value: 50;
+
+    touch-area := TouchArea {
+        property <length> start-value;
+        property <length> start-x;
+
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                self.start-value = root.value;
+                self.start-x = self.mouse-x;
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.moved(self.start-value + root.direction * (self.mouse-x - self.start-x));
+            }
+        }
+    }
+}
+
+/// Divisor horizontal: arrasta na vertical e devolve a altura desejada.
+component SplitterHorizontal inherits Rectangle {
+    in property <length> value;
+    in property <float> direction: 1.0;
+    callback moved(length);
+
+    width: 100%;
+    height: 6px;
+    background: touch-area.has-hover || touch-area.pressed ? DesignTokens.accent : DesignTokens.border;
+    accessible-role: slider;
+    accessible-label: "Resize panel height";
+    accessible-value: 50;
+
+    touch-area := TouchArea {
+        property <length> start-value;
+        property <length> start-y;
+
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                self.start-value = root.value;
+                self.start-y = self.mouse-y;
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.moved(self.start-value + root.direction * (self.mouse-y - self.start-y));
+            }
+        }
+    }
+}
+
 component TopAction inherits Rectangle {
     in property <Icon> icon;
     in property <string> semantic-label;
@@ -313,6 +375,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> active-object-title: "Default Cube";
     in-out property <string> active-object-details: "Vertices: 8  ·  Faces: 6";
     in-out property <string> active-material-name: "Default Material";
+    in-out property <length> inspector-width: 290px;
+    in-out property <length> asset-library-height: 200px;
     in-out property <string> scene-stats: "";
     in-out property <string> uv-stats: "";
     in-out property <string> current-theme: "petunia-dark";
@@ -377,6 +441,8 @@ export component PetuniaSlintShell inherits Window {
     callback tool-modal-text-committed(string);
     callback tool-modal-apply;
     callback tool-modal-cancel;
+    callback inspector-width-changed(float);
+    callback asset-library-height-changed(float);
     callback open-project-requested;
     callback scene-select(string);
     callback scene-toggle-visibility(string);
@@ -1196,9 +1262,17 @@ export component PetuniaSlintShell inherits Window {
                     }
                 }
 
+                if inspector-visible && !compact-shell: SplitterVertical {
+                    value: root.inspector-width;
+                    direction: -1.0;
+                    moved(width) => { root.inspector-width-changed(width / 1px); }
+                }
+
                 Rectangle {
-                    width: inspector-visible && !compact-shell ? 288px : 0px;
+                    width: inspector-width;
                     visible: inspector-visible && !compact-shell;
+                    y: 0;
+                    height: 100%;
                     background: DesignTokens.surface;
                     border-width: 1px;
                     border-color: DesignTokens.border;
@@ -1841,12 +1915,22 @@ export component PetuniaSlintShell inherits Window {
             }
         }
 
+        // Divisor da Asset Library: arrasta na vertical e devolve a altura.
+        if asset-library-visible: SplitterHorizontal {
+            x: 8px;
+            y: parent.height - 36px - asset-library-height;
+            width: parent.width - 16px - (inspector-visible && !compact-shell ? inspector-width + 8px : 0px);
+            value: root.asset-library-height;
+            direction: -1.0;
+            moved(height) => { root.asset-library-height-changed(height / 1px); }
+        }
+
         // Overlay / Bottom Drawer: Asset Library (AGENTS.md §3: Asset Library-abaixo)
         if asset-library-visible: Rectangle {
             x: 8px;
-            y: parent.height - 230px;
-            width: parent.width - 16px - (inspector-visible && !compact-shell ? 296px : 0px);
-            height: 200px;
+            y: parent.height - 30px - asset-library-height;
+            width: parent.width - 16px - (inspector-visible && !compact-shell ? inspector-width + 8px : 0px);
+            height: asset-library-height;
             background: DesignTokens.surface-raised;
             border-width: 1px;
             border-color: DesignTokens.border;

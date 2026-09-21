@@ -736,6 +736,17 @@ pub const TOOLBAR_DEFAULT_WIDTH: f32 = 74.0;
 ///
 /// Espelha `petunia_ui::tokens::PROPERTIES_DEFAULT_WIDTH`.
 pub const PROPERTIES_DEFAULT_WIDTH: f32 = 290.0;
+/// Piso do dock de contexto: abaixo disso os campos numéricos do inspetor
+/// deixam de caber lado a lado com o rótulo.
+pub const PROPERTIES_MIN_WIDTH: f32 = 208.0;
+/// Teto do dock de contexto: a viewport precisa manter área útil.
+pub const PROPERTIES_MAX_WIDTH: f32 = 560.0;
+/// Altura inicial da Asset Library do shell Slint (logical px).
+pub const SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT: f32 = 200.0;
+/// Piso da Asset Library: cabe uma fileira de cartões com o cabeçalho.
+pub const SHELL_ASSET_LIBRARY_MIN_HEIGHT: f32 = 132.0;
+/// Teto da Asset Library: nunca cobre mais que isso da viewport.
+pub const SHELL_ASSET_LIBRARY_MAX_HEIGHT: f32 = 520.0;
 
 /// 4. ESTADO DE APRESENTAÇÃO E WIDGETS UI: campos visuais, abas, pesquisas e preferências.
 pub struct UiState {
@@ -778,6 +789,9 @@ pub struct UiState {
     pub density: UiDensity,
     /// Altura do painel Scene automática (conteúdo) vs manual (divisor).
     pub scene_split_auto: bool,
+    /// Altura da Asset Library do shell Slint (logical px), dona do valor que o
+    /// divisor horizontal ajusta. Distinta da shelf do shell egui legado.
+    pub shell_asset_library_height: f32,
     /// Busca do Scene: aberta (campo expandido) e foco pendente (Ctrl+F).
     pub scene_search_open: bool,
     pub scene_search_focus_request: bool,
@@ -846,6 +860,7 @@ impl UiState {
             show_shelf: true,
             density: UiDensity::Comfortable,
             scene_split_auto: true,
+            shell_asset_library_height: SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT,
             scene_search_open: false,
             scene_search_focus_request: false,
             scene_filter: SceneFilter::default(),
@@ -880,6 +895,39 @@ impl UiState {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status = msg.into();
+    }
+
+    /// Largura do dock de contexto, limitada à faixa utilizável.
+    ///
+    /// Retorna `true` quando o valor mudou — o divisor arrastável usa isso para
+    /// evitar trabalho de renderização em arrastos que já bateram no limite.
+    /// Entradas não finitas são recusadas em vez de virarem um chute.
+    pub fn set_right_width(&mut self, width: f32) -> bool {
+        if !width.is_finite() {
+            return false;
+        }
+        let clamped = width.clamp(PROPERTIES_MIN_WIDTH, PROPERTIES_MAX_WIDTH);
+        if (clamped - self.right_width).abs() < f32::EPSILON {
+            return false;
+        }
+        self.right_width = clamped;
+        true
+    }
+
+    /// Altura da Asset Library do shell Slint, limitada à faixa utilizável.
+    pub fn set_shell_asset_library_height(&mut self, height: f32) -> bool {
+        if !height.is_finite() {
+            return false;
+        }
+        let clamped = height.clamp(
+            SHELL_ASSET_LIBRARY_MIN_HEIGHT,
+            SHELL_ASSET_LIBRARY_MAX_HEIGHT,
+        );
+        if (clamped - self.shell_asset_library_height).abs() < f32::EPSILON {
+            return false;
+        }
+        self.shell_asset_library_height = clamped;
+        true
     }
 }
 
