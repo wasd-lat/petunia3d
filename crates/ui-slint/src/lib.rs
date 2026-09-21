@@ -5306,9 +5306,10 @@ mod tests {
     }
 
     #[test]
-    fn switching_workspace_remembers_the_resized_inspector() {
+    fn switching_workspace_remembers_the_resized_inspector_and_library() {
         let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
         assert!(bridge.set_inspector_width(420.0));
+        assert!(bridge.set_asset_library_height(340.0));
 
         bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Paint));
         assert_ne!(
@@ -5316,9 +5317,15 @@ mod tests {
             420.0,
             "Paint deve restaurar a própria largura, não herdar a de Model"
         );
+        assert_ne!(
+            bridge.view_model().asset_library_height,
+            340.0,
+            "a Asset Library também tem memória por workspace"
+        );
 
         bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Model));
         assert_eq!(bridge.view_model().inspector_width, 420.0);
+        assert_eq!(bridge.view_model().asset_library_height, 340.0);
     }
 
     #[test]

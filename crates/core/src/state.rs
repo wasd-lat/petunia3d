@@ -1079,6 +1079,8 @@ pub struct WorkspaceUiMemory {
     /// restaura a composição, não só a divisão do dock.
     pub left_width: f32,
     pub right_width: f32,
+    /// Altura da Asset Library do shell Slint por workspace.
+    pub shell_asset_library_height: f32,
 }
 
 impl Default for WorkspaceUiMemory {
@@ -1090,6 +1092,7 @@ impl Default for WorkspaceUiMemory {
             inspector_collapsed: false,
             left_width: TOOLBAR_DEFAULT_WIDTH,
             right_width: PROPERTIES_DEFAULT_WIDTH,
+            shell_asset_library_height: SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT,
         }
     }
 }
@@ -1424,6 +1427,7 @@ impl AppState {
             inspector_collapsed: self.ui.inspector_collapsed,
             left_width: self.ui.left_width,
             right_width: self.ui.right_width,
+            shell_asset_library_height: self.ui.shell_asset_library_height,
         };
         let restored = self.ui.workspace_memory[workspace_index(next)].clone();
         self.ui.right_dock_split = restored.dock_split;
@@ -1432,6 +1436,7 @@ impl AppState {
         self.ui.inspector_collapsed = restored.inspector_collapsed;
         self.ui.left_width = restored.left_width;
         self.ui.right_width = restored.right_width;
+        self.ui.shell_asset_library_height = restored.shell_asset_library_height;
         self.session.workspace = next;
         self.mark_dirty();
     }
