@@ -288,6 +288,23 @@ pub struct ShellViewModel {
     pub menu_edit_items: Vec<MenuEntryModel>,
     pub menu_view_items: Vec<MenuEntryModel>,
     pub menu_window_items: Vec<MenuEntryModel>,
+    pub label_parts: String,
+    pub label_project_asset_library: String,
+    pub label_save_active_as_asset: String,
+    pub label_status_hint: String,
+    pub label_unwrap_mesh: String,
+    pub label_pack_islands: String,
+    pub label_active_brush_color: String,
+    pub label_albedo_base_color: String,
+    pub label_theme: String,
+    pub label_asset_library: String,
+    pub label_preferences: String,
+    pub shell_info: String,
+    pub label_apply: String,
+    pub label_cancel: String,
+    pub label_delete: String,
+    pub label_duplicate: String,
+    pub themes: Vec<ThemeEntryModel>,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -413,6 +430,23 @@ impl ShellViewModel {
             menu_edit_items: Vec::new(),
             menu_view_items: Vec::new(),
             menu_window_items: Vec::new(),
+            label_parts: String::new(),
+            label_project_asset_library: String::new(),
+            label_save_active_as_asset: String::new(),
+            label_status_hint: String::new(),
+            label_unwrap_mesh: String::new(),
+            label_pack_islands: String::new(),
+            label_active_brush_color: String::new(),
+            label_albedo_base_color: String::new(),
+            label_theme: String::new(),
+            label_asset_library: String::new(),
+            label_preferences: String::new(),
+            shell_info: String::new(),
+            label_apply: String::new(),
+            label_cancel: String::new(),
+            label_delete: String::new(),
+            label_duplicate: String::new(),
+            themes: Vec::new(),
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -607,6 +641,14 @@ impl MenuKind {
             ],
         }
     }
+}
+
+/// Tema disponível no registry, já marcado como ativo ou não.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThemeEntryModel {
+    pub id: String,
+    pub name: String,
+    pub active: bool,
 }
 
 /// Item de menu já traduzido para o shell.
@@ -1907,6 +1949,40 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.menu_open = kind.id().to_string();
         }
         let translated = |id: petunia_config::TextId| self.state.t_id(id);
+        vm.label_parts = translated(petunia_config::text_id::UI_PARTS);
+        vm.label_project_asset_library =
+            translated(petunia_config::text_id::UI_PROJECT_ASSET_LIBRARY);
+        vm.label_save_active_as_asset =
+            translated(petunia_config::text_id::UI_SAVE_ACTIVE_AS_ASSET);
+        vm.label_status_hint = translated(petunia_config::text_id::UI_STATUS_HINT);
+        vm.label_unwrap_mesh = translated(petunia_config::text_id::UI_UNWRAP_MESH);
+        vm.label_pack_islands = translated(petunia_config::text_id::UI_PACK_ISLANDS);
+        vm.label_active_brush_color = translated(petunia_config::text_id::UI_ACTIVE_BRUSH_COLOR);
+        vm.label_albedo_base_color = translated(petunia_config::text_id::UI_ALBEDO_BASE_COLOR);
+        vm.label_theme = translated(petunia_config::text_id::UI_THEME);
+        vm.label_asset_library = translated(petunia_config::text_id::UI_ASSETS);
+        vm.label_preferences = translated(petunia_config::text_id::MENU_PREFERENCES);
+        // A linha de rodapé das preferências informa o keymap e o idioma REAIS em uso.
+        vm.shell_info = format!(
+            "{}: {}  ·  {}: {}",
+            translated(petunia_config::text_id::UI_THEME),
+            self.state.ui.active_theme_id,
+            "Keymap",
+            self.state.ui.active_keymap_id,
+        );
+        vm.label_apply = translated(petunia_config::text_id::ACTIONS_APPLY);
+        vm.label_cancel = translated(petunia_config::text_id::ACTIONS_CANCEL);
+        vm.label_delete = translated(petunia_config::text_id::ACTIONS_DELETE);
+        vm.label_duplicate = translated(petunia_config::text_id::ACTIONS_DUPLICATE);
+        vm.themes = petunia_config::theme::ThemeRegistry::global()
+            .available()
+            .iter()
+            .map(|manifest| ThemeEntryModel {
+                id: manifest.id.clone(),
+                name: manifest.name.clone(),
+                active: manifest.id == self.state.ui.active_theme_id,
+            })
+            .collect();
         for kind in MenuKind::ALL {
             let entries: Vec<MenuEntryModel> = kind
                 .items()
@@ -2254,6 +2330,32 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_menu_edit_items(to_entries(&vm.menu_edit_items).as_slice().into());
     window.set_menu_view_items(to_entries(&vm.menu_view_items).as_slice().into());
     window.set_menu_window_items(to_entries(&vm.menu_window_items).as_slice().into());
+    window.set_label_parts(vm.label_parts.as_str().into());
+    window.set_label_project_asset_library(vm.label_project_asset_library.as_str().into());
+    window.set_label_save_active_as_asset(vm.label_save_active_as_asset.as_str().into());
+    window.set_label_status_hint(vm.label_status_hint.as_str().into());
+    window.set_label_unwrap_mesh(vm.label_unwrap_mesh.as_str().into());
+    window.set_label_pack_islands(vm.label_pack_islands.as_str().into());
+    window.set_label_active_brush_color(vm.label_active_brush_color.as_str().into());
+    window.set_label_albedo_base_color(vm.label_albedo_base_color.as_str().into());
+    window.set_label_theme(vm.label_theme.as_str().into());
+    window.set_label_asset_library(vm.label_asset_library.as_str().into());
+    window.set_label_preferences(vm.label_preferences.as_str().into());
+    window.set_shell_info(vm.shell_info.as_str().into());
+    window.set_label_apply(vm.label_apply.as_str().into());
+    window.set_label_cancel(vm.label_cancel.as_str().into());
+    window.set_label_delete(vm.label_delete.as_str().into());
+    window.set_label_duplicate(vm.label_duplicate.as_str().into());
+    let theme_entries: Vec<ThemeEntry> = vm
+        .themes
+        .iter()
+        .map(|theme| ThemeEntry {
+            id: theme.id.as_str().into(),
+            name: theme.name.as_str().into(),
+            active: theme.active,
+        })
+        .collect();
+    window.set_themes(theme_entries.as_slice().into());
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
     window.set_tool_modal_active(vm.tool_modal_active);
@@ -4504,6 +4606,62 @@ mod tests {
 
         assert!(bridge.menu_item_invoked("view.reset_camera"));
         assert!(!bridge.menu_item_invoked("view.not_a_real_command"));
+    }
+
+    #[test]
+    fn shell_chrome_labels_are_translated_and_the_theme_list_comes_from_the_registry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let vm = bridge.view_model();
+        assert_eq!(vm.label_parts, "Parts");
+        assert_eq!(vm.label_apply, "Apply");
+        assert_eq!(vm.label_cancel, "Cancel");
+        assert_eq!(vm.label_delete, "Delete");
+        assert_eq!(vm.label_asset_library, "Asset Library");
+        assert_eq!(vm.label_preferences, "Preferences");
+        assert_eq!(vm.label_theme, "Theme");
+
+        assert!(
+            vm.themes.len() >= 2,
+            "o registry precisa publicar os temas oficiais, veio {:?}",
+            vm.themes
+        );
+        assert!(vm.themes.iter().any(|theme| theme.id == "petunia-dark"));
+        assert!(
+            vm.themes
+                .iter()
+                .any(|theme| theme.id == "petunia-high-contrast")
+        );
+        assert_eq!(
+            vm.themes.iter().filter(|theme| theme.active).count(),
+            1,
+            "exatamente um tema ativo"
+        );
+        assert!(
+            vm.themes
+                .iter()
+                .find(|theme| theme.active)
+                .is_some_and(|theme| theme.id == "petunia-dark")
+        );
+
+        bridge.state.ui.i18n = petunia_config::I18n::load("pt-BR");
+        let vm = bridge.view_model();
+        assert_eq!(vm.label_parts, "Peças");
+        assert_eq!(vm.label_apply, "Aplicar");
+        assert_eq!(vm.label_delete, "Apagar");
+        assert_eq!(vm.label_asset_library, "Assets");
+        assert_eq!(vm.label_theme, "Tema");
+    }
+
+    #[test]
+    fn the_preferences_footer_reports_the_real_keymap_and_theme() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let info = bridge.view_model().shell_info;
+        assert!(info.contains("petunia-dark"), "veio: {info}");
+        assert!(info.contains("petunia-default"), "veio: {info}");
+        assert!(
+            !info.contains("Keymap: Standard"),
+            "a linha antiga afirmava um keymap fixo que não era o real: {info}"
+        );
     }
 
     #[test]

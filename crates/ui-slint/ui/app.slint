@@ -11,6 +11,12 @@ export struct CommandItem {
     disabled-reason: string,
 }
 
+export struct ThemeEntry {
+    id: string,
+    name: string,
+    active: bool,
+}
+
 export struct MenuEntry {
     id: string,
     label: string,
@@ -521,6 +527,23 @@ export component PetuniaSlintShell inherits Window {
     in-out property <[MenuEntry]> menu-edit-items: [];
     in-out property <[MenuEntry]> menu-view-items: [];
     in-out property <[MenuEntry]> menu-window-items: [];
+    in-out property <[ThemeEntry]> themes: [];
+    in-out property <string> label-parts: "";
+    in-out property <string> label-project-asset-library: "";
+    in-out property <string> label-save-active-as-asset: "";
+    in-out property <string> label-status-hint: "";
+    in-out property <string> label-unwrap-mesh: "";
+    in-out property <string> label-pack-islands: "";
+    in-out property <string> label-active-brush-color: "";
+    in-out property <string> label-albedo-base-color: "";
+    in-out property <string> label-apply: "";
+    in-out property <string> label-cancel: "";
+    in-out property <string> label-delete: "";
+    in-out property <string> label-duplicate: "";
+    in-out property <string> label-theme: "";
+    in-out property <string> label-asset-library: "";
+    in-out property <string> label-preferences: "";
+    in-out property <string> shell-info: "";
     in-out property <string> rename-value: "";
     in-out property <bool> tool-modal-active: false;
     in-out property <string> tool-modal-title: "";
@@ -1499,14 +1522,14 @@ export component PetuniaSlintShell inherits Window {
                                             background: DesignTokens.surface-raised;
                                             border-width: 1px;
                                             border-color: DesignTokens.border;
-                                            Text { text: "Cancel"; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
                                             TouchArea { clicked => { root.tool-modal-cancel(); } }
                                         }
                                         Rectangle {
                                             horizontal-stretch: 1;
                                             border-radius: 4px;
                                             background: DesignTokens.accent;
-                                            Text { text: "Apply"; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                             TouchArea { clicked => { root.tool-modal-apply(); } }
                                         }
                                     }
@@ -1617,7 +1640,7 @@ export component PetuniaSlintShell inherits Window {
                                             stroke: DesignTokens.text-primary;
                                         }
                                         Text {
-                                            text: "Duplicate";
+                                            text: root.label-duplicate;
                                             color: DesignTokens.text-primary;
                                             font-size: 11px;
                                             font-weight: 600;
@@ -1650,7 +1673,7 @@ export component PetuniaSlintShell inherits Window {
                                             stroke: DesignTokens.danger;
                                         }
                                         Text {
-                                            text: "Delete";
+                                            text: root.label-delete;
                                             color: DesignTokens.danger;
                                             font-size: 11px;
                                             font-weight: 600;
@@ -1696,7 +1719,7 @@ export component PetuniaSlintShell inherits Window {
                                         }
 
                                         Text {
-                                            text: "Active Brush Color";
+                                            text: root.label-active-brush-color;
                                             color: DesignTokens.text-primary;
                                             font-size: 11px;
                                             font-weight: 600;
@@ -1834,7 +1857,7 @@ export component PetuniaSlintShell inherits Window {
                                             spacing: 6px;
                                             alignment: center;
                                             IconDisplay { icon: IconSet.Layers3; size: 14px; stroke: DesignTokens.accent; }
-                                            Text { text: "Albedo (Base Color)"; color: DesignTokens.text-primary; font-size: 11px; vertical-alignment: center; }
+                                            Text { text: root.label-albedo-base-color; color: DesignTokens.text-primary; font-size: 11px; vertical-alignment: center; }
                                             Rectangle { horizontal-stretch: 1; }
                                             Text { text: "Active"; color: DesignTokens.success; font-size: 10px; font-weight: 700; vertical-alignment: center; }
                                         }
@@ -1863,7 +1886,7 @@ export component PetuniaSlintShell inherits Window {
                                             alignment: center;
                                             spacing: 6px;
                                             IconDisplay { icon: IconSet.Maximize2; size: 14px; stroke: DesignTokens.canvas; }
-                                            Text { text: "Unwrap Mesh"; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                                            Text { text: root.label-unwrap-mesh; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; vertical-alignment: center; }
                                         }
                                         TouchArea { clicked => { root.command-executed("uv.unwrap"); } }
                                     }
@@ -1878,7 +1901,7 @@ export component PetuniaSlintShell inherits Window {
                                             alignment: center;
                                             spacing: 6px;
                                             IconDisplay { icon: IconSet.Grid2x2; size: 14px; stroke: DesignTokens.text-primary; }
-                                            Text { text: "Pack Islands"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                                            Text { text: root.label-pack-islands; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                                         }
                                         TouchArea { clicked => { root.command-executed("uv.pack_islands"); } }
                                     }
@@ -1915,7 +1938,7 @@ export component PetuniaSlintShell inherits Window {
                     alignment: center;
 
                     Text { text: root.status-message; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
-                    Text { text: "LMB select   ·   MMB orbit   ·   Esc cancel"; color: DesignTokens.text-muted; font-size: 11px; vertical-alignment: center; }
+                    Text { text: root.label-status-hint; color: DesignTokens.text-muted; font-size: 11px; vertical-alignment: center; }
 
                     Rectangle { horizontal-stretch: 1; }
 
@@ -1936,7 +1959,7 @@ export component PetuniaSlintShell inherits Window {
                                 stroke: asset-library-visible ? DesignTokens.canvas : DesignTokens.text-primary;
                             }
                             Text {
-                                text: "Asset Library";
+                                text: root.label-asset-library;
                                 color: asset-library-visible ? DesignTokens.canvas : DesignTokens.text-primary;
                                 font-size: 10px;
                                 font-weight: 600;
@@ -1968,7 +1991,7 @@ export component PetuniaSlintShell inherits Window {
 
                 HorizontalLayout {
                     Text {
-                        text: "Parts";
+                        text: root.label-parts;
                         color: DesignTokens.text-primary;
                         font-size: 12px;
                         font-weight: 700;
@@ -2238,7 +2261,7 @@ export component PetuniaSlintShell inherits Window {
                     }
 
                     Text {
-                        text: "Project Asset Library";
+                        text: root.label-project-asset-library;
                         color: DesignTokens.text-primary;
                         font-size: 12px;
                         font-weight: 700;
@@ -2266,7 +2289,7 @@ export component PetuniaSlintShell inherits Window {
                             spacing: 4px;
                             alignment: center;
                             IconDisplay { icon: IconSet.BookmarkPlus; size: 12px; stroke: DesignTokens.text-primary; }
-                            Text { text: "Save Active as Asset"; color: DesignTokens.text-primary; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                            Text { text: root.label-save-active-as-asset; color: DesignTokens.text-primary; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                         }
                         TouchArea { clicked => { root.save-active-as-asset-requested(); } }
                     }
@@ -2512,7 +2535,7 @@ export component PetuniaSlintShell inherits Window {
 
                     HorizontalLayout {
                         Text {
-                            text: "Preferences";
+                            text: root.label-preferences;
                             color: DesignTokens.text-primary;
                             font-size: 14px;
                             font-weight: 700;
@@ -2529,7 +2552,7 @@ export component PetuniaSlintShell inherits Window {
                     Rectangle { height: 1px; background: DesignTokens.border; }
 
                     Text {
-                        text: "Theme (P3D-085)";
+                        text: root.label-theme;
                         color: DesignTokens.text-primary;
                         font-size: 12px;
                         font-weight: 600;
@@ -2539,51 +2562,31 @@ export component PetuniaSlintShell inherits Window {
                         spacing: 8px;
                         alignment: start;
 
-                        Rectangle {
-                            width: 120px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: root.current-theme == "petunia-dark" ? DesignTokens.accent : DesignTokens.surface;
-                            border-width: 1px;
-                            border-color: DesignTokens.border;
-
-                            Text {
-                                text: "Petunia Dark";
-                                color: root.current-theme == "petunia-dark" ? DesignTokens.canvas : DesignTokens.text-primary;
-                                font-size: 11px;
-                                font-weight: 600;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
-                            }
-                            TouchArea {
-                                clicked => { root.theme-changed("petunia-dark"); }
-                            }
-                        }
-
-                        Rectangle {
+                        for theme in root.themes: Rectangle {
                             width: 140px;
                             height: 28px;
                             border-radius: 4px;
-                            background: root.current-theme == "petunia-high-contrast" ? DesignTokens.accent : DesignTokens.surface;
+                            background: theme.active ? DesignTokens.accent : DesignTokens.surface;
                             border-width: 1px;
                             border-color: DesignTokens.border;
 
                             Text {
-                                text: "High Contrast";
-                                color: root.current-theme == "petunia-high-contrast" ? DesignTokens.canvas : DesignTokens.text-primary;
+                                text: theme.name;
+                                color: theme.active ? DesignTokens.canvas : DesignTokens.text-primary;
                                 font-size: 11px;
                                 font-weight: 600;
                                 vertical-alignment: center;
                                 horizontal-alignment: center;
+                                overflow: elide;
                             }
                             TouchArea {
-                                clicked => { root.theme-changed("petunia-high-contrast"); }
+                                clicked => { root.theme-changed(theme.id); }
                             }
                         }
                     }
 
                     Text {
-                        text: "Keymap: Standard  ·  Language: English\nTheme tokens dynamically synchronized with ThemeRegistry.";
+                        text: root.shell-info;
                         color: DesignTokens.text-muted;
                         font-size: 11px;
                     }

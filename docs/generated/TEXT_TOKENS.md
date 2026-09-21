@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **589**.
+Total de chaves de localização cadastradas: **598**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -559,7 +559,9 @@ Total de chaves de localização cadastradas: **589**.
 | `transform.scale` | Scale | Escala |
 | `transform.title` | Transform | Transform |
 | `transform.unlink` | Unlink axes | Desligar eixos |
+| `ui.active_brush_color` | Active Brush Color | Cor ativa do pincel |
 | `ui.active_tool` | Active tool | Ferramenta ativa |
+| `ui.albedo_base_color` | Albedo (Base Color) | Albedo (cor base) |
 | `ui.assets` | Asset Library | Assets |
 | `ui.at_3d_cursor` | at 3D Cursor | no Cursor 3D |
 | `ui.close` | Close | Fechar |
@@ -576,13 +578,20 @@ Total de chaves de localização cadastradas: **589**.
 | `ui.more_actions` | More actions | Mais ações |
 | `ui.no_tool` | Tool disabled in tools.toml | Ferramenta desligada no tools.toml |
 | `ui.outliner` | Outliner | Outliner |
+| `ui.pack_islands` | Pack Islands | Empacotar ilhas |
+| `ui.parts` | Parts | Peças |
+| `ui.project_asset_library` | Project Asset Library | Biblioteca de Assets do Projeto |
 | `ui.properties` | Properties | Propriedades |
 | `ui.redock` | Re-dock the Properties panel into the sidebar | Reancorar o Painel de Propriedades na barra lateral |
 | `ui.refs` | Reference images | Imagens de referência |
 | `ui.rename` | Rename | Renomear |
+| `ui.save_active_as_asset` | Save Active as Asset | Salvar ativo como asset |
 | `ui.search` | Search | Buscar |
+| `ui.status_hint` | LMB select   ·   MMB orbit   ·   Esc cancel | LMB seleciona   ·   MMB orbita   ·   Esc cancela |
+| `ui.theme` | Theme | Tema |
 | `ui.tools` | Tools | Ferramentas |
 | `ui.tools_menu` | Tools… | Ferramentas… |
+| `ui.unwrap_mesh` | Unwrap Mesh | Desdobrar malha |
 | `ui.visible` | Visible | Visível |
 | `uv.faces` | Faces | Faces |
 | `uv.hint` | Click: select face. Drag: move UVs. Wheel: scale. | Clique: seleciona face. Arraste: move UVs. Scroll: escala. |

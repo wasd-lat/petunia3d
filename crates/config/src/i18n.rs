@@ -175,6 +175,21 @@ pub mod text_id {
     pub const UI_REDOCK: TextId = TextId::new("ui.redock");
     pub const UI_AT_3D_CURSOR: TextId = TextId::new("ui.at_3d_cursor");
 
+    // Chrome do shell Slint: títulos de painel, botões e dicas de status.
+    pub const UI_PARTS: TextId = TextId::new("ui.parts");
+    pub const UI_PROJECT_ASSET_LIBRARY: TextId = TextId::new("ui.project_asset_library");
+    pub const UI_SAVE_ACTIVE_AS_ASSET: TextId = TextId::new("ui.save_active_as_asset");
+    pub const UI_STATUS_HINT: TextId = TextId::new("ui.status_hint");
+    pub const UI_UNWRAP_MESH: TextId = TextId::new("ui.unwrap_mesh");
+    pub const UI_PACK_ISLANDS: TextId = TextId::new("ui.pack_islands");
+    pub const UI_ACTIVE_BRUSH_COLOR: TextId = TextId::new("ui.active_brush_color");
+    pub const UI_ALBEDO_BASE_COLOR: TextId = TextId::new("ui.albedo_base_color");
+    pub const UI_THEME: TextId = TextId::new("ui.theme");
+    pub const ACTIONS_APPLY: TextId = TextId::new("actions.apply");
+    pub const ACTIONS_CANCEL: TextId = TextId::new("actions.cancel");
+    pub const ACTIONS_DELETE: TextId = TextId::new("actions.delete");
+    pub const ACTIONS_DUPLICATE: TextId = TextId::new("actions.duplicate");
+
     // Barra de menus do shell e itens que ela publica. As chaves de locale já
     // existiam; o que faltava era o vínculo tipado que o shell consome.
     pub const MENU_FILE: TextId = TextId::new("menu.file");
@@ -311,6 +326,19 @@ pub mod text_id {
         UI_FLOATING_INSPECTOR,
         UI_REDOCK,
         UI_AT_3D_CURSOR,
+        UI_PARTS,
+        UI_PROJECT_ASSET_LIBRARY,
+        UI_SAVE_ACTIVE_AS_ASSET,
+        UI_STATUS_HINT,
+        UI_UNWRAP_MESH,
+        UI_PACK_ISLANDS,
+        UI_ACTIVE_BRUSH_COLOR,
+        UI_ALBEDO_BASE_COLOR,
+        UI_THEME,
+        ACTIONS_APPLY,
+        ACTIONS_CANCEL,
+        ACTIONS_DELETE,
+        ACTIONS_DUPLICATE,
         MENU_FILE,
         MENU_EDIT,
         MENU_VIEW,
