@@ -262,6 +262,7 @@ pub struct ShellViewModel {
     pub active_object_details: String,
     pub active_material_name: String,
     pub scene_stats: String,
+    pub uv_stats: String,
     pub current_theme: String,
     pub is_orthographic: bool,
     pub is_wireframe: bool,
@@ -322,6 +323,19 @@ impl ShellViewModel {
             state.scene_verts()
         );
 
+        let uv_stats = match petunia_module_uv::UvModule::diagnostics(state) {
+            Some(diagnostics) => format!(
+                "Provider: xatlas-rs-v2 (generic fallback)\nIslands: {}\nOverlaps: {}\nZero-area faces: {}\nOut of range: {}\nStretch: mean {:.1}% / max {:.1}%",
+                diagnostics.island_count,
+                diagnostics.overlapping_islands,
+                diagnostics.zero_area_faces,
+                diagnostics.out_of_range_corners,
+                diagnostics.mean_stretch * 100.0,
+                diagnostics.max_stretch * 100.0,
+            ),
+            None => "No active mesh".to_string(),
+        };
+
         let active_tool = if state.session.tools.active_tool.is_empty() {
             "select".to_string()
         } else {
@@ -354,6 +368,7 @@ impl ShellViewModel {
             active_object_details,
             active_material_name,
             scene_stats,
+            uv_stats,
             current_theme: state.ui.active_theme_id.clone(),
             is_orthographic: state.session.camera.proj == petunia_core::Projection::Ortho,
             is_wireframe: state.session.show_wireframe_overlay,
@@ -1791,6 +1806,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_active_object_details(vm.active_object_details.as_str().into());
     window.set_active_material_name(vm.active_material_name.as_str().into());
     window.set_scene_stats(vm.scene_stats.as_str().into());
+    window.set_uv_stats(vm.uv_stats.as_str().into());
     window.set_current_theme(vm.current_theme.as_str().into());
 
     let scene_items: Vec<SceneItem> = vm
@@ -3569,6 +3585,22 @@ mod tests {
         );
         assert!(bridge.commit_tool_modal());
         assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+    }
+
+    #[test]
+    fn uv_statistics_come_from_the_real_diagnostics_not_a_hardcoded_claim() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let stats = bridge.view_model().uv_stats;
+        assert!(stats.contains("xatlas-rs-v2"));
+        assert!(stats.contains("Islands:"));
+        assert!(!stats.contains("LSCM"));
+        assert!(!stats.contains("Texel Density: Auto"));
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.execute_core_command("uv.unwrap").unwrap();
+        let stats = bridge.view_model().uv_stats;
+        assert!(stats.contains("Islands: 1"), "unwrap real: {stats}");
     }
 
     #[test]

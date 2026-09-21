@@ -313,7 +313,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> active-object-title: "Default Cube";
     in-out property <string> active-object-details: "Vertices: 8  ·  Faces: 6";
     in-out property <string> active-material-name: "Default Material";
-    in-out property <string> scene-stats: "12 tris  ·  8 verts";
+    in-out property <string> scene-stats: "";
+    in-out property <string> uv-stats: "";
     in-out property <string> current-theme: "petunia-dark";
 
     in-out property <string> selection-domain: "OBJECT";
@@ -1656,7 +1657,7 @@ export component PetuniaSlintShell inherits Window {
                                 toggled => { self.open = !self.open; }
 
                                 Text {
-                                    text: "Algorithm: LSCM / ABF++ Conformal\nTarget: \{root.active-object-title}\nTexel Density: Auto";
+                                    text: root.uv-stats;
                                     color: DesignTokens.text-secondary;
                                     font-size: 11px;
                                 }
