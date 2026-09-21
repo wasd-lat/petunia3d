@@ -297,6 +297,7 @@ pub struct ShellViewModel {
     pub label_active_brush_color: String,
     pub label_albedo_base_color: String,
     pub label_theme: String,
+    pub label_place_in_scene: String,
     pub label_asset_library: String,
     pub label_preferences: String,
     pub shell_info: String,
@@ -439,6 +440,7 @@ impl ShellViewModel {
             label_active_brush_color: String::new(),
             label_albedo_base_color: String::new(),
             label_theme: String::new(),
+            label_place_in_scene: String::new(),
             label_asset_library: String::new(),
             label_preferences: String::new(),
             shell_info: String::new(),
@@ -1232,6 +1234,22 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
     }
 
+    /// Instancia uma cópia do asset da biblioteca no cursor 3D.
+    ///
+    /// É o caminho que o comando canônico `model.instantiate_asset` não tinha:
+    /// ele exige um `asset_id`, então a palette não consegue disparar sozinha.
+    pub fn place_asset(&mut self, id: &str) -> bool {
+        let Ok(asset) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        if !self.state.instantiate_asset_by_id(asset, None) {
+            self.state.set_status("Asset not found in project library");
+            return false;
+        }
+        self.state.mark_dirty();
+        true
+    }
+
     /// Abre o menu de contexto do Outliner sobre a linha de `id`.
     ///
     /// O alvo é selecionado antes de abrir: as ações do menu operam sobre ele e
@@ -1960,6 +1978,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_active_brush_color = translated(petunia_config::text_id::UI_ACTIVE_BRUSH_COLOR);
         vm.label_albedo_base_color = translated(petunia_config::text_id::UI_ALBEDO_BASE_COLOR);
         vm.label_theme = translated(petunia_config::text_id::UI_THEME);
+        vm.label_place_in_scene = translated(petunia_config::text_id::UI_PLACE_IN_SCENE);
         vm.label_asset_library = translated(petunia_config::text_id::UI_ASSETS);
         vm.label_preferences = translated(petunia_config::text_id::MENU_PREFERENCES);
         // A linha de rodapé das preferências informa o keymap e o idioma REAIS em uso.
@@ -2339,6 +2358,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_label_active_brush_color(vm.label_active_brush_color.as_str().into());
     window.set_label_albedo_base_color(vm.label_albedo_base_color.as_str().into());
     window.set_label_theme(vm.label_theme.as_str().into());
+    window.set_label_place_in_scene(vm.label_place_in_scene.as_str().into());
     window.set_label_asset_library(vm.label_asset_library.as_str().into());
     window.set_label_preferences(vm.label_preferences.as_str().into());
     window.set_shell_info(vm.shell_info.as_str().into());
@@ -3073,6 +3093,22 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 return;
             }
             bridge.menu_item_invoked(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let place_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_place_asset_requested(move |id| {
+        if let Ok(mut bridge) = place_bridge.lock() {
+            bridge.place_asset(id.as_str());
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -4662,6 +4698,36 @@ mod tests {
             !info.contains("Keymap: Standard"),
             "a linha antiga afirmava um keymap fixo que não era o real: {info}"
         );
+    }
+
+    #[test]
+    fn placing_a_library_asset_instantiates_a_copy_at_the_cursor() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let source = bridge.state.project.assets[0].id;
+        let before = bridge.state.project.assets.len();
+        bridge.state.session.cursor_3d = [4.0, 1.0, -2.0];
+
+        assert!(bridge.place_asset(&source.to_string()));
+        assert_eq!(bridge.state.project.assets.len(), before + 1);
+        let placed = bridge.state.project.assets.last().unwrap();
+        assert_ne!(placed.id, source, "a cópia precisa de identidade própria");
+        let center = placed.mesh.selection_center();
+        assert!((center[0] - 4.0).abs() < 1.0e-4, "veio {center:?}");
+        assert!((center[2] - (-2.0)).abs() < 1.0e-4, "veio {center:?}");
+
+        assert!(bridge.state.project.undo.can_undo());
+        assert!(bridge.state.undo());
+        assert_eq!(bridge.state.project.assets.len(), before);
+    }
+
+    #[test]
+    fn placing_an_unknown_asset_is_refused_and_says_so() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let before = bridge.state.project.assets.len();
+        assert!(!bridge.place_asset(&uuid::Uuid::new_v4().to_string()));
+        assert!(!bridge.place_asset("not-a-uuid"));
+        assert_eq!(bridge.state.project.assets.len(), before);
+        assert_eq!(bridge.state.ui.status, "Asset not found in project library");
     }
 
     #[test]

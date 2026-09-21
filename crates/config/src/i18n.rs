@@ -185,6 +185,7 @@ pub mod text_id {
     pub const UI_ACTIVE_BRUSH_COLOR: TextId = TextId::new("ui.active_brush_color");
     pub const UI_ALBEDO_BASE_COLOR: TextId = TextId::new("ui.albedo_base_color");
     pub const UI_THEME: TextId = TextId::new("ui.theme");
+    pub const UI_PLACE_IN_SCENE: TextId = TextId::new("ui.place_in_scene");
     pub const ACTIONS_APPLY: TextId = TextId::new("actions.apply");
     pub const ACTIONS_CANCEL: TextId = TextId::new("actions.cancel");
     pub const ACTIONS_DELETE: TextId = TextId::new("actions.delete");
@@ -335,6 +336,7 @@ pub mod text_id {
         UI_ACTIVE_BRUSH_COLOR,
         UI_ALBEDO_BASE_COLOR,
         UI_THEME,
+        UI_PLACE_IN_SCENE,
         ACTIONS_APPLY,
         ACTIONS_CANCEL,
         ACTIONS_DELETE,

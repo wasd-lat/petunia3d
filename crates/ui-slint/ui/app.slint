@@ -541,6 +541,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-delete: "";
     in-out property <string> label-duplicate: "";
     in-out property <string> label-theme: "";
+    in-out property <string> label-place-in-scene: "";
     in-out property <string> label-asset-library: "";
     in-out property <string> label-preferences: "";
     in-out property <string> shell-info: "";
@@ -611,6 +612,7 @@ export component PetuniaSlintShell inherits Window {
     callback toggle-wireframe-requested;
     callback reset-camera-requested;
     callback save-active-as-asset-requested;
+    callback place-asset-requested(string);
     callback paint-color-changed(float, float, float);
     callback brush-size-changed(float);
     callback brush-opacity-changed(float);
@@ -2373,6 +2375,20 @@ export component PetuniaSlintShell inherits Window {
                                                 root.scene-select(item.id);
                                                 root.duplicate-requested();
                                             }
+                                        }
+                                    }
+
+                                    // Coloca uma cópia do asset no cursor 3D (P3D-093).
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 22px;
+                                        border-radius: 3px;
+                                        background: DesignTokens.surface-raised;
+                                        accessible-role: button;
+                                        accessible-label: root.label-place-in-scene;
+                                        IconDisplay { icon: IconSet.Plus; size: 12px; stroke: DesignTokens.text-secondary; }
+                                        TouchArea {
+                                            clicked => { root.place-asset-requested(item.id); }
                                         }
                                     }
                                 }
