@@ -537,6 +537,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> context-menu-locked: false;
     in-out property <string> boolean-operand-name: "";
     in-out property <bool> boolean-ready: false;
+    in-out property <bool> boolean-keep-parts: false;
     in-out property <bool> rename-active: false;
     in-out property <string> menu-open: "";
     property <length> menu-anchor-x: 0px;
@@ -641,6 +642,8 @@ export component PetuniaSlintShell inherits Window {
     callback uv-seam-toggled;
     callback uv-seams-cleared;
     callback boolean-operand-cleared;
+    callback boolean-keep-parts-set(bool);
+    callback join-requested;
     callback paint-fill-scope-set(string);
     callback paint-projection-set(string);
     callback paint-lock-set(string);
@@ -1633,6 +1636,42 @@ export component PetuniaSlintShell inherits Window {
                                             accessible-role: button;
                                             accessible-label: "Intersect with the operand";
                                             TouchArea { clicked => { root.command-executed("model.intersect"); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Join"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Join the operand into the active object";
+                                            TouchArea { clicked => { root.join-requested(); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.boolean-keep-parts ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: checkbox;
+                                            accessible-label: "Keep Parts";
+                                            accessible-checked: root.boolean-keep-parts;
+                                            Text {
+                                                text: root.boolean-keep-parts ? "Keep Parts: on" : "Keep Parts: off";
+                                                color: root.boolean-keep-parts ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 10px;
+                                                font-weight: 600;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            TouchArea { clicked => { root.boolean-keep-parts-set(!root.boolean-keep-parts); } }
                                         }
                                     }
 

@@ -14,7 +14,7 @@ description: Catálogo canônico de comandos gerados a partir do CommandDispatch
 > **Single Source of Truth (P3D-100, P3D-119)**
 > Todos os comandos do Petunia3D são registrados centralmente no `CommandDispatcher`, permitindo despacho transacional com histórico (Undo/Redo), Command Palette e telemetria.
 
-Total de comandos registrados no motor: **83**.
+Total de comandos registrados no motor: **84**.
 
 ## Tabela Geral de Comandos
 
@@ -49,15 +49,16 @@ Total de comandos registrados no motor: **83**.
 | `model.add_wedge` | **Add Wedge** | `Model` | Não | Modeling | Add a wedge/ramp primitive |
 | `model.bevel` | **Bevel Edges** | `Model` | Sim | Bevel | Bevel selected mesh edges |
 | `model.connect` | **Connect Loops** | `Model` | Sim | Modeling | Bridge two selected faces with connecting quads |
-| `model.cut` | **Cut** | `Model` | Sim | Modeling | Subtract the boolean operand from the active object |
+| `model.cut` | **Cut** | `Model` | Não | Modeling | Subtract the boolean operand from the active object |
 | `model.extrude` | **Extrude** | `Model` | Sim | Extrude | Extrude selected faces along surface normal |
 | `model.extrude_individual` | **Extrude Individual** | `Model` | Sim | Extrude | Extrude selected faces individually |
 | `model.flip_diagonal` | **Flip Diagonal** | `Model` | Sim | Modeling | Flip quad internal diagonal or triangle edge |
 | `model.flip_normals` | **Flip Normals** | `Model` | Sim | Modeling | Reverse orientation of face normals |
-| `model.fuse` | **Fuse** | `Model` | Sim | Modeling | Combine the active object with the boolean operand into one |
+| `model.fuse` | **Fuse** | `Model` | Não | Modeling | Combine the active object with the boolean operand into one |
 | `model.inset` | **Inset Faces** | `Model` | Sim | Modeling | Inset selected faces towards interior |
 | `model.instantiate_asset` | **Instantiate Asset** | `Model` | Sim | Assets | Instantiate a library asset into the active 3D scene |
-| `model.intersect` | **Intersect** | `Model` | Sim | Modeling | Keep only the volume shared with the boolean operand |
+| `model.intersect` | **Intersect** | `Model` | Não | Modeling | Keep only the volume shared with the boolean operand |
+| `model.join` | **Join** | `Model` | Não | Modeling | Merge the operand into the active object keeping both topologies |
 | `model.knife` | **Knife** | `Model` | Não | Knife | Cut the active mesh along edge points picked in the viewport |
 | `model.loop_cut` | **Loop Cut** | `Model` | Sim | LoopCut | Insert evenly spaced cuts along a quad ring |
 | `model.merge` | **Merge Center** | `Model` | Sim | Modeling | Merge selected vertices into center point |

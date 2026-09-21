@@ -281,6 +281,7 @@ pub struct ShellViewModel {
     pub context_menu_locked: bool,
     pub boolean_operand_name: String,
     pub boolean_ready: bool,
+    pub boolean_keep_parts: bool,
     pub menu_open: String,
     pub menu_file_label: String,
     pub menu_edit_label: String,
@@ -446,6 +447,7 @@ impl ShellViewModel {
             context_menu_locked: false,
             boolean_operand_name: String::new(),
             boolean_ready: false,
+            boolean_keep_parts: false,
             menu_open: String::new(),
             menu_file_label: String::new(),
             menu_edit_label: String::new(),
@@ -2193,6 +2195,31 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Liga/desliga o modificador **Keep Parts**.
+    pub fn set_boolean_keep_parts(&mut self, keep: bool) -> bool {
+        if self.state.session.tools.boolean_keep_parts == keep {
+            return false;
+        }
+        self.state.session.tools.boolean_keep_parts = keep;
+        self.state.set_status(if keep {
+            "Keep Parts on: the operand stays in the scene"
+        } else {
+            "Keep Parts off: the operand is consumed"
+        });
+        true
+    }
+
+    /// **Join** pelo id canônico.
+    pub fn join_operand(&mut self) -> bool {
+        match self.execute_core_command("model.join") {
+            Ok(()) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
     pub fn clear_boolean_operand(&mut self) -> bool {
         if self.state.session.tools.boolean_operand.take().is_none() {
             return false;
@@ -2968,6 +2995,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 vm.boolean_operand_name = "missing".to_string();
             }
         }
+        vm.boolean_keep_parts = self.state.session.tools.boolean_keep_parts;
         vm.boolean_ready = self.state.session.tools.boolean_operand.is_some()
             && self.state.project.active_mesh().is_some();
         if let Some(kind) = self.menu_open {
@@ -3539,6 +3567,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_context_menu_locked(vm.context_menu_locked);
     window.set_boolean_operand_name(vm.boolean_operand_name.as_str().into());
     window.set_boolean_ready(vm.boolean_ready);
+    window.set_boolean_keep_parts(vm.boolean_keep_parts);
     window.set_menu_open(vm.menu_open.as_str().into());
     window.set_menu_file_label(vm.menu_file_label.as_str().into());
     window.set_menu_edit_label(vm.menu_edit_label.as_str().into());
@@ -4363,6 +4392,34 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 return;
             }
             bridge.menu_item_invoked(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let keep_parts_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_boolean_keep_parts_set(move |keep| {
+        if let Ok(mut bridge) = keep_parts_bridge.lock() {
+            bridge.set_boolean_keep_parts(keep);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let join_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_join_requested(move || {
+        if let Ok(mut bridge) = join_bridge.lock() {
+            bridge.join_operand();
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -7271,6 +7328,70 @@ mod tests {
         let params = bridge.view_model().paint_effect_params;
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].key, "levels");
+    }
+
+    #[test]
+    fn join_merges_the_operand_through_the_shell_and_keeps_parts_is_opt_in() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(
+            petunia_core::PrimitiveKind::Cylinder,
+        ));
+        let operand = bridge.state.project.assets[1].id;
+        let operand_verts = bridge.state.project.assets[1].mesh.verts.len();
+        let active_verts = bridge.state.project.assets[0].mesh.verts.len();
+        // A primitiva recém-criada vira ativa; o alvo do Join é o cubo.
+        bridge.state.project.active = 0;
+
+        assert!(bridge.set_boolean_operand(&operand.to_string()));
+        assert!(!bridge.view_model().boolean_keep_parts, "padrão é consumir");
+        let undo_before = bridge.state.project.undo.depth().0;
+
+        assert!(bridge.join_operand());
+        assert_eq!(bridge.state.project.assets.len(), 1);
+        assert_eq!(
+            bridge.state.project.assets[0].mesh.verts.len(),
+            active_verts + operand_verts,
+            "Join preserva as duas topologias"
+        );
+        assert_eq!(
+            bridge.state.project.undo.depth().0,
+            undo_before + 1,
+            "Join é exatamente uma entrada de undo"
+        );
+    }
+
+    #[test]
+    fn keep_parts_toggle_is_reported_and_preserves_the_operand() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_boolean_keep_parts(true));
+        assert!(bridge.view_model().boolean_keep_parts);
+        assert_eq!(
+            bridge.state.ui.status,
+            "Keep Parts on: the operand stays in the scene"
+        );
+        assert!(!bridge.set_boolean_keep_parts(true), "sem mudança real");
+        assert!(bridge.set_boolean_keep_parts(false));
+        assert!(!bridge.view_model().boolean_keep_parts);
+
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Cone));
+        let operand = bridge.state.project.assets[1].id;
+        {
+            let mesh = &mut bridge.state.project.assets[1].mesh;
+            mesh.select_all();
+            mesh.translate_selected([1.6, 0.0, 0.0]);
+            mesh.deselect_all();
+        }
+        bridge.set_boolean_operand(&operand.to_string());
+        bridge.set_boolean_keep_parts(true);
+        bridge.state.project.active = 0;
+
+        assert!(bridge.boolean_op("model.fuse"));
+        assert_eq!(
+            bridge.state.project.assets.len(),
+            2,
+            "com Keep Parts o operando permanece"
+        );
+        assert!(bridge.state.project.assets.iter().any(|a| a.id == operand));
     }
 
     #[test]

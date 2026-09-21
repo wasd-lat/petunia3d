@@ -342,6 +342,9 @@ pub struct ToolState {
     /// Operando B das operações booleanas (Fuse/Cut/Intersect): o outro ativo
     /// escolhido pelo usuário, distinto do ativo atual (A).
     pub boolean_operand: Option<uuid::Uuid>,
+    /// Modificador **Keep Parts**: mantém o operando na cena depois da operação,
+    /// em vez de consumi-lo.
+    pub boolean_keep_parts: bool,
     pub mesh_preview: Option<crate::mesh_preview::MeshPreview>,
     pub paint_color: [f32; 3],
     pub paint_radius: f32,
@@ -411,6 +414,7 @@ impl ToolState {
             pointer_session: None,
             cut_session: None,
             boolean_operand: None,
+            boolean_keep_parts: false,
             mesh_preview: None,
             paint_color: [1.0, 0.2, 0.2],
             paint_radius: 0.8,
@@ -2006,7 +2010,45 @@ impl AppState {
         if let Some(asset) = self.project.assets.get_mut(active_index) {
             asset.mesh = result;
         }
-        // B é consumido: remover antes do ativo desloca o índice.
+        // Keep Parts mantém B na cena; sem o modificador ele é consumido, e
+        // remover antes do ativo desloca o índice.
+        if !self.session.tools.boolean_keep_parts {
+            self.project.assets.remove(operand_index);
+            if operand_index < active_index {
+                self.project.active = active_index - 1;
+            }
+        }
+        self.session.tools.boolean_operand = None;
+        self.sync_selection();
+        self.emit_mesh_changed();
+        self.mark_dirty();
+        Ok(verts)
+    }
+
+    /// **Join**: funde o operando no ativo como um único objeto, sem kernel
+    /// booleano — a topologia dos dois é preservada lado a lado.
+    pub fn join_active_with_operand(&mut self) -> Result<usize, &'static str> {
+        let operand_id = self
+            .session
+            .tools
+            .boolean_operand
+            .ok_or("Choose a boolean operand first")?;
+        let active_index = self.project.active;
+        let operand_index = self
+            .project
+            .assets
+            .iter()
+            .position(|asset| asset.id == operand_id)
+            .ok_or("The boolean operand no longer exists")?;
+        if operand_index == active_index {
+            return Err("The boolean operand cannot be the active object");
+        }
+        let other = self.project.assets[operand_index].mesh.clone();
+        let added = other.verts.len();
+        self.checkpoint("join");
+        if let Some(asset) = self.project.assets.get_mut(active_index) {
+            asset.mesh.join(&other);
+        }
         self.project.assets.remove(operand_index);
         if operand_index < active_index {
             self.project.active = active_index - 1;
@@ -2015,7 +2057,7 @@ impl AppState {
         self.sync_selection();
         self.emit_mesh_changed();
         self.mark_dirty();
-        Ok(verts)
+        Ok(added)
     }
 
     /// Renomeia o ativo ativo (P3D-093).

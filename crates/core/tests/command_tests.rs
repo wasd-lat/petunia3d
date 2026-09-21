@@ -875,7 +875,13 @@ fn test_boolean_fuse_and_cut_between_active_and_operand() {
     state.session.tools.boolean_operand = Some(b_id);
 
     let before = state.project.assets[0].mesh.verts.len();
+    let undo_before = state.project.undo.depth().0;
     assert!(state.dispatch(&BooleanOpCmd::new(BooleanOp::Union)).is_ok());
+    assert_eq!(
+        state.project.undo.depth().0,
+        undo_before + 1,
+        "Fuse é exatamente uma entrada de undo"
+    );
     assert_eq!(state.project.assets.len(), 1, "B é consumido");
     assert!(state.project.assets[0].mesh.verts.len() > before);
     assert!(state.session.tools.boolean_operand.is_none());
@@ -923,4 +929,79 @@ fn test_boolean_refuses_the_active_asset_as_operand_and_missing_operand() {
             .is_err()
     );
     assert_eq!(state.project.assets.len(), 1);
+}
+
+#[test]
+fn test_keep_parts_keeps_the_operand_in_the_scene() {
+    use petunia_core::BooleanOpCmd;
+    use petunia_mesh::boolean::BooleanOp;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    state.project.assets[0].mesh = petunia_mesh::Mesh::cube(2.0);
+
+    let mut b = petunia_mesh::Mesh::cube(2.0);
+    b.select_all();
+    b.translate_selected([1.6, 0.0, 0.0]);
+    b.deselect_all();
+    state.project.add("B", b);
+    let b_id = state.project.assets[1].id;
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+    state.session.tools.boolean_keep_parts = true;
+
+    assert!(state.dispatch(&BooleanOpCmd::new(BooleanOp::Union)).is_ok());
+    assert_eq!(
+        state.project.assets.len(),
+        2,
+        "Keep Parts mantém o operando na cena"
+    );
+    assert!(state.project.assets.iter().any(|a| a.id == b_id));
+    assert_eq!(state.project.active, 0, "o ativo continua sendo A");
+    assert!(state.session.tools.boolean_operand.is_none());
+}
+
+#[test]
+fn test_join_merges_both_topologies_without_a_boolean_kernel() {
+    use petunia_core::JoinObjectsCmd;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    state.project.assets[0].mesh = petunia_mesh::Mesh::cube(2.0);
+    let a_verts = state.project.assets[0].mesh.verts.len();
+    let a_faces = state.project.assets[0].mesh.faces.len();
+
+    let mut b = petunia_mesh::Mesh::cube(2.0);
+    b.select_all();
+    b.translate_selected([5.0, 0.0, 0.0]);
+    b.deselect_all();
+    state.project.add("B", b);
+    let b_id = state.project.assets[1].id;
+    let b_verts = state.project.assets[1].mesh.verts.len();
+    let b_faces = state.project.assets[1].mesh.faces.len();
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+
+    let undo_before = state.project.undo.depth().0;
+    assert!(state.dispatch(&JoinObjectsCmd).is_ok());
+    assert_eq!(
+        state.project.undo.depth().0,
+        undo_before + 1,
+        "Join é exatamente uma entrada de undo"
+    );
+    assert_eq!(state.project.assets.len(), 1);
+    let mesh = state.project.active_mesh().unwrap();
+    assert_eq!(
+        mesh.verts.len(),
+        a_verts + b_verts,
+        "Join preserva os vértices das duas malhas"
+    );
+    assert_eq!(mesh.faces.len(), a_faces + b_faces);
+
+    assert!(state.undo());
+    assert_eq!(
+        state.project.assets.len(),
+        2,
+        "undo restaura os dois objetos"
+    );
 }

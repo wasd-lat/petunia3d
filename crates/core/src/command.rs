@@ -691,6 +691,16 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "model.join",
+                "Join",
+                "Merge the operand into the active object keeping both topologies",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            JoinObjectsCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.intersect",
                 "Intersect",
                 "Keep only the volume shared with the boolean operand",
@@ -2491,6 +2501,12 @@ impl Command for BooleanOpCmd {
         self.label_for()
     }
 
+    /// Sem checkpoint do dispatcher: `apply_boolean` captura a transação única.
+    /// Com os dois, cada operação empilharia duas entradas de undo.
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         if state.project.active_mesh().is_none() {
             return Err("No active mesh");
@@ -2521,6 +2537,51 @@ impl Command for BooleanOpCmd {
                 Ok(())
             }
             Err(error) => Err(CommandError::Execution(error.to_string())),
+        }
+    }
+}
+
+/// **Join**: funde o operando no ativo preservando as duas topologias.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct JoinObjectsCmd;
+
+impl Command for JoinObjectsCmd {
+    fn label(&self) -> &'static str {
+        "join"
+    }
+
+    /// Sem checkpoint do dispatcher: `join_active_with_operand` captura a única.
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.project.active_mesh().is_none() {
+            return Err("No active mesh");
+        }
+        let Some(operand) = state.session.tools.boolean_operand else {
+            return Err("Choose a boolean operand first");
+        };
+        if !state.project.assets.iter().any(|asset| asset.id == operand) {
+            return Err("The boolean operand no longer exists");
+        }
+        if state
+            .project
+            .active()
+            .is_some_and(|asset| asset.id == operand)
+        {
+            return Err("The boolean operand cannot be the active object");
+        }
+        Ok(())
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        match state.join_active_with_operand() {
+            Ok(verts) => {
+                state.set_status(format!("Join: {verts} vertices merged"));
+                Ok(())
+            }
+            Err(reason) => Err(CommandError::Execution(reason.to_string())),
         }
     }
 }
