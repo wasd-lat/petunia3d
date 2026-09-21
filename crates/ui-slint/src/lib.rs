@@ -618,6 +618,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub menu_open: Option<MenuKind>,
     /// Forma ancorada (Line/Rectangle) em curso: canto inicial em pixels do canvas.
     pub shape_anchor: Option<(u32, u32)>,
+    /// Plano de corte (Slice) ativo: âncora em pixels lógicos da viewport.
+    pub slice_anchor: Option<[f32; 2]>,
     /// Sessão de loop cut com slide interativo (P3D-131).
     pub loop_cut: Option<LoopCutSessionState>,
     /// Autosave rotativo do shell (P3D-002). Nunca sobrescreve o arquivo oficial.
@@ -782,6 +784,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             context_menu: None,
             menu_open: None,
             shape_anchor: None,
+            slice_anchor: None,
             loop_cut: None,
             autosave: petunia_core::AutosaveService::default(),
             pending_recovery: None,
@@ -1251,6 +1254,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.viewport_size = [width as f32, height as f32];
         self.state.session.camera.aspect = width as f32 / height as f32;
         self.state.mark_dirty();
+    }
+
+    /// Atualiza o plano de corte enquanto o ponteiro se move.
+    pub fn update_viewport_slice(&mut self, x: f32, y: f32) -> bool {
+        if self.slice_anchor.is_none() {
+            return false;
+        }
+        self.update_slice(x, y)
     }
 
     /// Inicia uma transformação modal por arrasto na viewport.
@@ -2101,6 +2112,96 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Abre o plano de corte (Slice) ancorado no ponto pressionado.
+    pub fn begin_slice(&mut self, x: f32, y: f32) -> bool {
+        let Some(mesh) = self.state.project.active_mesh().cloned() else {
+            self.state.set_status("Slice: no active mesh");
+            return false;
+        };
+        self.state.session.tools.cut_session = Some(petunia_core::CutSession::new(mesh));
+        self.state.session.tools.active_tool = "slice".to_string();
+        self.slice_anchor = Some([x, y]);
+        self.state
+            .set_status("Slice: drag to orient the plane, release to cut");
+        true
+    }
+
+    /// Atualiza a pré-visualização do plano de corte.
+    pub fn update_slice(&mut self, x: f32, y: f32) -> bool {
+        let Some(anchor) = self.slice_anchor else {
+            return false;
+        };
+        let viewport = petunia_core::LogicalRect::from_min_max(
+            [0.0, 0.0],
+            [self.viewport_size[0], self.viewport_size[1]],
+        );
+        let Some(session) = self.state.session.tools.cut_session.as_ref() else {
+            return false;
+        };
+        let Some(sliced) =
+            session.compute_slice(&self.state.session.camera, anchor, [x, y], viewport)
+        else {
+            return false;
+        };
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = sliced;
+        }
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Confirma o corte como uma única operação de undo.
+    pub fn commit_slice(&mut self) -> bool {
+        // A faca compartilha `cut_session`, então o Slice só age quando é ele que
+        // está armado — senão um release cancelaria o corte da faca.
+        if self.slice_anchor.is_none() && self.state.session.tools.active_tool != "slice" {
+            return false;
+        }
+        let Some(session) = self.state.session.tools.cut_session.take() else {
+            self.slice_anchor = None;
+            return false;
+        };
+        self.slice_anchor = None;
+        self.state.session.tools.active_tool = "select".to_string();
+        // A pré-visualização já está na malha: restaurar o snapshot, capturar e
+        // reaplicar o corte garante que o undo volte ao estado anterior.
+        let Some(current) = self.state.project.active_mesh().cloned() else {
+            return false;
+        };
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source.clone();
+        }
+        self.state.checkpoint("slice");
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = current;
+        }
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Slice applied");
+        true
+    }
+
+    /// Abandona o plano de corte restaurando a malha original.
+    pub fn cancel_slice(&mut self) -> bool {
+        if self.slice_anchor.is_none() && self.state.session.tools.active_tool != "slice" {
+            return false;
+        }
+        let Some(session) = self.state.session.tools.cut_session.take() else {
+            self.slice_anchor = None;
+            return false;
+        };
+        self.slice_anchor = None;
+        self.state.session.tools.active_tool = "select".to_string();
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source;
+        }
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Slice cancelled");
+        true
+    }
+
     /// Um clique de faca na viewport: primeiro ponto ancora, segundo corta.
     ///
     /// O ponto vem de `AppState::pick_edge`, então a faca corta a aresta que o
@@ -2640,6 +2741,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if self.cancel_loop_cut() {
             return true;
         }
+        if self.cancel_slice() {
+            return true;
+        }
         if self.cancel_knife() {
             return true;
         }
@@ -2826,6 +2930,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             "global.rename" => {
                 self.begin_rename();
+            }
+            "model.slice" => {
+                // A ação do keymap só arma a ferramenta; a âncora nasce no
+                // pointer-down da viewport.
+                self.state.session.tools.active_tool = "slice".to_string();
+                self.state
+                    .set_status("Slice: press and drag in the viewport");
             }
             "global.save_project" => self.apply(UiIntent::SaveProject),
             "global.help" => {
@@ -4112,6 +4223,14 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             "pos" => TransformKind::Position,
             "rot" => TransformKind::Rotation,
             "scale" => TransformKind::Scale,
+            // O plano de corte reusa o mesmo canal de arrasto, mas com a própria
+            // sessão: nada de transformar geometria.
+            "slice" => {
+                if let Ok(mut bridge) = transform_begin_bridge.lock() {
+                    bridge.begin_slice(x, y);
+                }
+                return;
+            }
             _ => return,
         };
         if let Ok(mut bridge) = transform_begin_bridge.lock() {
@@ -4123,6 +4242,17 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let window_weak = window.as_weak();
     window.on_viewport_transform_update(move |x, y| {
         if let Ok(mut bridge) = transform_drag_bridge.lock() {
+            if bridge.update_viewport_slice(x, y) {
+                let vm = bridge.view_model();
+                let new_frame = bridge.render_viewport();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    if let Some(frame) = new_frame {
+                        window.set_viewport_image(frame);
+                    }
+                }
+                return;
+            }
             bridge.update_viewport_transform(x, y);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
@@ -4139,6 +4269,17 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let window_weak = window.as_weak();
     window.on_viewport_transform_end(move || {
         if let Ok(mut bridge) = transform_end_bridge.lock() {
+            if bridge.commit_slice() {
+                let vm = bridge.view_model();
+                let new_frame = bridge.render_viewport();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    if let Some(frame) = new_frame {
+                        window.set_viewport_image(frame);
+                    }
+                }
+                return;
+            }
             bridge.end_viewport_transform();
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
@@ -7392,6 +7533,105 @@ mod tests {
             "com Keep Parts o operando permanece"
         );
         assert!(bridge.state.project.assets.iter().any(|a| a.id == operand));
+    }
+
+    #[test]
+    fn slice_drag_cuts_the_mesh_and_commits_one_undo_entry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.session.tools.active_tool = "slice".to_string();
+
+        assert!(bridge.begin_slice(400.0, 300.0));
+        assert_eq!(bridge.state.session.tools.active_tool, "slice");
+        assert!(bridge.slice_anchor.is_some());
+
+        assert!(
+            bridge.update_slice(400.0, 380.0),
+            "arrasto vertical precisa produzir um plano de corte"
+        );
+        // `slice_plane` com tampa mantém o semi-espaço positivo e o fecha: o
+        // resultado é uma metade fechada, então a contagem de faces e vértices
+        // se mantém e o que muda é a extensão da malha.
+        let sliced = bridge.state.project.active_mesh().unwrap().clone();
+        let report = sliced.validate_topology();
+        assert!(report.is_manifold && report.is_closed, "{report:?}");
+        let span = |mesh: &petunia_core::Mesh| {
+            let xs: Vec<f32> = mesh.verts.iter().map(|v| v.pos[0]).collect();
+            let zs: Vec<f32> = mesh.verts.iter().map(|v| v.pos[2]).collect();
+            let ys: Vec<f32> = mesh.verts.iter().map(|v| v.pos[1]).collect();
+            (
+                xs.iter().fold(f32::MIN, |a, b| a.max(*b))
+                    - xs.iter().fold(f32::MAX, |a, b| a.min(*b)),
+                ys.iter().fold(f32::MIN, |a, b| a.max(*b))
+                    - ys.iter().fold(f32::MAX, |a, b| a.min(*b)),
+                zs.iter().fold(f32::MIN, |a, b| a.max(*b))
+                    - zs.iter().fold(f32::MAX, |a, b| a.min(*b)),
+            )
+        };
+        let after = span(&sliced);
+        let before = (2.0, 2.0, 2.0);
+        assert!(
+            after.0 < before.0 - 0.1 || after.1 < before.1 - 0.1 || after.2 < before.2 - 0.1,
+            "o corte precisa reduzir a extensão em algum eixo: {after:?}"
+        );
+
+        assert!(bridge.commit_slice());
+        assert!(bridge.slice_anchor.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.state.undo());
+        let restored = span(bridge.state.project.active_mesh().unwrap());
+        assert_eq!(restored, before, "undo volta ao cubo inteiro");
+    }
+
+    #[test]
+    fn slice_without_a_drag_is_refused_and_escape_restores_the_mesh() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.session.tools.active_tool = "slice".to_string();
+
+        assert!(bridge.begin_slice(400.0, 300.0));
+        assert!(
+            !bridge.update_slice(402.0, 301.0),
+            "arrasto abaixo do limiar não define plano"
+        );
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "pré-visualização não empilha histórico"
+        );
+
+        assert!(bridge.handle_escape());
+        assert!(bridge.slice_anchor.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.ui.status, "Slice cancelled");
+        assert_eq!(bridge.state.project.active_mesh().unwrap().verts.len(), 8);
+    }
+
+    #[test]
+    fn the_slice_keymap_action_arms_the_tool_without_touching_geometry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let keybinds = petunia_config::keybinds::Keybinds::defaults();
+        let key = input::key_code_from_slint("K").expect("K mapeável");
+        let shift = petunia_config::keybinds::Mods2 {
+            ctrl: false,
+            shift: true,
+            alt: false,
+        };
+        assert_eq!(
+            keybinds.find(key, shift),
+            Some("model.slice"),
+            "Shift+K precisa estar ligado ao Slice"
+        );
+
+        assert!(bridge.route_shortcut("K", false, true, false));
+        assert_eq!(bridge.state.session.tools.active_tool, "slice");
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert!(
+            bridge.slice_anchor.is_none(),
+            "a âncora nasce no pointer-down"
+        );
     }
 
     #[test]
