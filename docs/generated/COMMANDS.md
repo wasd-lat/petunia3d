@@ -21,13 +21,13 @@ Total de comandos registrados no motor: **80**.
 | ID (`CommandId`) | Rótulo | Categoria | Destrutivo | Tópico Docs | Descrição |
 | :--- | :--- | :---: | :---: | :--- | :--- |
 | `edit.delete` | **Delete** | `Edit` | Sim | — | Delete selected elements or active object |
-| `edit.delete` | **Delete** | `Edit` | Sim | — | Delete selected elements or active object |
-| `edit.duplicate` | **Duplicate** | `Edit` | Sim | — | Duplicate selected elements or active object |
 | `edit.duplicate` | **Duplicate** | `Edit` | Sim | — | Duplicate selected elements or active object |
 | `edit.redo` | **Redo** | `Edit` | Não | — | Redo last undone modification |
-| `edit.redo` | **Redo** | `Edit` | Não | — | Redo last undone modification |
 | `edit.undo` | **Undo** | `Edit` | Não | — | Undo previous modification |
-| `edit.undo` | **Undo** | `Edit` | Não | — | Undo previous modification |
+| `global.redo` | **Redo** | `Edit` | Não | — | Redo last undone modification |
+| `global.undo` | **Undo** | `Edit` | Não | — | Undo previous modification |
+| `model.delete` | **Delete** | `Edit` | Sim | — | Delete selected elements or active object |
+| `model.duplicate` | **Duplicate** | `Edit` | Sim | — | Duplicate selected elements or active object |
 | `file.export_glb` | **Export GLB** | `File` | Não | ImportExport | Export scene to binary glTF format |
 | `file.export_obj` | **Export OBJ** | `File` | Não | ImportExport | Export active mesh to Wavefront OBJ format |
 | `file.import_obj` | **Import OBJ** | `File` | Não | ImportExport | Import 3D mesh from Wavefront OBJ file |
@@ -65,7 +65,9 @@ Total de comandos registrados no motor: **80**.
 | `model.subdivide` | **Subdivide** | `Model` | Sim | LoopCut | Subdivide selected geometry |
 | `model.symmetrize` | **Symmetrize** | `Model` | Sim | Modeling | Copy one side to the other across an axis |
 | `model.weld` | **Merge by Distance** | `Model` | Sim | Modeling | Weld duplicate vertices within distance |
-| `select.all` | **Select All** | `Select` | Não | — | Select all geometry elements in active mesh |
+| `model.deselect_all` | **Deselect All** | `Select` | Não | — | Clear current geometry selection |
+| `model.invert_selection` | **Invert Selection** | `Select` | Não | — | Invert geometry selection in active mesh |
+| `model.select_all` | **Select All** | `Select` | Não | — | Select all geometry elements in active mesh |
 | `select.all` | **Select All** | `Select` | Não | — | Select all geometry elements in active mesh |
 | `select.cycle_domain` | **Cycle Selection Domain** | `Select` | Não | — | Toggle between Object and last component domain |
 | `select.domain_edge` | **Select Domain: Edge** | `Select` | Não | — | Switch interaction to Edge domain |
@@ -73,9 +75,7 @@ Total de comandos registrados no motor: **80**.
 | `select.domain_object` | **Select Domain: Object** | `Select` | Não | — | Switch interaction to Object domain |
 | `select.domain_vertex` | **Select Domain: Point** | `Select` | Não | — | Switch interaction to Point domain |
 | `select.invert` | **Invert Selection** | `Select` | Não | — | Invert geometry selection in active mesh |
-| `select.invert` | **Invert Selection** | `Select` | Não | — | Invert geometry selection in active mesh |
 | `select.linked` | **Select Linked** | `Select` | Não | — | Select connected geometry elements |
-| `select.none` | **Deselect All** | `Select` | Não | — | Clear current geometry selection |
 | `select.none` | **Deselect All** | `Select` | Não | — | Clear current geometry selection |
 | `uv.pack_islands` | **Pack UV Islands** | `Tools` | Sim | UvUnwrapping | Pack UV islands into 0..1 without overlaps |
 | `uv.project_view` | **Project From View** | `Tools` | Sim | UvUnwrapping | Project UVs from the current camera view |

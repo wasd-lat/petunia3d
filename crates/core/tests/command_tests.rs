@@ -2,6 +2,7 @@
 //! Garante a execução headless e o ciclo transacional de Undo/Redo sem qualquer dependência de UI.
 #![allow(clippy::field_reassign_with_default)]
 
+use petunia_core::ProjectService;
 use petunia_core::command::{
     AddPrimitiveCmd, BoxSelectCmd, ClearSelectionCmd, CommandDispatcher, CommandError,
     DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd, DuplicateSelectionCmd,
@@ -10,10 +11,7 @@ use petunia_core::command::{
     SubdivideSelectionCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd,
     ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
 };
-use petunia_core::state::{
-    ASSET_NAME_MAX_LEN, AppState, AssetRenameError, EditMode,
-};
-use petunia_core::ProjectService;
+use petunia_core::state::{ASSET_NAME_MAX_LEN, AppState, AssetRenameError, EditMode};
 
 #[test]
 fn test_add_primitive_commands_and_undo_redo() {
@@ -818,4 +816,31 @@ fn test_rename_active_asset_validates_and_commits_one_undo_entry() {
     assert_eq!(state.project.active().unwrap().name, "Turret Base");
     assert!(state.undo());
     assert_eq!(state.project.active().unwrap().name, original);
+}
+
+#[test]
+fn test_alias_does_not_duplicate_command_ids_in_the_catalog() {
+    let dispatcher = petunia_core::command::CommandDispatcher::canonical();
+    let ids: Vec<&str> = dispatcher
+        .all_metadata()
+        .iter()
+        .map(|meta| meta.id.as_str())
+        .collect();
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        ids.len(),
+        unique.len(),
+        "o catálogo publica ids repetidos: {ids:?}"
+    );
+
+    // O alias existe e aponta para o mesmo comando, mas com id próprio.
+    assert!(dispatcher.contains("model.delete"));
+    assert!(dispatcher.contains("edit.delete"));
+    let alias_meta = dispatcher.get_metadata("model.delete").unwrap();
+    assert_eq!(alias_meta.id, "model.delete");
+    let canonical_meta = dispatcher.get_metadata("edit.delete").unwrap();
+    assert_eq!(canonical_meta.id, "edit.delete");
+    assert_eq!(alias_meta.label, canonical_meta.label);
 }

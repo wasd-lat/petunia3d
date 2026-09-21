@@ -273,6 +273,12 @@ pub struct ShellViewModel {
     pub asset_library_height: f32,
     pub rename_active: bool,
     pub rename_value: String,
+    pub context_menu_open: bool,
+    pub context_menu_x: f32,
+    pub context_menu_y: f32,
+    pub context_menu_title: String,
+    pub context_menu_visible: bool,
+    pub context_menu_locked: bool,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -383,6 +389,12 @@ impl ShellViewModel {
             asset_library_height: state.ui.shell_asset_library_height,
             rename_active: false,
             rename_value: String::new(),
+            context_menu_open: false,
+            context_menu_x: 0.0,
+            context_menu_y: 0.0,
+            context_menu_title: String::new(),
+            context_menu_visible: true,
+            context_menu_locked: false,
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -500,6 +512,16 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub tool_modal_value: f32,
     /// Renomeação inline do ativo selecionado (Outliner): `Some(nome em edição)`.
     pub rename_draft: Option<String>,
+    /// Menu de contexto do Outliner: posição em px lógicos e ativo alvo.
+    pub context_menu: Option<ContextMenuState>,
+}
+
+/// Menu de contexto do Outliner aberto sobre uma linha do painel Parts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContextMenuState {
+    pub x: f32,
+    pub y: f32,
+    pub asset: uuid::Uuid,
 }
 
 impl<V: PetuniaViewport> SlintUiBridge<V> {
@@ -519,6 +541,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             tool_modal: None,
             tool_modal_value: 0.0,
             rename_draft: None,
+            context_menu: None,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -1013,6 +1036,93 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.ui.set_shell_asset_library_height(height)
     }
 
+    /// Abre o menu de contexto do Outliner sobre a linha de `id`.
+    ///
+    /// O alvo é selecionado antes de abrir: as ações do menu operam sobre ele e
+    /// um clique-direito em linha não selecionada precisa agir no que o usuário
+    /// apontou, não no que estava ativo.
+    pub fn open_context_menu(&mut self, id: &str, x: f32, y: f32) -> bool {
+        let Ok(asset) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        if !self.state.project.assets.iter().any(|a| a.id == asset) {
+            return false;
+        }
+        self.select_asset_by_id(asset);
+        self.context_menu = Some(ContextMenuState { x, y, asset });
+        self.overlays.push(OverlayEntry {
+            id: OverlayId::OutlinerContextMenu,
+            kind: OverlayKind::ContextMenu,
+            pinned: false,
+            dismiss_on_escape: true,
+            dismiss_on_click_away: true,
+        });
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn close_context_menu(&mut self) -> bool {
+        self.overlays.remove(OverlayId::OutlinerContextMenu);
+        self.context_menu.take().is_some()
+    }
+
+    /// Executa uma ação do menu de contexto sobre o alvo apontado.
+    pub fn context_menu_action(&mut self, action: &str) -> bool {
+        let Some(menu) = self.context_menu else {
+            return false;
+        };
+        let id = menu.asset.to_string();
+        self.close_context_menu();
+        match action {
+            "rename" => self.begin_rename(),
+            "duplicate" => {
+                self.select_asset_by_id(menu.asset);
+                self.apply(UiIntent::DuplicateActiveAsset);
+                true
+            }
+            "visibility" => {
+                self.toggle_asset_visibility(&id);
+                true
+            }
+            "lock" => {
+                self.toggle_asset_lock(&id);
+                true
+            }
+            "frame" => {
+                self.select_asset_by_id(menu.asset);
+                let _ = self.state.dispatch_command("view.frame_selection");
+                true
+            }
+            "delete" => {
+                self.select_asset_by_id(menu.asset);
+                self.apply(UiIntent::DeleteActiveAsset);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn select_asset_by_id(&mut self, asset: uuid::Uuid) {
+        if let Some(index) = self
+            .state
+            .project
+            .assets
+            .iter()
+            .position(|candidate| candidate.id == asset)
+        {
+            self.state.project.active = index;
+            self.state.sync_selection();
+        }
+    }
+
+    fn toggle_asset_visibility(&mut self, id: &str) {
+        self.apply(UiIntent::ToggleSceneAssetVisibility(id.to_string()));
+    }
+
+    fn toggle_asset_lock(&mut self, id: &str) {
+        self.apply(UiIntent::ToggleSceneAssetLock(id.to_string()));
+    }
+
     /// Abre a edição inline do nome do ativo selecionado.
     pub fn begin_rename(&mut self) -> bool {
         if self.rename_draft.is_some() {
@@ -1281,6 +1391,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.close_context_menu() {
+            return true;
+        }
         if self.cancel_rename() {
             return true;
         }
@@ -1617,6 +1730,22 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.rename_active = true;
             vm.rename_value = draft.clone();
         }
+        if let Some(menu) = self.context_menu {
+            vm.context_menu_open = true;
+            vm.context_menu_x = menu.x;
+            vm.context_menu_y = menu.y;
+            if let Some(asset) = self
+                .state
+                .project
+                .assets
+                .iter()
+                .find(|asset| asset.id == menu.asset)
+            {
+                vm.context_menu_title = asset.name.clone();
+                vm.context_menu_visible = asset.visible;
+                vm.context_menu_locked = asset.locked;
+            }
+        }
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
@@ -1662,6 +1791,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             OverlayId::Settings => self.settings_visible = false,
             OverlayId::SceneDrawer => self.scene_drawer_visible = false,
             OverlayId::AssetLibrary => self.asset_library_visible = false,
+            OverlayId::OutlinerContextMenu => self.context_menu = None,
         }
     }
 }
@@ -1908,6 +2038,12 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_add_menu_open(vm.add_menu_open);
     window.set_rename_active(vm.rename_active);
     window.set_rename_value(vm.rename_value.as_str().into());
+    window.set_context_menu_open(vm.context_menu_open);
+    window.set_context_menu_x(vm.context_menu_x);
+    window.set_context_menu_y(vm.context_menu_y);
+    window.set_context_menu_title(vm.context_menu_title.as_str().into());
+    window.set_context_menu_visible(vm.context_menu_visible);
+    window.set_context_menu_locked(vm.context_menu_locked);
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
     window.set_tool_modal_active(vm.tool_modal_active);
@@ -2561,6 +2697,34 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let context_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_scene_context_requested(move |id, x, y| {
+        if let Ok(mut bridge) = context_bridge.lock() {
+            bridge.open_context_menu(id.as_str(), x, y);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let context_action_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_context_menu_action(move |action| {
+        if let Ok(mut bridge) = context_action_bridge.lock() {
+            bridge.context_menu_action(action.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -3927,15 +4091,88 @@ mod tests {
     #[test]
     fn canonical_keymap_has_no_duplicate_binding_inside_a_namespace() {
         let canonical = petunia_config::keybinds::Keybinds::defaults();
-        let mut seen: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         for (action, shortcut) in canonical.all_bindings() {
             let namespace = action.split('.').next().unwrap_or_default();
             let key = format!("{namespace}:{shortcut}");
             if let Some(previous) = seen.insert(key, action.clone()) {
-                panic!("{shortcut} está mapeado para {previous} e para {action} no mesmo namespace");
+                panic!(
+                    "{shortcut} está mapeado para {previous} e para {action} no mesmo namespace"
+                );
             }
         }
+    }
+
+    #[test]
+    fn context_menu_targets_the_clicked_asset_not_the_previous_active_one() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        assert_eq!(bridge.state.project.assets.len(), 2);
+        let first = bridge.state.project.assets[0].id;
+        let second = bridge.state.project.assets[1].id;
+        assert_eq!(
+            bridge.state.project.active, 1,
+            "a esfera acabou de ser criada"
+        );
+
+        assert!(bridge.open_context_menu(&first.to_string(), 120.0, 60.0));
+        assert_eq!(
+            bridge.state.project.active, 0,
+            "o alvo do menu vira o ativo"
+        );
+        assert!(bridge.view_model().context_menu_open);
+        assert_eq!(bridge.view_model().context_menu_x, 120.0);
+
+        assert!(bridge.context_menu_action("delete"));
+        assert_eq!(bridge.state.project.assets.len(), 1);
+        assert!(!bridge.state.project.assets.iter().any(|a| a.id == first));
+        assert!(bridge.state.project.assets.iter().any(|a| a.id == second));
+        assert!(!bridge.view_model().context_menu_open);
+    }
+
+    #[test]
+    fn context_menu_visibility_and_lock_act_on_the_target() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let id = bridge.state.project.assets[0].id.to_string();
+
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(bridge.view_model().context_menu_visible);
+        assert!(bridge.context_menu_action("visibility"));
+
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(!bridge.view_model().context_menu_visible, "Hide inverteu");
+        assert!(!bridge.state.project.assets[0].visible);
+
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(bridge.context_menu_action("lock"));
+        assert!(bridge.state.project.assets[0].locked);
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(bridge.view_model().context_menu_locked);
+    }
+
+    #[test]
+    fn escape_closes_the_context_menu_before_anything_else() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let id = bridge.state.project.assets[0].id.to_string();
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        bridge.begin_rename();
+
+        assert!(bridge.handle_escape(), "fecha o menu primeiro");
+        assert!(!bridge.view_model().context_menu_open);
+        assert!(
+            bridge.view_model().rename_active,
+            "o rename continua aberto: o menu era o topo da pilha"
+        );
+        assert!(bridge.handle_escape());
+        assert!(!bridge.view_model().rename_active);
+    }
+
+    #[test]
+    fn context_menu_refuses_an_unknown_asset() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.open_context_menu(&uuid::Uuid::new_v4().to_string(), 0.0, 0.0));
+        assert!(!bridge.open_context_menu("not-a-uuid", 0.0, 0.0));
+        assert!(!bridge.view_model().context_menu_open);
     }
 
     #[test]

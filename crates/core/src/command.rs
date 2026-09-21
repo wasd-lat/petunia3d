@@ -175,12 +175,18 @@ impl CommandDispatcher {
     }
 
     /// Alias for a registered command id (keymap/MCP/Lua dialects).
+    ///
+    /// The metadata clone gets the alias id: sem isso o catálogo publicado lista
+    /// duas linhas com o mesmo `CommandId` (uma para o dono, outra para o slot
+    /// do alias) e a contagem de comandos registrados mente.
     pub fn alias(&mut self, from: impl Into<String>, to: &str) {
         let from = from.into();
         if let Some(cmd) = self.registry.get(to).cloned() {
             self.registry.insert(from.clone(), cmd);
         }
         if let Some(meta) = self.metadata.get(to).cloned() {
+            let mut meta = meta;
+            meta.id = from.clone();
             self.metadata.insert(from, meta);
         }
     }
