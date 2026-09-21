@@ -268,6 +268,7 @@ pub struct ShellViewModel {
     pub is_wireframe: bool,
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
+    pub selection_overlay: SelectionOverlayModel,
     pub add_menu_open: bool,
     pub inspector_width: f32,
     pub asset_library_height: f32,
@@ -434,6 +435,7 @@ impl ShellViewModel {
             is_wireframe: state.session.show_wireframe_overlay,
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
+            selection_overlay: SelectionOverlayModel::default(),
             add_menu_open: false,
             inspector_width: state.ui.right_width,
             asset_library_height: state.ui.shell_asset_library_height,
@@ -713,6 +715,21 @@ pub struct UvEditorModel {
     pub uv_selected_count: usize,
     /// `true` quando a malha tem mais faces do que o editor desenha.
     pub truncated: bool,
+}
+
+/// Feedback visual da seleção na viewport, projetado para `Path` do Slint.
+///
+/// O renderer WGPU não desenha seleção, então o shell desenha o contorno por
+/// cima da imagem: sem isso o usuário clica e nada muda na tela.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SelectionOverlayModel {
+    pub visible: bool,
+    /// Arestas do contorno (caixa do objeto, arestas ou faces selecionadas).
+    pub outline_commands: String,
+    /// Marcadores preenchidos dos vértices selecionados.
+    pub point_commands: String,
+    /// Cor semântica: seleção normal ou ativo em modo componente.
+    pub accent: bool,
 }
 
 /// Parâmetro numérico de um efeito de camada, já com rótulo e faixa.
@@ -2665,53 +2682,68 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         best = Some((index, along));
                     }
                 }
-                if let Some((index, _)) = best {
-                    self.state.project.active = index;
-                    self.state.session.selection.asset = Some(self.state.project.assets[index].id);
-                }
-            }
-            SelectionDomain::Vertex => {
-                if let Some((index, _)) = self.state.pick_vertex(origin, direction)
-                    && let Some(mesh) = self.state.project.active_mesh_mut()
-                {
-                    if !extend {
-                        mesh.deselect_all();
+                match best {
+                    Some((index, _)) => {
+                        self.state.project.active = index;
+                        self.state.session.selection.asset =
+                            Some(self.state.project.assets[index].id);
+                        let name = self.state.project.assets[index].name.clone();
+                        self.state.set_status(format!("Selected '{name}'"));
                     }
-                    if let Some(vertex) = mesh.verts.get_mut(index) {
-                        vertex.selected = !extend || !vertex.selected;
+                    None => {
+                        self.state.set_status("Nothing under the cursor");
                     }
                 }
             }
-            SelectionDomain::Face => {
-                if let Some((face, _)) = pick_face_hit(&self.state, origin, direction)
-                    && let Some(mesh) = self.state.project.active_mesh_mut()
-                {
-                    if !extend {
-                        for current in &mut mesh.faces {
-                            current.selected = false;
+            SelectionDomain::Vertex => match self.state.pick_vertex(origin, direction) {
+                Some((index, _)) => {
+                    if let Some(mesh) = self.state.project.active_mesh_mut() {
+                        if !extend {
+                            mesh.deselect_all();
+                        }
+                        if let Some(vertex) = mesh.verts.get_mut(index) {
+                            vertex.selected = !extend || !vertex.selected;
                         }
                     }
-                    if let Some(current) = mesh.faces.get_mut(face) {
-                        current.selected = true;
-                    }
+                    self.state.set_status(format!("Point {index} selected"));
                 }
-            }
-            SelectionDomain::Edge => {
-                if let Some((edge, _)) = self.state.pick_edge(origin, direction)
-                    && let Some(mesh) = self.state.project.active_mesh_mut()
-                {
-                    if !extend {
-                        mesh.selected_edges.clear();
-                        mesh.deselect_all();
-                    }
-                    mesh.selected_edges.insert(edge);
-                    for vertex in [edge.0, edge.1] {
-                        if let Some(vertex) = mesh.verts.get_mut(vertex as usize) {
-                            vertex.selected = true;
+                None => self.state.set_status("No point under the cursor"),
+            },
+            SelectionDomain::Face => match pick_face_hit(&self.state, origin, direction) {
+                Some((face, _)) => {
+                    if let Some(mesh) = self.state.project.active_mesh_mut() {
+                        if !extend {
+                            for current in &mut mesh.faces {
+                                current.selected = false;
+                            }
+                        }
+                        if let Some(current) = mesh.faces.get_mut(face) {
+                            current.selected = true;
                         }
                     }
+                    self.state.set_status(format!("Face {face} selected"));
                 }
-            }
+                None => self.state.set_status("No face under the cursor"),
+            },
+            SelectionDomain::Edge => match self.state.pick_edge(origin, direction) {
+                Some((edge, _)) => {
+                    if let Some(mesh) = self.state.project.active_mesh_mut() {
+                        if !extend {
+                            mesh.selected_edges.clear();
+                            mesh.deselect_all();
+                        }
+                        mesh.selected_edges.insert(edge);
+                        for vertex in [edge.0, edge.1] {
+                            if let Some(vertex) = mesh.verts.get_mut(vertex as usize) {
+                                vertex.selected = true;
+                            }
+                        }
+                    }
+                    self.state
+                        .set_status(format!("Edge {}-{} selected", edge.0, edge.1));
+                }
+                None => self.state.set_status("No edge under the cursor"),
+            },
         }
         self.state.sync_selection();
         self.state.mark_dirty();
@@ -3072,6 +3104,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.is_wireframe = self.state.session.show_wireframe_overlay;
         vm.asset_library_visible = self.asset_library_visible;
         vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.selection_overlay =
+            compute_selection_overlay(&self.state, self.viewport_size[0], self.viewport_size[1]);
         vm.add_menu_open = self.add_menu_open;
         if let Some(draft) = &self.rename_draft {
             vm.rename_active = true;
@@ -3336,6 +3370,14 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
     if state.workspace != Workspace::Model {
         return GizmoModel::default();
     }
+    // O gizmo é a alça da transformação: fora de Move/Rotate/Scale ele só
+    // poluiria a leitura da cena por cima do modelo.
+    if !matches!(
+        state.session.tools.active_tool.as_str(),
+        "move" | "rotate" | "scale"
+    ) {
+        return GizmoModel::default();
+    }
     let Some(asset) = state.project.active() else {
         return GizmoModel::default();
     };
@@ -3389,6 +3431,171 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
         y_end_y: y_end[1],
         z_end_x: z_end[0],
         z_end_y: z_end[1],
+    }
+}
+
+/// Projeta o contorno da seleção para desenhar por cima da imagem da viewport.
+///
+/// O que é desenhado depende do domínio: caixa do objeto em `Object`, arestas em
+/// `Edge`, contorno das faces em `Face` e cruzetas em `Point`.
+fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> SelectionOverlayModel {
+    /// Teto de segmentos por frame: malhas grandes não podem gerar uma string
+    /// gigante a cada sync de propriedades.
+    const MAX_SEGMENTS: usize = 4_000;
+    /// Meia-aresta do marcador de vértice, em px lógicos.
+    const MARKER: f32 = 3.5;
+
+    if width <= 1.0 || height <= 1.0 {
+        return SelectionOverlayModel::default();
+    }
+    if state.workspace == Workspace::Paint {
+        return SelectionOverlayModel::default();
+    }
+    let Some(asset) = state.project.active() else {
+        return SelectionOverlayModel::default();
+    };
+    let mesh = &asset.mesh;
+    if mesh.verts.is_empty() {
+        return SelectionOverlayModel::default();
+    }
+
+    let view_proj = state.session.camera.view_proj();
+    let project = |point: glam::Vec3| -> Option<[f32; 2]> {
+        let clip = view_proj * glam::Vec4::new(point.x, point.y, point.z, 1.0);
+        if clip.w <= 0.05 {
+            return None;
+        }
+        let inv_w = 1.0 / clip.w;
+        Some([
+            (clip.x * inv_w * 0.5 + 0.5) * width,
+            (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height,
+        ])
+    };
+
+    let mut outline = String::new();
+    let mut points = String::new();
+    let mut segments = 0usize;
+    let push_segment = |commands: &mut String, a: [f32; 2], b: [f32; 2]| {
+        commands.push_str(&format!(
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            a[0], a[1], b[0], b[1]
+        ));
+    };
+
+    let domain = state.selection_domain();
+    let mut truncated = false;
+
+    match domain {
+        SelectionDomain::Object => {
+            // Caixa alinhada aos eixos do objeto ativo.
+            let mut min = glam::Vec3::splat(f32::MAX);
+            let mut max = glam::Vec3::splat(f32::MIN);
+            for vertex in &mesh.verts {
+                let point = vertex.vec();
+                min = min.min(point);
+                max = max.max(point);
+            }
+            if min.is_finite() && max.is_finite() {
+                let corners = [
+                    glam::Vec3::new(min.x, min.y, min.z),
+                    glam::Vec3::new(max.x, min.y, min.z),
+                    glam::Vec3::new(max.x, max.y, min.z),
+                    glam::Vec3::new(min.x, max.y, min.z),
+                    glam::Vec3::new(min.x, min.y, max.z),
+                    glam::Vec3::new(max.x, min.y, max.z),
+                    glam::Vec3::new(max.x, max.y, max.z),
+                    glam::Vec3::new(min.x, max.y, max.z),
+                ];
+                let edges = [
+                    (0, 1),
+                    (1, 2),
+                    (2, 3),
+                    (3, 0),
+                    (4, 5),
+                    (5, 6),
+                    (6, 7),
+                    (7, 4),
+                    (0, 4),
+                    (1, 5),
+                    (2, 6),
+                    (3, 7),
+                ];
+                let projected: Vec<Option<[f32; 2]>> =
+                    corners.iter().map(|&corner| project(corner)).collect();
+                for (a, b) in edges {
+                    if let (Some(a), Some(b)) = (projected[a], projected[b]) {
+                        push_segment(&mut outline, a, b);
+                    }
+                }
+            }
+        }
+        SelectionDomain::Vertex => {
+            for vertex in mesh.verts.iter().filter(|vertex| vertex.selected) {
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                let Some(sp) = project(vertex.vec()) else {
+                    continue;
+                };
+                points.push_str(&format!(
+                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+                    sp[0],
+                    sp[1] - MARKER,
+                    sp[0] + MARKER,
+                    sp[1],
+                    sp[0],
+                    sp[1] + MARKER,
+                    sp[0] - MARKER,
+                    sp[1],
+                ));
+                segments += 1;
+            }
+        }
+        SelectionDomain::Edge => {
+            for &(a, b) in &mesh.selected_edges {
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                let (Some(va), Some(vb)) = (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                else {
+                    continue;
+                };
+                if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
+                    push_segment(&mut outline, pa, pb);
+                    segments += 1;
+                }
+            }
+        }
+        SelectionDomain::Face => {
+            for face in mesh.faces.iter().filter(|face| face.selected) {
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                for index in 0..face.verts.len() {
+                    let a = face.verts[index] as usize;
+                    let b = face.verts[(index + 1) % face.verts.len()] as usize;
+                    let (Some(va), Some(vb)) = (mesh.verts.get(a), mesh.verts.get(b)) else {
+                        continue;
+                    };
+                    if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
+                        push_segment(&mut outline, pa, pb);
+                        segments += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = truncated;
+    let visible = !outline.is_empty() || !points.is_empty();
+    SelectionOverlayModel {
+        visible,
+        outline_commands: outline,
+        point_commands: points,
+        accent: domain != SelectionDomain::Object,
     }
 }
 
@@ -3658,6 +3865,10 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     let model = std::rc::Rc::new(slint::VecModel::from(scene_items));
     window.set_scene_items(model.into());
 
+    window.set_selection_overlay_visible(vm.selection_overlay.visible);
+    window.set_selection_outline_commands(vm.selection_overlay.outline_commands.as_str().into());
+    window.set_selection_point_commands(vm.selection_overlay.point_commands.as_str().into());
+    window.set_selection_overlay_accent(vm.selection_overlay.accent);
     window.set_gizmo_visible(vm.gizmo.visible);
     window.set_gizmo_origin_x(vm.gizmo.origin_x);
     window.set_gizmo_origin_y(vm.gizmo.origin_y);
@@ -5923,7 +6134,8 @@ mod tests {
 
     #[test]
     fn gizmo_projects_axes_for_the_active_object() {
-        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
         let gizmo = bridge.view_model().gizmo;
 
         assert!(gizmo.visible);
@@ -7632,6 +7844,97 @@ mod tests {
             bridge.slice_anchor.is_none(),
             "a âncora nasce no pointer-down"
         );
+    }
+
+    #[test]
+    fn selection_overlay_outlines_the_active_object() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.visible, "o cubo ativo precisa de contorno visível");
+        assert!(!overlay.accent, "domínio Object usa a cor de seleção");
+        assert_eq!(
+            overlay.outline_commands.matches('M').count(),
+            12,
+            "a caixa do objeto tem 12 arestas"
+        );
+        assert!(overlay.point_commands.is_empty());
+    }
+
+    #[test]
+    fn selection_overlay_follows_the_domain() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+
+        // Point: só marcadores dos vértices selecionados.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        assert!(
+            !bridge.view_model().selection_overlay.visible,
+            "sem vértice selecionado não há o que desenhar"
+        );
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.visible && overlay.accent);
+        assert_eq!(overlay.point_commands.matches('M').count(), 1);
+        assert!(overlay.outline_commands.is_empty());
+
+        // Edge: uma linha por aresta selecionada.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .selected_edges
+            .insert((0, 1));
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert_eq!(overlay.outline_commands.matches('M').count(), 1);
+
+        // Face: contorno fechado da face.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert_eq!(
+            overlay.outline_commands.matches('M').count(),
+            4,
+            "uma face quad tem 4 arestas"
+        );
+    }
+
+    #[test]
+    fn clicking_the_viewport_reports_what_was_selected() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.project.active = 0;
+        bridge.state.set_status("");
+
+        bridge.select_viewport(0.5, 0.5, false);
+        assert_eq!(bridge.state.ui.status, "Selected 'Cube'");
+
+        // Fora do cubo o status diz que não acertou nada, em vez de silêncio.
+        bridge.state.set_status("");
+        bridge.select_viewport(0.02, 0.02, false);
+        assert_eq!(bridge.state.ui.status, "Nothing under the cursor");
+    }
+
+    #[test]
+    fn the_gizmo_only_appears_with_a_transform_tool() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        assert!(
+            !bridge.view_model().gizmo.visible,
+            "com a ferramenta Select o gizmo não pode cobrir o modelo"
+        );
+
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+        assert!(bridge.view_model().gizmo.visible);
+
+        bridge.apply(UiIntent::SetActiveTool("select".to_string()));
+        assert!(!bridge.view_model().gizmo.visible);
     }
 
     #[test]

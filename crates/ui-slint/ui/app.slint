@@ -520,6 +520,10 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> is-orthographic: false;
     in-out property <bool> is-wireframe: false;
     in-out property <bool> gizmo-visible: false;
+    in-out property <bool> selection-overlay-visible: false;
+    in-out property <string> selection-outline-commands: "";
+    in-out property <string> selection-point-commands: "";
+    in-out property <bool> selection-overlay-accent: false;
     in-out property <length> gizmo-origin-x: 0px;
     in-out property <length> gizmo-origin-y: 0px;
     in-out property <length> gizmo-x-end-x: 0px;
@@ -1085,6 +1089,20 @@ export component PetuniaSlintShell inherits Window {
                         font-size: 14px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
+                    }
+
+                    // Contorno da seleção por cima da imagem: o renderer não
+                    // desenha seleção, então o shell projeta e desenha aqui.
+                    if selection-overlay-visible: Path {
+                        fill: transparent;
+                        stroke: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
+                        stroke-width: 1.5px;
+                        commands: root.selection-outline-commands;
+                    }
+                    if selection-overlay-visible: Path {
+                        fill: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
+                        stroke: transparent;
+                        commands: root.selection-point-commands;
                     }
 
                     viewport-touch := TouchArea {
