@@ -571,6 +571,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> uv-layout-truncated: false;
     in-out property <[PaintLayerEntry]> paint-layers: [];
     in-out property <string> paint-layer-count: "";
+    in-out property <string> paint-fill-scope: "ConnectedPixels";
+    in-out property <string> paint-projection: "Surface";
+    in-out property <string> paint-lock: "None";
     in-out property <bool> loop-cut-active: false;
     in-out property <float> loop-cut-slide: 0.0;
     in-out property <int> loop-cut-cuts: 1;
@@ -617,6 +620,9 @@ export component PetuniaSlintShell inherits Window {
     callback loop-cut-count-committed(string);
     callback uv-seam-toggled;
     callback uv-seams-cleared;
+    callback paint-fill-scope-set(string);
+    callback paint-projection-set(string);
+    callback paint-lock-set(string);
     callback paint-layer-added;
     callback paint-layer-group-added;
     callback paint-layer-removed(string);
@@ -1855,6 +1861,106 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "PAINT": VerticalLayout {
                             spacing: 10px;
+
+                            InspectorSection {
+                                title: "Fill & Projection";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: "Fill scope";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for scope in ["ConnectedPixels", "Face", "SelectedFaces", "UvIsland", "Object"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.paint-fill-scope == scope ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: radio-button;
+                                            accessible-label: scope;
+                                            accessible-checked: root.paint-fill-scope == scope;
+                                            Text {
+                                                text: scope;
+                                                color: root.paint-fill-scope == scope ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 9px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                            TouchArea { clicked => { root.paint-fill-scope-set(scope); } }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "Projection";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for projection in ["Surface", "ScreenSpace"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.paint-projection == projection ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: radio-button;
+                                            accessible-label: projection;
+                                            accessible-checked: root.paint-projection == projection;
+                                            Text {
+                                                text: projection;
+                                                color: root.paint-projection == projection ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 10px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            TouchArea { clicked => { root.paint-projection-set(projection); } }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "Brush lock";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for lock in ["None", "FirstObject", "FirstFace"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.paint-lock == lock ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: radio-button;
+                                            accessible-label: lock;
+                                            accessible-checked: root.paint-lock == lock;
+                                            Text {
+                                                text: lock;
+                                                color: root.paint-lock == lock ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 9px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                            TouchArea { clicked => { root.paint-lock-set(lock); } }
+                                        }
+                                    }
+                                }
+                            }
 
                             InspectorSection {
                                 title: "Layers";

@@ -355,6 +355,8 @@ pub struct ToolState {
     pub paint_isolate_selection: bool,
     pub brush_projection: crate::brush::BrushProjectionMode,
     pub brush_lock: crate::brush::BrushLock,
+    /// Face travada pelo `BrushLock` no primeiro toque do traço atual.
+    pub paint_lock_face: Option<Option<usize>>,
     pub fill_scope: crate::brush::FillScope,
     /// Canal de textura alvo da pintura (P3D-062). V1: só Albedo opera;
     /// demais canais ficam desabilitados na UI até V1.x.
@@ -421,6 +423,7 @@ impl ToolState {
             paint_isolate_selection: false,
             brush_projection: crate::brush::BrushProjectionMode::Surface,
             brush_lock: crate::brush::BrushLock::None,
+            paint_lock_face: None,
             fill_scope: crate::brush::FillScope::ConnectedPixels,
             paint_channel: petunia_project::TextureChannel::Albedo,
             paint_pixel_grid: true,
@@ -1748,6 +1751,15 @@ impl AppState {
 
     /// Pinta vértices próximos do ponto 3D (vertex paint).
     pub fn paint_at(&mut self, center: Vec3) {
+        self.paint_at_with_face(center, None)
+    }
+
+    /// Pinta respeitando `fill_scope` e `brush_lock`.
+    ///
+    /// `face_hint` é o índice da face sob o cursor, quando o chamador tem um:
+    /// sem ele os escopos por face caem no comportamento de raio em vez de
+    /// inventar uma face.
+    pub fn paint_at_with_face(&mut self, center: Vec3, face_hint: Option<usize>) {
         let before = self
             .session
             .tools
@@ -1761,15 +1773,103 @@ impl AppState {
             self.session.tools.paint_strength.clamp(0.0, 1.0),
         );
         let r2 = r * r;
-        if let Some(obj) = self.project.active_mut() {
-            for v in &mut obj.mesh.verts {
-                let d2 = (v.vec() - center).length_squared();
-                if d2 <= r2 {
-                    for (ch, cc) in v.color.iter_mut().zip(col.iter()) {
-                        *ch = *ch * (1.0 - k) + cc * k;
+        let scope = self.session.tools.fill_scope;
+        let lock = self.session.tools.brush_lock;
+
+        // Conjunto de vértices elegíveis pelo escopo. `None` = todos (raio decide).
+        let allowed: Option<Vec<bool>> = match scope {
+            crate::brush::FillScope::ConnectedPixels => None,
+            crate::brush::FillScope::Object => {
+                Some(vec![
+                    true;
+                    self.project.active_mesh().map_or(0, |m| m.verts.len())
+                ])
+            }
+            crate::brush::FillScope::Face => face_hint.and_then(|face| {
+                self.project.active_mesh().map(|mesh| {
+                    let mut mask = vec![false; mesh.verts.len()];
+                    if let Some(face) = mesh.faces.get(face) {
+                        for &vi in &face.verts {
+                            if let Some(slot) = mask.get_mut(vi as usize) {
+                                *slot = true;
+                            }
+                        }
                     }
-                    n += 1;
+                    mask
+                })
+            }),
+            crate::brush::FillScope::SelectedFaces => self.project.active_mesh().map(|mesh| {
+                let mut mask = vec![false; mesh.verts.len()];
+                for face in &mesh.faces {
+                    if face.selected {
+                        for &vi in &face.verts {
+                            if let Some(slot) = mask.get_mut(vi as usize) {
+                                *slot = true;
+                            }
+                        }
+                    }
                 }
+                mask
+            }),
+            crate::brush::FillScope::UvIsland => face_hint.and_then(|face| {
+                self.project.active_mesh().map(|mesh| {
+                    let mut mask = vec![false; mesh.verts.len()];
+                    let islands = mesh.uv_islands();
+                    if let Some(island) = islands.iter().find(|island| island.faces.contains(&face))
+                    {
+                        for &fi in &island.faces {
+                            if let Some(face) = mesh.faces.get(fi) {
+                                for &vi in &face.verts {
+                                    if let Some(slot) = mask.get_mut(vi as usize) {
+                                        *slot = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    mask
+                })
+            }),
+        };
+
+        // Trava de pincel: restringe a superfície alcançável a partir do primeiro
+        // toque do traço, sem bloquear o resto do fluxo.
+        let locked_face = match lock {
+            crate::brush::BrushLock::None => None,
+            crate::brush::BrushLock::FirstObject => Some(None),
+            crate::brush::BrushLock::FirstFace => Some(face_hint),
+            // Travar nas faces selecionadas é um escopo, não uma trava de
+            // primeiro toque: quem restringe é `fill_scope`, não o lock.
+            crate::brush::BrushLock::SelectedFaces => None,
+        };
+        if let Some(face) = locked_face {
+            self.session.tools.paint_lock_face.get_or_insert(face);
+        }
+        let lock_face = self.session.tools.paint_lock_face;
+
+        if let Some(obj) = self.project.active_mut() {
+            let mesh = &mut obj.mesh;
+            for (index, v) in mesh.verts.iter_mut().enumerate() {
+                if allowed.as_ref().is_some_and(|mask| !mask[index]) {
+                    continue;
+                }
+                let d2 = (v.vec() - center).length_squared();
+                let in_radius = scope == crate::brush::FillScope::Object
+                    || scope == crate::brush::FillScope::SelectedFaces
+                    || d2 <= r2;
+                if !in_radius {
+                    continue;
+                }
+                if let (Some(locked), Some(current)) = (lock_face, face_hint)
+                    && locked.is_some()
+                    && locked != Some(current)
+                {
+                    continue;
+                }
+                for (ch, cc) in v.color.iter_mut().zip(col.iter()) {
+                    *ch = *ch * (1.0 - k) + cc * k;
+                }
+                n += 1;
             }
         }
         if n > 0 {
@@ -1791,6 +1891,9 @@ impl AppState {
         }
         if self.session.tools.paint_stroke.is_none() {
             self.session.tools.paint_stroke = Some(self.project.project.clone());
+            // A trava de pincel vale por traço: o próximo traço pode começar em
+            // outra superfície.
+            self.session.tools.paint_lock_face = None;
         }
     }
 

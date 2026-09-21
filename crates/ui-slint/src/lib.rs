@@ -316,6 +316,9 @@ pub struct ShellViewModel {
     pub uv_editor: UvEditorModel,
     pub paint_layers: Vec<PaintLayerModel>,
     pub paint_layer_count: String,
+    pub paint_fill_scope: String,
+    pub paint_projection: String,
+    pub paint_lock: String,
     pub loop_cut_active: bool,
     pub loop_cut_slide: f32,
     pub loop_cut_cuts: i32,
@@ -472,6 +475,9 @@ impl ShellViewModel {
             uv_editor: UvEditorModel::default(),
             paint_layers: Vec::new(),
             paint_layer_count: String::new(),
+            paint_fill_scope: "ConnectedPixels".to_string(),
+            paint_projection: "Surface".to_string(),
+            paint_lock: "None".to_string(),
             loop_cut_active: false,
             loop_cut_slide: 0.0,
             loop_cut_cuts: 1,
@@ -1355,6 +1361,48 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Define o escopo de preenchimento do pincel.
+    pub fn set_fill_scope(&mut self, scope: &str) -> bool {
+        let parsed = match scope {
+            "ConnectedPixels" => petunia_core::FillScope::ConnectedPixels,
+            "Face" => petunia_core::FillScope::Face,
+            "SelectedFaces" => petunia_core::FillScope::SelectedFaces,
+            "UvIsland" => petunia_core::FillScope::UvIsland,
+            "Object" => petunia_core::FillScope::Object,
+            _ => return false,
+        };
+        self.state.session.tools.fill_scope = parsed;
+        self.state.set_status(format!("Fill scope: {scope}"));
+        true
+    }
+
+    /// Define o modo de projeção do pincel.
+    pub fn set_brush_projection(&mut self, projection: &str) -> bool {
+        let parsed = match projection {
+            "Surface" => petunia_core::BrushProjectionMode::Surface,
+            "ScreenSpace" => petunia_core::BrushProjectionMode::ScreenSpace,
+            _ => return false,
+        };
+        self.state.session.tools.brush_projection = parsed;
+        self.state.set_status(format!("Projection: {projection}"));
+        true
+    }
+
+    /// Define a trava de pincel.
+    pub fn set_brush_lock(&mut self, lock: &str) -> bool {
+        let parsed = match lock {
+            "None" => petunia_core::BrushLock::None,
+            "FirstObject" => petunia_core::BrushLock::FirstObject,
+            "FirstFace" => petunia_core::BrushLock::FirstFace,
+            "SelectedFaces" => petunia_core::BrushLock::SelectedFaces,
+            _ => return false,
+        };
+        self.state.session.tools.brush_lock = parsed;
+        self.state.session.tools.paint_lock_face = None;
+        self.state.set_status(format!("Brush lock: {lock}"));
+        true
+    }
+
     /// Constrói a geometria 2D do editor UV a partir das UVs reais da malha.
     ///
     /// O quadrado 0..1 vira uma caixa de 256 px; cada face contribui um contorno
@@ -2019,10 +2067,26 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return;
         };
         let tool = self.state.session.tools.active_tool.clone();
+        if tool == "picker" {
+            return;
+        }
+        if tool == "fill" {
+            let scope = self.state.session.tools.fill_scope;
+            let isolate = self.state.session.tools.paint_isolate_selection;
+            let seed =
+                petunia_module_paint::PaintModule::face_hit_uv(&self.state, face, hit, isolate)
+                    .and_then(|uv| petunia_module_paint::PaintModule::uv_to_px(&self.state, uv));
+            petunia_module_paint::PaintModule::canvas_fill_scoped(
+                &mut self.state,
+                Some(face),
+                seed,
+                scope,
+            );
+            self.state.set_status(format!("Filled ({scope:?})"));
+            return;
+        }
         let brush = match tool.as_str() {
             "eraser" => petunia_core::BrushType::Eraser,
-            "fill" => petunia_core::BrushType::Fill,
-            "picker" => return,
             _ => petunia_core::BrushType::Soft,
         };
         let radius = (self.state.session.tools.paint_radius * 8.0).max(1.0) as u32;
@@ -2612,6 +2676,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
         }
+        vm.paint_fill_scope = format!("{:?}", self.state.session.tools.fill_scope);
+        vm.paint_projection = format!("{:?}", self.state.session.tools.brush_projection);
+        vm.paint_lock = format!("{:?}", self.state.session.tools.brush_lock);
         vm.uv_editor = self.build_uv_editor();
         if let Some(stack) = self
             .state
@@ -3068,6 +3135,9 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_uv_selected_face(vm.uv_editor.selected_face);
     window.set_uv_layout_truncated(vm.uv_editor.truncated);
     window.set_paint_layer_count(vm.paint_layer_count.as_str().into());
+    window.set_paint_fill_scope(vm.paint_fill_scope.as_str().into());
+    window.set_paint_projection(vm.paint_projection.as_str().into());
+    window.set_paint_lock(vm.paint_lock.as_str().into());
     let layer_entries: Vec<PaintLayerEntry> = vm
         .paint_layers
         .iter()
@@ -3808,6 +3878,42 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 if let Some(frame) = new_frame {
                     window.set_viewport_image(frame);
                 }
+            }
+        }
+    });
+
+    let fill_scope_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_fill_scope_set(move |scope| {
+        if let Ok(mut bridge) = fill_scope_bridge.lock() {
+            bridge.set_fill_scope(scope.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let projection_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_projection_set(move |projection| {
+        if let Ok(mut bridge) = projection_bridge.lock() {
+            bridge.set_brush_projection(projection.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let brush_lock_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_lock_set(move |lock| {
+        if let Ok(mut bridge) = brush_lock_bridge.lock() {
+            bridge.set_brush_lock(lock.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
             }
         }
     });
@@ -6080,6 +6186,162 @@ mod tests {
                 .uv_seams
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn fill_scope_and_projection_controls_change_real_session_state() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert_eq!(bridge.view_model().paint_fill_scope, "ConnectedPixels");
+
+        assert!(bridge.set_fill_scope("UvIsland"));
+        assert_eq!(
+            bridge.state.session.tools.fill_scope,
+            petunia_core::FillScope::UvIsland
+        );
+        assert_eq!(bridge.view_model().paint_fill_scope, "UvIsland");
+
+        assert!(bridge.set_brush_projection("ScreenSpace"));
+        assert_eq!(
+            bridge.state.session.tools.brush_projection,
+            petunia_core::BrushProjectionMode::ScreenSpace
+        );
+
+        assert!(bridge.set_brush_lock("FirstFace"));
+        assert_eq!(
+            bridge.state.session.tools.brush_lock,
+            petunia_core::BrushLock::FirstFace
+        );
+
+        assert!(!bridge.set_fill_scope("Nope"));
+        assert!(!bridge.set_brush_projection("Nope"));
+        assert!(!bridge.set_brush_lock("Nope"));
+        assert_eq!(
+            bridge.state.session.tools.fill_scope,
+            petunia_core::FillScope::UvIsland,
+            "valor inválido não pode alterar o estado"
+        );
+    }
+
+    #[test]
+    fn fill_scope_object_paints_the_whole_canvas_and_connected_pixels_stops_at_a_border() {
+        use petunia_module_paint::PaintModule;
+        let mut state = AppState::default();
+        PaintModule::ensure_stack(&mut state);
+        state.paint_color = [1.0, 0.0, 0.0];
+
+        let canvas_of = |state: &AppState| {
+            state
+                .project
+                .assets
+                .get(state.project.active)
+                .and_then(|asset| asset.paint_stack.as_ref())
+                .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
+                .cloned()
+                .expect("canvas do stack")
+        };
+        let painted = |state: &AppState| {
+            canvas_of(state)
+                .pixels
+                .chunks(4)
+                .filter(|px| px[3] > 0)
+                .count()
+        };
+
+        // Object: canvas inteiro.
+        PaintModule::canvas_fill_scoped(&mut state, None, None, petunia_core::FillScope::Object);
+        let canvas = canvas_of(&state);
+        let total = (canvas.w * canvas.h) as usize;
+        assert_eq!(painted(&state), total, "Object pinta o canvas todo");
+
+        // Monta uma fronteira: metade esquerda vermelha, metade direita azul.
+        {
+            let active = state.project.active;
+            let canvas = state
+                .project
+                .assets
+                .get_mut(active)
+                .and_then(|asset| asset.paint_stack.as_mut())
+                .and_then(|stack| stack.active_mut())
+                .and_then(|layer| layer.canvas_mut())
+                .expect("canvas mutável");
+            let width = canvas.w;
+            let height = canvas.h;
+            for y in 0..height {
+                for x in 0..width {
+                    if x < width / 2 {
+                        canvas.set(x, y, [255, 0, 0, 255]);
+                    } else {
+                        canvas.set(x, y, [0, 0, 255, 255]);
+                    }
+                }
+            }
+        }
+
+        // ConnectedPixels a partir da esquerda: o azul da direita não é alcançado.
+        state.paint_color = [0.0, 1.0, 0.0];
+        PaintModule::canvas_fill_scoped(
+            &mut state,
+            None,
+            Some((4, 4)),
+            petunia_core::FillScope::ConnectedPixels,
+        );
+        let canvas = canvas_of(&state);
+        let green = canvas
+            .pixels
+            .chunks(4)
+            .filter(|px| px[1] > 200 && px[0] < 60)
+            .count();
+        let blue = canvas
+            .pixels
+            .chunks(4)
+            .filter(|px| px[2] > 200 && px[0] < 60)
+            .count();
+        let half = total / 2;
+        assert!(
+            green.abs_diff(half) < canvas.w as usize * 2,
+            "a metade esquerda vira verde: {green} vs {half}"
+        );
+        assert_eq!(blue, half, "a metade direita permanece azul: {blue}");
+    }
+
+    #[test]
+    fn face_fill_scope_paints_only_the_hit_face_uv_region() {
+        use petunia_module_paint::PaintModule;
+        let mut state = AppState::default();
+        PaintModule::ensure_stack(&mut state);
+        state.paint_color = [0.0, 1.0, 0.0];
+
+        // O cubo usa projeção planar, então todas as faces cobrem 0..1. Restrinjo
+        // a face 0 a um quadrado interno para que o escopo por face seja visível.
+        {
+            let mesh = state.project.active_mesh_mut().unwrap();
+            mesh.faces[0].uv = vec![[0.25, 0.25], [0.25, 0.75], [0.75, 0.75], [0.75, 0.25]];
+        }
+
+        PaintModule::canvas_fill_scoped(&mut state, Some(0), None, petunia_core::FillScope::Face);
+        let canvas = state
+            .project
+            .assets
+            .get(state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
+            .cloned()
+            .unwrap();
+        // O canvas base nasce opaco, então o que identifica o preenchimento é a
+        // cor: verde puro só existe onde o escopo pintou.
+        let painted = canvas
+            .pixels
+            .chunks(4)
+            .filter(|px| px[1] > 200 && px[0] < 60 && px[2] < 60)
+            .count();
+        let total = (canvas.w * canvas.h) as usize;
+        let expected = total / 4;
+        assert!(painted > 0, "a face 0 precisa pintar a própria região UV");
+        assert!(
+            painted.abs_diff(expected) < canvas.w as usize * 2,
+            "o quadrado interno cobre ~1/4 do canvas: {painted} vs {expected}"
+        );
+        assert!(painted < total, "uma face não pode cobrir o canvas inteiro");
     }
 
     #[test]
