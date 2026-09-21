@@ -1305,6 +1305,70 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Um clique de faca na viewport: primeiro ponto ancora, segundo corta.
+    ///
+    /// O ponto vem de `AppState::pick_edge`, então a faca corta a aresta que o
+    /// usuário realmente apontou. O corte é aplicado como uma única transação.
+    pub fn knife_click(&mut self, normalized_x: f32, normalized_y: f32) -> bool {
+        if self.state.session.tools.cut_session.is_none() {
+            return false;
+        }
+        let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
+        let ndc_y = 1.0 - normalized_y.clamp(0.0, 1.0) * 2.0;
+        let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
+        let Some((edge, position)) = self.state.pick_edge(origin, direction) else {
+            self.state.set_status("Knife: no edge under the cursor");
+            return false;
+        };
+        let point = petunia_core::CutEdgePoint { edge, position };
+
+        let Some(session) = self.state.session.tools.cut_session.as_mut() else {
+            return false;
+        };
+        let Some(start) = session.edge_start else {
+            session.edge_start = Some(point);
+            session.anchor = Some([normalized_x, normalized_y]);
+            self.state.set_status("Knife: pick the second edge point");
+            self.state.mark_dirty();
+            return true;
+        };
+
+        let Some(mesh) = self.state.project.active_mesh().cloned() else {
+            return false;
+        };
+        match session.cut_knife_segment(start, point, &mesh) {
+            Ok(cut) => {
+                self.state.checkpoint("knife cut");
+                if let Some(active) = self.state.project.active_mesh_mut() {
+                    *active = cut;
+                }
+                self.state.session.tools.cut_session = None;
+                self.state.session.tools.active_tool = "select".to_string();
+                self.state.sync_selection();
+                self.state.emit_mesh_changed();
+                self.state.set_status("Knife: cut applied");
+                true
+            }
+            Err(error) => {
+                // Topologia recusada: a sessão continua viva para o usuário
+                // escolher outro ponto em vez de perder o primeiro.
+                self.state.set_status(format!("Knife: {error}"));
+                false
+            }
+        }
+    }
+
+    /// Cancela a faca mantendo a malha intacta.
+    pub fn cancel_knife(&mut self) -> bool {
+        if self.state.session.tools.cut_session.take().is_none() {
+            return false;
+        }
+        self.state.session.tools.active_tool = "select".to_string();
+        self.state.set_status("Knife cancelled");
+        self.state.mark_dirty();
+        true
+    }
+
     /// Instancia uma cópia do asset da biblioteca no cursor 3D.
     ///
     /// É o caminho que o comando canônico `model.instantiate_asset` não tinha:
@@ -1557,6 +1621,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
+        // A faca consome o clique antes da seleção: com uma sessão de corte
+        // aberta, clicar é escolher ponto de aresta, não selecionar.
+        if self.state.session.tools.cut_session.is_some()
+            && self.knife_click(normalized_x, normalized_y)
+        {
+            return;
+        }
         let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
         let ndc_y = 1.0 - normalized_y.clamp(0.0, 1.0) * 2.0;
         let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
@@ -1695,8 +1766,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.cancel_transform();
             return true;
         }
-        if self.state.session.tools.cut_session.take().is_some() {
-            self.state.set_status("Cut cancelled");
+        if self.cancel_knife() {
             return true;
         }
         if self.cancel_transform() {
@@ -4972,6 +5042,62 @@ mod tests {
         assert!(bridge.keep_saved_project(), "abrir o salvo fecha o aviso");
         assert!(!bridge.view_model().recovery_open);
         assert!(!bridge.state.project.assets[0].name.is_empty());
+    }
+
+    #[test]
+    fn knife_takes_two_viewport_picks_and_commits_one_cut() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.execute_core_command("model.knife").unwrap();
+        assert!(bridge.state.session.tools.cut_session.is_some());
+        let faces_before = bridge.state.project.active_mesh().unwrap().faces.len();
+
+        // O cubo padrão preenche o centro da viewport: dois cliques sobre
+        // arestas reais aplicam o corte.
+        assert!(
+            bridge.knife_click(0.5, 0.5),
+            "primeiro ponto precisa ancorar"
+        );
+        assert_eq!(bridge.state.ui.status, "Knife: pick the second edge point");
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "ancorar não corta"
+        );
+        assert!(
+            bridge.knife_click(0.35, 0.62),
+            "segundo ponto precisa cortar"
+        );
+
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(
+            mesh.faces.len() > faces_before,
+            "o corte precisa criar faces: antes {faces_before}, depois {}",
+            mesh.faces.len()
+        );
+        assert!(bridge.state.session.tools.cut_session.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn knife_click_outside_a_session_does_nothing() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.knife_click(0.5, 0.5));
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn escape_cancels_the_knife_and_restores_the_select_tool() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.execute_core_command("model.knife").unwrap();
+        assert_eq!(bridge.state.session.tools.active_tool, "cut");
+
+        assert!(bridge.handle_escape());
+        assert!(bridge.state.session.tools.cut_session.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.ui.status, "Knife cancelled");
     }
 
     #[test]

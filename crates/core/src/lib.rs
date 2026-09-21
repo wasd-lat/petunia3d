@@ -99,5 +99,9 @@ pub use viewport_query::{
 
 pub use modal::{ModalConstraint, ModalError, ModalKind, ModalOp};
 
+/// Ponto de corte de aresta da faca, reexportado para os shells não dependerem
+/// de `petunia_mesh` diretamente.
+pub use petunia_mesh::knife::EdgePoint as CutEdgePoint;
+
 #[cfg(test)]
 mod preview_tests;
