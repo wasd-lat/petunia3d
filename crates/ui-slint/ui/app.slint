@@ -570,6 +570,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <int> uv-island-count: 0;
     in-out property <int> uv-face-count: 0;
     in-out property <int> uv-selected-face: -1;
+    in-out property <int> uv-selected-count: 0;
     in-out property <bool> uv-layout-truncated: false;
     in-out property <[PaintLayerEntry]> paint-layers: [];
     in-out property <string> paint-layer-count: "";
@@ -623,6 +624,10 @@ export component PetuniaSlintShell inherits Window {
     callback tool-modal-cancel;
     callback loop-cut-scrubbed(float);
     callback loop-cut-count-committed(string);
+    callback uv-editor-clicked(float, float, bool);
+    callback uv-moved(float, float);
+    callback uv-scaled(float);
+    callback uv-rotated(float);
     callback uv-seam-toggled;
     callback uv-seams-cleared;
     callback boolean-operand-cleared;
@@ -2482,6 +2487,22 @@ export component PetuniaSlintShell inherits Window {
                                             commands: root.uv-layout-commands;
                                         }
 
+                                        TouchArea {
+                                            property <bool> extend: false;
+                                            pointer-event(event) => {
+                                                extend = event.modifiers.shift;
+                                                if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                                                    // O domínio usa UV com origem embaixo; a caixa desenha
+                                                    // com origem em cima, então o V é invertido aqui.
+                                                    root.uv-editor-clicked(
+                                                        self.mouse-x / self.width,
+                                                        1.0 - self.mouse-y / self.height,
+                                                        extend,
+                                                    );
+                                                }
+                                            }
+                                        }
+
                                         // Contorno do espaço 0..1.
                                         Rectangle { x: 0; y: 0; width: 100%; height: 1px; background: DesignTokens.border; }
                                         Rectangle { x: 0; y: parent.height - 1px; width: 100%; height: 1px; background: DesignTokens.border; }
@@ -2490,9 +2511,109 @@ export component PetuniaSlintShell inherits Window {
                                     }
 
                                     Text {
-                                        text: "\{root.uv-island-count} island(s)  ·  \{root.uv-face-count} face(s)  ·  selected: \{root.uv-selected-face}";
+                                        text: "\{root.uv-island-count} island(s)  ·  \{root.uv-face-count} face(s)  ·  selected: \{root.uv-selected-face}  ·  UV set: \{root.uv-selected-count}";
                                         color: DesignTokens.text-secondary;
                                         font-size: 10px;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "← U"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV left";
+                                            TouchArea { clicked => { root.uv-moved(-0.05, 0.0); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "U →"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV right";
+                                            TouchArea { clicked => { root.uv-moved(0.05, 0.0); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "↓ V"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV down";
+                                            TouchArea { clicked => { root.uv-moved(0.0, -0.05); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "V ↑"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV up";
+                                            TouchArea { clicked => { root.uv-moved(0.0, 0.05); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Scale −"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Scale UV down";
+                                            TouchArea { clicked => { root.uv-scaled(0.9); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Scale +"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Scale UV up";
+                                            TouchArea { clicked => { root.uv-scaled(1.1); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Rotate −"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Rotate UV counter-clockwise";
+                                            TouchArea { clicked => { root.uv-rotated(-15.0); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Rotate +"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Rotate UV clockwise";
+                                            TouchArea { clicked => { root.uv-rotated(15.0); } }
+                                        }
                                     }
                                     if root.uv-layout-truncated: Text {
                                         text: "Layout truncated: only the first 2000 faces are drawn.";

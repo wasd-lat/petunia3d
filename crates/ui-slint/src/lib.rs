@@ -701,6 +701,8 @@ pub struct UvEditorModel {
     pub island_count: usize,
     pub face_count: usize,
     pub selected_face: i32,
+    /// Faces marcadas em `uv_selected` (seleção de UV, distinta da seleção 3D).
+    pub uv_selected_count: usize,
     /// `true` quando a malha tem mais faces do que o editor desenha.
     pub truncated: bool,
 }
@@ -1609,8 +1611,95 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 .position(|face| face.selected)
                 .map(|index| index as i32)
                 .unwrap_or(-1),
+            uv_selected_count: self.state.session.uv_selected.len(),
             truncated: face_count > MAX_FACES,
         }
+    }
+
+    /// Clique no editor UV 2D: seleciona a face cuja ilha contém o ponto.
+    ///
+    /// `u`/`v` chegam normalizados em 0..1 com origem embaixo, que é a
+    /// convenção do domínio; o editor desenha com origem em cima e converte
+    /// antes de chamar.
+    pub fn uv_editor_click(&mut self, u: f32, v: f32, extend: bool) -> bool {
+        if !u.is_finite() || !v.is_finite() {
+            return false;
+        }
+        let Some(face) = petunia_module_uv::UvModule::uv_hit(&self.state, u, v) else {
+            if !extend {
+                self.state.session.uv_selected.clear();
+                self.state.mark_dirty();
+            }
+            self.state.set_status("UV: no face under the cursor");
+            return false;
+        };
+        if extend {
+            // Com Shift a seleção acumula e alterna; sem Shift ela é substituída,
+            // que é o comportamento previsível de um clique simples.
+            if !self.state.session.uv_selected.insert(face) {
+                self.state.session.uv_selected.remove(&face);
+            }
+        } else {
+            self.state.session.uv_selected.clear();
+            self.state.session.uv_selected.insert(face);
+        }
+        if let Some(mesh) = self.state.project.active_mesh_mut() {
+            if !extend {
+                for current in &mut mesh.faces {
+                    current.selected = false;
+                }
+            }
+            if let Some(target) = mesh.faces.get_mut(face) {
+                target.selected = true;
+            }
+        }
+        self.state.sync_selection();
+        self.state.mark_dirty();
+        self.state.set_status(format!(
+            "UV: face {face} selected ({} total)",
+            self.state.session.uv_selected.len()
+        ));
+        true
+    }
+
+    /// Move as UVs selecionadas (ou todas, quando nada está marcado).
+    pub fn uv_move_selected(&mut self, du: f32, dv: f32) -> bool {
+        if !du.is_finite() || !dv.is_finite() {
+            return false;
+        }
+        if du == 0.0 && dv == 0.0 {
+            return false;
+        }
+        self.state.checkpoint("move uv");
+        petunia_module_uv::UvModule::move_selected(&mut self.state, du, dv);
+        self.state.emit_mesh_changed();
+        self.state
+            .set_status(format!("UV moved by ({du:.3}, {dv:.3})"));
+        true
+    }
+
+    /// Escala as UVs selecionadas em torno do centroide.
+    pub fn uv_scale_selected(&mut self, factor: f32) -> bool {
+        if !factor.is_finite() || factor <= 0.0 {
+            return false;
+        }
+        self.state.checkpoint("scale uv");
+        petunia_module_uv::UvModule::scale_selected(&mut self.state, factor);
+        self.state.emit_mesh_changed();
+        self.state.set_status(format!("UV scaled ×{factor:.3}"));
+        true
+    }
+
+    /// Rotaciona as UVs selecionadas em torno do centroide.
+    pub fn uv_rotate_selected(&mut self, degrees: f32) -> bool {
+        if !degrees.is_finite() || degrees == 0.0 {
+            return false;
+        }
+        self.state.checkpoint("rotate uv");
+        petunia_module_uv::UvModule::rotate_selected(&mut self.state, degrees.to_radians());
+        self.state.emit_mesh_changed();
+        self.state.set_status(format!("UV rotated {degrees:.1}°"));
+        true
     }
 
     /// Marca ou desmarca como costura todas as arestas da face UV selecionada.
@@ -3353,6 +3442,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_uv_island_count(vm.uv_editor.island_count as i32);
     window.set_uv_face_count(vm.uv_editor.face_count as i32);
     window.set_uv_selected_face(vm.uv_editor.selected_face);
+    window.set_uv_selected_count(vm.uv_editor.uv_selected_count as i32);
     window.set_uv_layout_truncated(vm.uv_editor.truncated);
     window.set_paint_layer_count(vm.paint_layer_count.as_str().into());
     window.set_paint_canvas_size(vm.paint_canvas_size.as_str().into());
@@ -4156,6 +4246,54 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_paint_lock_set(move |lock| {
         if let Ok(mut bridge) = brush_lock_bridge.lock() {
             bridge.set_brush_lock(lock.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_click_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_editor_clicked(move |u, v, extend| {
+        if let Ok(mut bridge) = uv_click_bridge.lock() {
+            bridge.uv_editor_click(u, v, extend);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_move_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_moved(move |du, dv| {
+        if let Ok(mut bridge) = uv_move_bridge.lock() {
+            bridge.uv_move_selected(du, dv);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_scale_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_scaled(move |factor| {
+        if let Ok(mut bridge) = uv_scale_bridge.lock() {
+            bridge.uv_scale_selected(factor);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_rotate_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_rotated(move |degrees| {
+        if let Ok(mut bridge) = uv_rotate_bridge.lock() {
+            bridge.uv_rotate_selected(degrees);
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
@@ -6759,6 +6897,89 @@ mod tests {
         petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
         assert!(bridge.paint_canvas_dimensions().is_some());
         assert!(bridge.view_model().paint_canvas_size.contains('×'));
+    }
+
+    #[test]
+    fn clicking_the_uv_editor_selects_the_face_under_the_cursor() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // O cubo usa projeção planar: o centro do espaço UV cai na face 0.
+        assert!(bridge.uv_editor_click(0.5, 0.5, false));
+        assert_eq!(bridge.view_model().uv_editor.selected_face, 0);
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 1);
+        assert_eq!(bridge.state.ui.status, "UV: face 0 selected (1 total)");
+
+        // Clicar de novo sem Shift substitui a seleção, não acumula.
+        assert!(bridge.uv_editor_click(0.5, 0.5, false));
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 1);
+        // Com Shift a seleção alterna.
+        assert!(bridge.uv_editor_click(0.5, 0.5, true));
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 0);
+    }
+
+    #[test]
+    fn uv_editor_click_off_the_layout_clears_the_selection_and_says_so() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // Tira a face 0 do canto para deixar uma região vazia.
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].uv =
+            vec![[0.0, 0.0], [0.0, 0.25], [0.25, 0.25], [0.25, 0.0]];
+        for face in bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .faces
+            .iter_mut()
+            .skip(1)
+        {
+            face.uv = vec![[0.0, 0.0], [0.0, 0.1], [0.1, 0.1], [0.1, 0.0]];
+        }
+        bridge.uv_editor_click(0.5, 0.5, false);
+
+        assert!(!bridge.uv_editor_click(0.9, 0.9, false));
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 0);
+        assert_eq!(bridge.state.ui.status, "UV: no face under the cursor");
+        assert!(!bridge.uv_editor_click(f32::NAN, 0.5, false));
+    }
+
+    #[test]
+    fn uv_transforms_move_scale_and_rotate_the_selected_faces() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.uv_editor_click(0.5, 0.5, false);
+        let before = bridge.state.project.active_mesh().unwrap().faces[0]
+            .uv
+            .clone();
+
+        assert!(bridge.uv_move_selected(0.1, 0.0));
+        let moved = bridge.state.project.active_mesh().unwrap().faces[0]
+            .uv
+            .clone();
+        assert!((moved[0][0] - before[0][0] - 0.1).abs() < 1.0e-5);
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.uv_scale_selected(2.0));
+        let scaled = bridge.state.project.active_mesh().unwrap().faces[0]
+            .uv
+            .clone();
+        let span_before = moved.iter().map(|uv| uv[0]).fold(f32::MIN, f32::max)
+            - moved.iter().map(|uv| uv[0]).fold(f32::MAX, f32::min);
+        let span_after = scaled.iter().map(|uv| uv[0]).fold(f32::MIN, f32::max)
+            - scaled.iter().map(|uv| uv[0]).fold(f32::MAX, f32::min);
+        assert!(
+            span_after > span_before,
+            "escalar ×2 precisa alargar a ilha: {span_before} -> {span_after}"
+        );
+
+        assert!(bridge.uv_rotate_selected(90.0));
+        assert_eq!(bridge.state.project.undo.depth(), (3, 0));
+
+        assert!(
+            !bridge.uv_move_selected(0.0, 0.0),
+            "movimento nulo é recusado"
+        );
+        assert!(!bridge.uv_scale_selected(0.0), "escala zero é recusada");
+        assert!(!bridge.uv_rotate_selected(0.0), "rotação nula é recusada");
+        assert!(!bridge.uv_scale_selected(f32::NAN));
+        assert_eq!(bridge.state.project.undo.depth(), (3, 0));
     }
 
     #[test]
