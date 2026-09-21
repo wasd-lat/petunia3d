@@ -602,6 +602,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub context_menu: Option<ContextMenuState>,
     /// Menu da barra superior aberto, se houver.
     pub menu_open: Option<MenuKind>,
+    /// Forma ancorada (Line/Rectangle) em curso: canto inicial em pixels do canvas.
+    pub shape_anchor: Option<(u32, u32)>,
     /// Sessão de loop cut com slide interativo (P3D-131).
     pub loop_cut: Option<LoopCutSessionState>,
     /// Autosave rotativo do shell (P3D-002). Nunca sobrescreve o arquivo oficial.
@@ -753,6 +755,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             rename_draft: None,
             context_menu: None,
             menu_open: None,
+            shape_anchor: None,
             loop_cut: None,
             autosave: petunia_core::AutosaveService::default(),
             pending_recovery: None,
@@ -955,6 +958,26 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         let count =
                             petunia_module_paint::PaintModule::fill_selection(&mut self.state);
                         self.state.set_status(format!("Filled {count} points"));
+                    }
+                    // Formas e pincéis do workspace PAINT compartilham o mesmo
+                    // índice de tipo de pincel que o resto do domínio.
+                    "line" | "rectangle" => {
+                        self.state.session.tools.paint_brush_kind =
+                            petunia_core::kind_from_brush_type(if tool == "line" {
+                                petunia_core::BrushType::Line
+                            } else {
+                                petunia_core::BrushType::Rectangle
+                            });
+                        self.state
+                            .set_status("Shape: press on the surface to anchor, release to commit");
+                    }
+                    "brush" | "eraser" | "picker" => {
+                        self.state.session.tools.paint_brush_kind =
+                            petunia_core::kind_from_brush_type(match tool.as_str() {
+                                "eraser" => petunia_core::BrushType::Eraser,
+                                "picker" => petunia_core::BrushType::Eyedropper,
+                                _ => petunia_core::BrushType::Soft,
+                            });
                     }
                     _ => {}
                 }
@@ -1195,11 +1218,99 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.state.set_status("No active mesh to paint");
             return false;
         }
+        if self.is_shape_tool() {
+            return self.begin_paint_shape_at(x, y);
+        }
         self.state.begin_paint_stroke();
         self.paint_dab_at(x, y);
         self.paint_last = Some([x, y]);
         self.state.mark_dirty();
         true
+    }
+
+    /// Ferramentas de forma ancoram no press e confirmam no release.
+    pub fn is_shape_tool(&self) -> bool {
+        matches!(
+            petunia_core::brush_type_from_kind(self.state.session.tools.paint_brush_kind),
+            petunia_core::BrushType::Line | petunia_core::BrushType::Rectangle
+        )
+    }
+
+    /// Inicia uma forma (Line/Rectangle) no pixel do canvas sob o cursor.
+    pub fn begin_paint_shape_at(&mut self, x: f32, y: f32) -> bool {
+        if self.state.workspace != Workspace::Paint {
+            return false;
+        }
+        // A forma precisa de canvas para converter UV em pixel.
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let Some((px, py)) = self.canvas_pixel_at(x, y) else {
+            self.state
+                .set_status("Shape: point at the surface to anchor the shape");
+            return false;
+        };
+        self.shape_anchor = Some((px, py));
+        self.state.set_status("Shape anchored: release to commit");
+        true
+    }
+
+    /// Confirma a forma como uma única operação de undo.
+    pub fn end_paint_shape_at(&mut self, x: f32, y: f32) -> bool {
+        let Some((x0, y0)) = self.shape_anchor.take() else {
+            return false;
+        };
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let Some((x1, y1)) = self.canvas_pixel_at(x, y) else {
+            self.state
+                .set_status("Shape: release point is off the surface, discarded");
+            return false;
+        };
+        let brush = petunia_core::brush_type_from_kind(self.state.session.tools.paint_brush_kind);
+        let color = [
+            (self.state.paint_color[0] * 255.0).clamp(0.0, 255.0) as u8,
+            (self.state.paint_color[1] * 255.0).clamp(0.0, 255.0) as u8,
+            (self.state.paint_color[2] * 255.0).clamp(0.0, 255.0) as u8,
+            255,
+        ];
+        let strength = self.state.session.tools.paint_strength;
+        self.state.checkpoint("paint shape");
+        petunia_module_paint::PaintModule::commit_shape(
+            &mut self.state,
+            petunia_module_paint::ShapeStroke {
+                x0,
+                y0,
+                x1,
+                y1,
+                brush,
+                color,
+                strength,
+            },
+        );
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        self.state
+            .set_status(format!("Shape committed ({brush:?})"));
+        true
+    }
+
+    /// Cancela a forma ancorada sem tocar no documento.
+    pub fn cancel_paint_shape(&mut self) -> bool {
+        if self.shape_anchor.take().is_none() {
+            return false;
+        }
+        self.state.set_status("Shape cancelled");
+        true
+    }
+
+    fn canvas_pixel_at(&self, x: f32, y: f32) -> Option<(u32, u32)> {
+        let width = self.viewport_size[0].max(1.0);
+        let height = self.viewport_size[1].max(1.0);
+        let ndc_x = (x / width).clamp(0.0, 1.0) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (y / height).clamp(0.0, 1.0) * 2.0;
+        let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
+        let (face, hit) = pick_face_hit(&self.state, origin, direction)?;
+        let isolate = self.state.session.tools.paint_isolate_selection;
+        let uv = petunia_module_paint::PaintModule::face_hit_uv(&self.state, face, hit, isolate)?;
+        petunia_module_paint::PaintModule::uv_to_px(&self.state, uv)
     }
 
     /// Estende o traço interpolando em espaço de tela e pintando cada dab.
@@ -1222,7 +1333,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     /// Confirma o traço como uma única entrada de undo.
-    pub fn end_paint_stroke_at(&mut self) -> bool {
+    pub fn end_paint_stroke_at(&mut self, x: f32, y: f32) -> bool {
+        if self.shape_anchor.is_some() {
+            return self.end_paint_shape_at(x, y);
+        }
         if self.paint_last.take().is_none() {
             return false;
         }
@@ -1231,6 +1345,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn cancel_paint_stroke(&mut self) -> bool {
+        if self.cancel_paint_shape() {
+            return true;
+        }
         if self.paint_last.take().is_none() {
             return false;
         }
@@ -3662,9 +3779,9 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
 
     let paint_end_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_viewport_paint_end(move || {
+    window.on_viewport_paint_end(move |x, y| {
         if let Ok(mut bridge) = paint_end_bridge.lock() {
-            bridge.end_paint_stroke_at();
+            bridge.end_paint_stroke_at(x, y);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -5182,7 +5299,7 @@ mod tests {
         assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
         assert!(bridge.paint_stroke_to(420.0, 300.0));
         assert!(bridge.paint_stroke_to(440.0, 310.0));
-        assert!(bridge.end_paint_stroke_at());
+        assert!(bridge.end_paint_stroke_at(440.0, 300.0));
 
         assert_eq!(bridge.state.project.undo.depth(), (1, 0));
         assert!(bridge.state.is_document_dirty());
@@ -6342,6 +6459,70 @@ mod tests {
             "o quadrado interno cobre ~1/4 do canvas: {painted} vs {expected}"
         );
         assert!(painted < total, "uma face não pode cobrir o canvas inteiro");
+    }
+
+    #[test]
+    fn shape_tools_anchor_on_press_and_commit_on_release() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("rectangle".to_string()));
+        assert!(
+            bridge.is_shape_tool(),
+            "rectangle precisa ser ferramenta de forma"
+        );
+        assert_eq!(
+            petunia_core::brush_type_from_kind(bridge.state.session.tools.paint_brush_kind),
+            petunia_core::BrushType::Rectangle
+        );
+
+        assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
+        assert!(bridge.shape_anchor.is_some(), "o press ancora a forma");
+        assert!(
+            bridge.paint_last.is_none(),
+            "forma não usa o caminho de traço livre"
+        );
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "ancorar não pode empilhar histórico"
+        );
+
+        assert!(bridge.end_paint_stroke_at(430.0, 320.0));
+        assert!(bridge.shape_anchor.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn cancelling_a_shape_leaves_the_document_untouched() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("line".to_string()));
+
+        assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
+        assert!(bridge.cancel_paint_stroke());
+        assert!(bridge.shape_anchor.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert_eq!(bridge.state.ui.status, "Shape cancelled");
+    }
+
+    #[test]
+    fn shape_press_off_the_surface_is_refused_with_a_reason() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("line".to_string()));
+
+        // Canto superior esquerdo: longe do cubo padrão.
+        assert!(!bridge.begin_paint_stroke_at(2.0, 2.0));
+        assert!(bridge.shape_anchor.is_none());
+        assert!(
+            bridge.state.ui.status.starts_with("Shape:"),
+            "veio: {}",
+            bridge.state.ui.status
+        );
     }
 
     #[test]

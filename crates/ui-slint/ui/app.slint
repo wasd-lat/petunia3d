@@ -610,7 +610,7 @@ export component PetuniaSlintShell inherits Window {
     callback viewport-transform-end;
     callback viewport-paint-begin(float, float);
     callback viewport-paint-update(float, float);
-    callback viewport-paint-end;
+    callback viewport-paint-end(float, float);
     callback add-menu-changed(bool);
     callback tool-modal-scrubbed(float, bool);
     callback tool-modal-text-committed(string);
@@ -995,6 +995,18 @@ export component PetuniaSlintShell inherits Window {
                                 active: active-tool == "fill";
                                 clicked => { root.active-tool-changed("fill"); }
                             }
+                            ToolButton {
+                                icon: IconSet.SquareDashed;
+                                semantic-label: "Line";
+                                active: active-tool == "line";
+                                clicked => { root.active-tool-changed("line"); }
+                            }
+                            ToolButton {
+                                icon: IconSet.Square;
+                                semantic-label: "Rectangle";
+                                active: active-tool == "rectangle";
+                                clicked => { root.active-tool-changed("rectangle"); }
+                            }
                         }
 
                         if active-workspace == "UV": VerticalLayout {
@@ -1125,7 +1137,7 @@ export component PetuniaSlintShell inherits Window {
                                     is-transform = false;
                                 }
                                 if is-painting {
-                                    root.viewport-paint-end();
+                                    root.viewport-paint-end(self.mouse-x / 1px, self.mouse-y / 1px);
                                     is-painting = false;
                                 }
                                 if is-tool-drag {
