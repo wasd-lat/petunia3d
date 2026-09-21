@@ -1,93 +1,99 @@
-# Petunia3D — editor low-poly shape-first (Rust + OpenGL)
+# Petunia3D — modelador low-poly shape-first (Rust + Slint + WGPU)
 
-Modelador 3D nativo focado em criação rápida de assets low-poly
-(estética PS1/N64/DS/indie): desenhe a silhueta sobre a referência,
-gere a malha, extrude/ajuste, faça UV e pinte — sem dominar um DCC.
+Modelador 3D nativo focado em criação rápida de assets low-poly para games:
+desenhe a silhueta sobre a referência, gere a malha, ajuste/transforme,
+prepare UV, pinte e exporte — sem exigir domínio prévio de um DCC generalista.
+
+A interface padrão é o shell Slint. O domínio geométrico permanece desacoplado
+da UI e é acionado por comandos transacionais com Undo/Redo. A UI egui existe
+apenas como legado de transição.
 
 ## Rodar
 
 ```bash
 cargo run --release
-# diagnóstico:
-PETUNIA_BACKEND=gl cargo run        # força OpenGL puro
-PETUNIA_BACKEND=wgpu cargo run      # força wgpu
-RUST_LOG=wgpu_hal=debug cargo run   # motivo de backend falhar
+cargo run --release -- --legacy-egui
+PETUNIA_LEGACY_EGUI=1 cargo run --release
+cargo run -p petunia-cli -- help
 ```
 
-Controles: **MMB** orbita • **Shift+MMB** pan • **scroll** zoom •
-**Tab** modo • **Del** apaga • **1/2/3** vértice/aresta/face •
-**G/E/I/W/M/A/P/B** ferramentas • **Ctrl+Z/Y** undo •
-**Home** reseta câmera • **H** ajuda. Tudo remapeável em
-`assets/keybinds/petunia.toml`.
+Os atalhos pertencem a perfis configuráveis em `assets/keymaps/`; a referência
+completa está em [`docs/input/keymaps.md`](docs/input/keymaps.md).
 
-## Workspaces (pílulas no header)
+## Workspaces e capacidades
 
-- **MODEL** — primitivas (10 espécies), Draw Profile (extrude/revolve),
-  Extrude, Push/Pull, Inset, Bevel, Subdivide, Mirror, Merge, Symmetrize +
-  referências ortográficas.
-- **PAINT** — vertex paint (brush/fill/eyedropper+Alt/palette) e
-  canvas albedo 2D com preview texturizado no viewport.
-- **UV** — editor sincronizado com a seleção, projeção planar,
-  mover/escalar ilhas.
-- **ANIMATE** — esqueletos, rigs e timeline com keyframes.
+- **MODEL** — primitivas procedurais, Draw Profile, extrusão, Push/Pull,
+  Inset, Bevel, Subdivide, Mirror, Merge, Symmetrize e referências
+  ortográficas, atrás do `CommandDispatcher` canônico.
+- **PAINT** — pincéis descritivos, camadas, efeitos, pintura 2D/3D e paleta do
+  projeto.
+- **UV** — projeções planar/cúbica/automática, empacotamento de ilhas,
+  transformações de UV e projeção a partir da vista.
+- **Command Palette** — busca e execução a partir do catálogo canônico em
+  [`docs/generated/COMMANDS.md`](docs/generated/COMMANDS.md).
 
-Exportação (lote OBJ em pasta ou GLB em arquivo) via diálogo de exportação.
+Exportação e importação passam pelo pipeline de entrega: OBJ, glTF/GLB e
+pacotes `.pkg`. O arquivo nativo `.petunia` é um contêiner ZIP versionado com
+UUIDs persistentes.
 
-Arquivo de projeto `.petunia` (binário versionado, UUIDs persistentes).
+## Frontend e renderização
 
-## Backends
-
-OpenGL-first: renderer puro `glow` (GL 3.3 Core, GLSL 330) com fallback
-automático a partir do wgpu. Em GPU antiga sem Vulkan funcional
-(ex. Intel Ivy Bridge no Mesa, onde o EGL do wgpu falha), o app cai
-sozinho para OpenGL desktop. Detalhes em `docs/ARCHITECTURE.md`.
+- **Produção:** shell declarativo em Slint 1.18 (`crates/ui-slint/`), com
+  viewport WGPU compartilhado e fallback de software quando não há GPU
+  compatível.
+- **Legado:** UI egui (`crates/ui/`) e host em `crates/app/`, acessíveis apenas
+  por `--legacy-egui` ou `PETUNIA_LEGACY_EGUI=1`; não recebem novas
+  funcionalidades de produto.
+- **Contratos visuais toolkit-neutros:** viewport-first, Parts/Context/Asset
+  Library, workspaces `MODEL / PAINT / UV`, tokens semânticos,
+  keyboard/focus/accessibility. Detalhes em [`docs/ui/README.md`](docs/ui/README.md).
 
 ## Layout
 
 ```
 petunia3d/
-├── src/main.rs            # binário fino (chama petunia_app::run)
+├── src/main.rs            # binário fino (Slint por padrão, egui legado opcional)
 ├── crates/
-│   ├── core/              # estado, câmera, eventos, contrato Module
-│   ├── mesh/              # malha: prims/ops/uv/obj/triangulate
-│   ├── commands/          # undo/redo (snapshots)
-│   ├── config/            # i18n, keybinds, tema, tools.toml
-│   ├── project/           # Asset(UUID)/Project, .petunia, export OBJ/GLB
-│   ├── render/            # tipos + matemática compartilhada (grid, luz)
-│   ├── render-gl/         # OpenGL puro (único lugar com GL)
-│   ├── render-wgpu/       # wgpu (quando há GPU compatível)
-│   ├── module-model/      # 16 ferramentas plugáveis
-│   ├── module-paint/      # vertex paint + canvas
-│   ├── module-uv/         # editor UV
-│   ├── module-assets/     # asset library
-│   ├── ui/                # layout egui (pílulas, painéis, viewport, gizmos)
-│   ├── app/               # Core, backends, loop render-on-demand
-│   ├── cli/               # CLI headless puro para automação e pipelines
-│   ├── ffi/               # Camada C-ABI e include/petunia.h
-│   ├── mcp/               # Fronteira MCP (ferramentas allowlisted p/ agentes)
-│   ├── plugins/           # Sistema de plugins
-│   └── xtask/             # Automação de CI/CD e prevenção de drift documental
-├── assets/                # locales, keybinds, themes, ícones vetoriais/raster
-└── docs/                  # Documentação VitePress, Manuais e Bíblia de Implementação (SSOT)
+│   ├── core/              # estado, câmera, comandos, undo/redo, módulos
+│   ├── mesh/              # malha, primitivas, operações, UV e topologia
+│   ├── commands/          # pilha de undo/redo
+│   ├── config/            # i18n, keymaps, temas e ferramentas
+│   ├── project/           # Asset(UUID)/Project, `.petunia`, pipeline OBJ/glTF/GLB/pkg
+│   ├── render/            # tipos e matemática compartilhada de cena
+│   ├── render-gl/         # backend OpenGL do host legado
+│   ├── render-wgpu/       # backend WGPU compartilhado
+│   ├── module-model/      # ferramentas de modelagem
+│   ├── module-paint/      # pintura 2D/3D, camadas e efeitos
+│   ├── module-uv/         # projeções, ilhas e transformações UV
+│   ├── module-assets/     # biblioteca de assets
+│   ├── ui-slint/          # frontend de produção em Slint
+│   ├── ui/                # frontend egui legado
+│   ├── app/               # host legado, backends e loop render-on-demand
+│   ├── cli/               # CLI headless para automação e pipelines
+│   ├── ffi/               # camada C-ABI e `include/petunia.h`
+│   ├── mcp/               # fronteira MCP para agentes
+│   ├── plugins/           # sistema de plugins Lua
+│   └── xtask/             # automação e prevenção de drift documental
+├── assets/                # locales, keymaps, temas e ícones
+└── docs/                  # manuais, referência e Livro Vivo (SSOT)
 ```
 
-## Documentação & Fonte Única da Verdade
+## Documentação e fonte única da verdade
 
-- **Site Oficial de Documentação**: Navegue em `docs/` ou execute `cargo xtask docs`.
-- **Bíblia de Implementação (SSOT)**: [`docs/bible/index.md`](docs/bible/index.md) reúne 155 especificações P3D, 17 capítulos constitucionais, 15 seções temáticas, 3 adendos e 36 capítulos de fundação.
+- Roteador do projeto: [`docs/PRUMO.md`](docs/PRUMO.md).
+- **Livro Vivo (SSOT):** [`docs/bible/index.md`](docs/bible/index.md), atualmente
+  com catálogo até `P3D-168`.
+- Interface e contratos visuais: [`docs/ui/README.md`](docs/ui/README.md).
+- Auditoria atual da interface Slint:
+  [`docs/ui/slint-modern-audit.md`](docs/ui/slint-modern-audit.md).
 
-## Qualidade & Status Atual
+## Qualidade e status
 
-- **Testes Automatizados**: **400+ testes** de unidade passando
-  (`cargo test --workspace --lib`), mais suites de integração
-  (kittest de fluxos de UI, CLI headless, malha, config com paridade i18n).
-- **Linter & Formatação**: `cargo clippy --workspace --all-targets -- -D warnings`
-  e `cargo fmt --all -- --check` 100% limpos.
-- **Portões de Integridade**: `cargo xtask arch-check`, `docs-check` e
-  `ui-check` (mapa de 193 componentes) aprovados.
-- **Progresso**: Waves 0–10 concluídas (modelagem, materiais, entrega, QA,
-  animação & rigging) + sistema V1 de primitivas (10 espécies) + sidebar
-  direita redesenhada (Scene + Inspector contextual).
+Os portões normativos — formato, `check`, testes relevantes, Clippy,
+`arch-check`, `docs-check`, `bible-check` e `ui-guard --strict` — estão
+definidos em [`AGENTS.md`](AGENTS.md). Para mudanças na UI Slint, consulte
+também a matriz de gaps em `docs/ui/slint-modern-audit.md` antes de considerar
+uma funcionalidade concluída.
 
 ## Contribuindo
 
