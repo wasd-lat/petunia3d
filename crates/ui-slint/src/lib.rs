@@ -277,6 +277,8 @@ pub struct ShellViewModel {
     pub xray_opacity: f32,
     pub show_xray: bool,
     pub shading_popover_open: bool,
+    pub gizmo_hover_axis: i32,
+    pub gizmo_active_axis: i32,
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
     pub selection_overlay: SelectionOverlayModel,
@@ -449,6 +451,8 @@ impl ShellViewModel {
             xray_opacity: state.session.xray_opacity,
             show_xray: state.session.show_xray,
             shading_popover_open: false,
+            gizmo_hover_axis: -1,
+            gizmo_active_axis: -1,
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
             selection_overlay: SelectionOverlayModel::default(),
@@ -637,6 +641,10 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub menu_open: Option<MenuKind>,
     /// Popover de opções de shading aberto.
     pub shading_popover_open: bool,
+    /// Handle do gizmo sob o cursor (preselection, sem clique).
+    pub gizmo_hover: Option<GizmoHandle>,
+    /// Handle do gizmo sendo arrastado, se houver.
+    pub gizmo_drag: Option<GizmoHandle>,
     /// Forma ancorada (Line/Rectangle) em curso: canto inicial em pixels do canvas.
     pub shape_anchor: Option<(u32, u32)>,
     /// Plano de corte (Slice) ativo: âncora em pixels lógicos da viewport.
@@ -778,6 +786,25 @@ pub struct PaintLayerModel {
     pub kind_label: String,
 }
 
+/// Handle do gizmo sob o cursor ou em arrasto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GizmoHandle {
+    X,
+    Y,
+    Z,
+}
+
+impl GizmoHandle {
+    /// Índice do eixo para `ModalConstraint::Axis`.
+    pub const fn axis(self) -> usize {
+        match self {
+            Self::X => 0,
+            Self::Y => 1,
+            Self::Z => 2,
+        }
+    }
+}
+
 /// Estado da sessão de loop cut ativa no shell.
 #[derive(Debug, Clone)]
 pub struct LoopCutSessionState {
@@ -827,6 +854,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             slice_anchor: None,
             loop_cut: None,
             shading_popover_open: false,
+            gizmo_hover: None,
+            gizmo_drag: None,
             autosave: petunia_core::AutosaveService::default(),
             pending_recovery: None,
             position: [
@@ -1300,6 +1329,173 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.mark_dirty();
     }
 
+    /// Orbita a câmera, usando a seleção como pivô quando existe.
+    ///
+    /// É o comportamento de Blender/C4D: o usuário orbita em torno do que
+    /// está trabalhando, não de um ponto fixo da cena.
+    pub fn orbit_viewport(&mut self, dx: f32, dy: f32) -> bool {
+        if !dx.is_finite() || !dy.is_finite() {
+            return false;
+        }
+        if let Some(center) = self.selection_pivot() {
+            self.state.session.camera.target = center;
+        }
+        self.state.session.camera.orbit(dx, dy);
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Distância em mundo que um arrasto de tela representa ao longo de um eixo.
+    ///
+    /// Projeta a direção do eixo em espaço de tela e mede quanto do movimento
+    /// do ponteiro caiu nela, convertendo por `visible_height`.
+    fn screen_delta_on_axis(
+        &self,
+        axis: usize,
+        total_x: f32,
+        total_y: f32,
+        viewport: [f32; 2],
+    ) -> f32 {
+        let world_axis = match axis {
+            0 => glam::Vec3::X,
+            1 => glam::Vec3::Y,
+            _ => glam::Vec3::Z,
+        };
+        let view_proj = self.state.session.camera.view_proj();
+        let project = |point: glam::Vec3| -> Option<[f32; 2]> {
+            let clip = view_proj * glam::Vec4::new(point.x, point.y, point.z, 1.0);
+            if clip.w <= 0.05 {
+                return None;
+            }
+            let inv_w = 1.0 / clip.w;
+            Some([
+                (clip.x * inv_w * 0.5 + 0.5) * viewport[0],
+                (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * viewport[1],
+            ])
+        };
+        let origin = self.state.session.camera.target;
+        let Some(a) = project(origin) else {
+            return 0.0;
+        };
+        let Some(b) = project(origin + world_axis) else {
+            return 0.0;
+        };
+        let direction = [b[0] - a[0], b[1] - a[1]];
+        let length_squared = direction[0] * direction[0] + direction[1] * direction[1];
+        if length_squared <= 1.0e-6 {
+            return 0.0;
+        }
+        // Fração do movimento do ponteiro na direção do eixo, em unidades de
+        // mundo (a direção projetada corresponde a 1 unidade do eixo).
+        let along = (total_x * direction[0] + total_y * direction[1]) / length_squared;
+        let world_per_pixel = self.state.session.camera.visible_height() / viewport[1].max(1.0);
+        along * length_squared.sqrt() * world_per_pixel
+    }
+
+    /// Centro da seleção do ativo, quando há algo selecionado.
+    fn selection_pivot(&self) -> Option<glam::Vec3> {
+        let mesh = self.state.project.active_mesh()?;
+        if !mesh.has_selection() {
+            return None;
+        }
+        let center = mesh.selection_center();
+        if center.iter().all(|value| value.is_finite()) {
+            Some(glam::Vec3::from_array(center))
+        } else {
+            None
+        }
+    }
+
+    /// Handle do gizmo sob um ponto de tela, dentro de um raio de tolerância.
+    ///
+    /// O teste é em espaço de tela porque o gizmo tem tamanho fixo em pixels:
+    /// o alvo do mouse precisa ser generoso (12 px) mesmo com a haste fina.
+    pub fn gizmo_handle_at(&self, x: f32, y: f32) -> Option<GizmoHandle> {
+        const HIT_RADIUS: f32 = 12.0;
+        let gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        if !gizmo.visible {
+            return None;
+        }
+        let origin = [gizmo.origin_x, gizmo.origin_y];
+        let mut best: Option<(GizmoHandle, f32)> = None;
+        for (handle, commands) in [
+            (GizmoHandle::X, &gizmo.x_commands),
+            (GizmoHandle::Y, &gizmo.y_commands),
+            (GizmoHandle::Z, &gizmo.z_commands),
+        ] {
+            let numbers: Vec<f32> = commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            if numbers.len() != 4 {
+                continue;
+            }
+            let end = [numbers[2], numbers[3]];
+            let distance = point_segment_distance([x, y], origin, end);
+            if distance <= HIT_RADIUS && best.is_none_or(|(_, current)| distance < current) {
+                best = Some((handle, distance));
+            }
+        }
+        best.map(|(handle, _)| handle)
+    }
+
+    /// Atualiza o handle do gizmo sob o cursor (preselection).
+    pub fn hover_gizmo(&mut self, x: f32, y: f32) -> bool {
+        if self.gizmo_drag.is_some() {
+            return false;
+        }
+        let next = self.gizmo_handle_at(x, y);
+        if next == self.gizmo_hover {
+            return false;
+        }
+        self.gizmo_hover = next;
+        true
+    }
+
+    /// Inicia o arrasto no handle do gizmo, restringindo a transformação ao eixo.
+    pub fn begin_gizmo_drag(&mut self, x: f32, y: f32) -> bool {
+        let Some(handle) = self.gizmo_handle_at(x, y) else {
+            return false;
+        };
+        let kind = match self.state.session.tools.active_tool.as_str() {
+            "rotate" => TransformKind::Rotation,
+            "scale" => TransformKind::Scale,
+            _ => TransformKind::Position,
+        };
+        if !self.begin_viewport_transform(kind, x, y) {
+            return false;
+        }
+        // A restrição de eixo é do domínio: o preview já sai no eixo certo.
+        let _ = self
+            .state
+            .set_modal_constraint(petunia_core::ModalConstraint::Axis(handle.axis()));
+        self.gizmo_drag = Some(handle);
+        self.state.set_status(format!(
+            "{} · {} axis",
+            match kind {
+                TransformKind::Position => "Move",
+                TransformKind::Rotation => "Rotate",
+                TransformKind::Scale => "Scale",
+            },
+            match handle {
+                GizmoHandle::X => "X",
+                GizmoHandle::Y => "Y",
+                GizmoHandle::Z => "Z",
+            }
+        ));
+        true
+    }
+
+    /// Encerra o arrasto do gizmo.
+    pub fn end_gizmo_drag(&mut self) -> bool {
+        if self.gizmo_drag.take().is_none() {
+            return false;
+        }
+        self.end_viewport_transform();
+        self.gizmo_hover = None;
+        true
+    }
+
     /// Atualiza o plano de corte enquanto o ponteiro se move.
     pub fn update_viewport_slice(&mut self, x: f32, y: f32) -> bool {
         if self.slice_anchor.is_none() {
@@ -1341,12 +1537,30 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let total_y = y - drag.start[1];
         let world_per_pixel =
             self.state.session.camera.visible_height() / drag.viewport[1].max(1.0);
+        // Com restrição de eixo o domínio espera um escalar, não um vetor: a
+        // distância projetada no eixo. Sem isso o movimento restrito fica zero.
+        let axis_constraint = self
+            .state
+            .session
+            .tools
+            .modal
+            .as_ref()
+            .and_then(|modal| match modal.constraint {
+                petunia_core::ModalConstraint::Axis(i) => Some(i),
+                _ => None,
+            });
         let result = match drag.kind {
             TransformKind::Position => {
-                let right = self.state.session.camera.right();
-                let up = self.state.session.camera.up();
-                let delta = right * (total_x * world_per_pixel) + up * (-total_y * world_per_pixel);
-                self.state.update_modal(delta, 0.0)
+                if let Some(index) = axis_constraint {
+                    let scalar = self.screen_delta_on_axis(index, total_x, total_y, drag.viewport);
+                    self.state.update_modal(glam::Vec3::ZERO, scalar)
+                } else {
+                    let right = self.state.session.camera.right();
+                    let up = self.state.session.camera.up();
+                    let delta =
+                        right * (total_x * world_per_pixel) + up * (-total_y * world_per_pixel);
+                    self.state.update_modal(delta, 0.0)
+                }
             }
             TransformKind::Rotation => self.state.update_modal(glam::Vec3::ZERO, total_x * 0.5),
             TransformKind::Scale => {
@@ -3222,6 +3436,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.rename_value = draft.clone();
         }
         vm.shading_popover_open = self.shading_popover_open;
+        vm.gizmo_hover_axis = self.gizmo_hover.map_or(-1, |h| h.axis() as i32);
+        vm.gizmo_active_axis = self.gizmo_drag.map_or(-1, |h| h.axis() as i32);
         if let Some(menu) = self.context_menu {
             vm.context_menu_open = true;
             vm.context_menu_x = menu.x;
@@ -3478,6 +3694,19 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 }
 
 /// Projeta o pivô da seleção e os três eixos do mundo para o overlay Slint.
+/// Distância de um ponto a um segmento, em espaço de tela.
+pub fn point_segment_distance(point: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ap = [point[0] - a[0], point[1] - a[1]];
+    let length_squared = ab[0] * ab[0] + ab[1] * ab[1];
+    if length_squared <= 1.0e-6 {
+        return (ap[0] * ap[0] + ap[1] * ap[1]).sqrt();
+    }
+    let t = ((ap[0] * ab[0] + ap[1] * ab[1]) / length_squared).clamp(0.0, 1.0);
+    let closest = [a[0] + ab[0] * t, a[1] + ab[1] * t];
+    ((point[0] - closest[0]).powi(2) + (point[1] - closest[1]).powi(2)).sqrt()
+}
+
 fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
     /// Comprimento das hastes do gizmo de transformação, em px lógicos.
     const ROD_LENGTH: f32 = 72.0;
@@ -4024,6 +4253,8 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_shading_mode(vm.shading_mode.as_str().into());
     window.set_show_xray(vm.show_xray);
     window.set_shading_popover_open(vm.shading_popover_open);
+    window.set_gizmo_hover_axis(vm.gizmo_hover_axis);
+    window.set_gizmo_active_axis(vm.gizmo_active_axis);
     window.set_xray_opacity(vm.xray_opacity);
     window.set_asset_library_visible(vm.asset_library_visible);
     window.set_paint_color(slint::Color::from_argb_f32(
@@ -4587,7 +4818,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let window_weak = window.as_weak();
     window.on_viewport_orbit(move |dx, dy| {
         if let Ok(mut bridge) = orbit_bridge.lock() {
-            bridge.apply(UiIntent::ViewportGesture(ViewportGesture::Orbit { dx, dy }));
+            bridge.orbit_viewport(dx, dy);
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
                 window.set_viewport_image(frame);
@@ -5069,6 +5300,47 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                     window.set_viewport_image(frame);
                 }
                 bridge.publish_canvas_image(&window);
+            }
+        }
+    });
+
+    let gizmo_hover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_gizmo_hover(move |x, y| {
+        if let Ok(mut bridge) = gizmo_hover_bridge.lock() {
+            if bridge.hover_gizmo(x, y) {
+                let vm = bridge.view_model();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                }
+            }
+        }
+    });
+
+    let gizmo_begin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_gizmo_drag_begin(move |x, y| {
+        if let Ok(mut bridge) = gizmo_begin_bridge.lock() {
+            bridge.begin_gizmo_drag(x, y);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let gizmo_end_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_gizmo_drag_end(move || {
+        if let Ok(mut bridge) = gizmo_end_bridge.lock() {
+            bridge.end_gizmo_drag();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -8565,6 +8837,116 @@ mod tests {
             light.enabled = false;
         }
         assert!(project.active_light().is_none());
+    }
+
+    #[test]
+    fn the_gizmo_handle_is_picked_in_screen_space_with_a_generous_target() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+        let gizmo = bridge.view_model().gizmo;
+        assert!(gizmo.visible);
+
+        // O centro exato de uma haste acerta o handle.
+        let x_end = {
+            let numbers: Vec<f32> = gizmo
+                .x_commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            [numbers[2], numbers[3]]
+        };
+        assert_eq!(
+            bridge.gizmo_handle_at(x_end[0], x_end[1]),
+            Some(GizmoHandle::X)
+        );
+
+        // Um ponto a 6 px da haste ainda acerta: o alvo é maior que o traço.
+        assert_eq!(
+            bridge.gizmo_handle_at(x_end[0] + 6.0, x_end[1]),
+            Some(GizmoHandle::X)
+        );
+        // Longe de qualquer haste não há handle.
+        assert_eq!(
+            bridge.gizmo_handle_at(gizmo.origin_x + 400.0, gizmo.origin_y),
+            None
+        );
+
+        // Sem ferramenta de transformação não há gizmo nem handle.
+        bridge.apply(UiIntent::SetActiveTool("select".to_string()));
+        assert_eq!(bridge.gizmo_handle_at(x_end[0], x_end[1]), None);
+    }
+
+    #[test]
+    fn dragging_a_gizmo_handle_constrains_the_transform_to_that_axis() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+        let gizmo = bridge.view_model().gizmo;
+        let numbers: Vec<f32> = gizmo
+            .x_commands
+            .split_whitespace()
+            .filter_map(|token| token.parse::<f32>().ok())
+            .collect();
+        let end = [numbers[2], numbers[3]];
+
+        // Hover antes do clique: preselection sem histórico.
+        assert!(bridge.hover_gizmo(end[0], end[1]));
+        assert_eq!(bridge.view_model().gizmo_hover_axis, 0);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+
+        assert!(bridge.begin_gizmo_drag(end[0], end[1]));
+        assert_eq!(bridge.view_model().gizmo_active_axis, 0);
+        assert!(bridge.state.session.tools.modal.is_some());
+
+        // Arrastar só move no eixo X: Y e Z ficam intactos.
+        let before = bridge.state.project.active_mesh().unwrap().verts[0].pos;
+        assert!(bridge.update_viewport_transform(end[0] + 80.0, end[1]));
+        let after = bridge.state.project.active_mesh().unwrap().verts[0].pos;
+        assert!((after[0] - before[0]).abs() > 1.0e-3, "X precisa mudar");
+        assert!((after[1] - before[1]).abs() < 1.0e-4, "Y precisa ficar");
+        assert!((after[2] - before[2]).abs() < 1.0e-4, "Z precisa ficar");
+
+        assert!(bridge.end_gizmo_drag());
+        assert_eq!(bridge.view_model().gizmo_active_axis, -1);
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+    }
+
+    #[test]
+    fn orbiting_uses_the_selection_as_pivot() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        // Move um vértice para longe da origem e seleciona só ele.
+        {
+            let mesh = bridge.state.project.active_mesh_mut().unwrap();
+            mesh.verts[0].pos = [5.0, 0.0, 0.0];
+            mesh.verts[0].selected = true;
+        }
+        bridge.state.sync_selection();
+        assert_ne!(bridge.state.session.camera.target.x, 5.0);
+
+        assert!(bridge.orbit_viewport(10.0, 0.0));
+        assert!(
+            (bridge.state.session.camera.target.x - 5.0).abs() < 1.0e-3,
+            "a órbita precisa pivotar na seleção, veio {:?}",
+            bridge.state.session.camera.target
+        );
+
+        // Sem seleção o alvo não é mexido.
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .deselect_all();
+        bridge.state.sync_selection();
+        let target = bridge.state.session.camera.target;
+        assert!(bridge.orbit_viewport(10.0, 0.0));
+        assert_eq!(bridge.state.session.camera.target, target);
     }
 
     #[test]

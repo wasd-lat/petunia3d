@@ -550,6 +550,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> shading-mode: "solid";
     in-out property <float> xray-opacity: 0.42;
     in-out property <bool> shading-popover-open: false;
+    in-out property <int> gizmo-hover-axis: -1;
+    in-out property <int> gizmo-active-axis: -1;
     in-out property <bool> show-xray: false;
     in-out property <bool> gizmo-visible: false;
     in-out property <bool> selection-overlay-visible: false;
@@ -734,6 +736,9 @@ export component PetuniaSlintShell inherits Window {
     callback shading-mode-set(string);
     callback xray-opacity-set(float);
     callback shading-popover-toggled(bool);
+    callback gizmo-hover(float, float);
+    callback gizmo-drag-begin(float, float);
+    callback gizmo-drag-end;
     callback toggle-xray-requested;
     callback reset-camera-requested;
     callback save-active-as-asset-requested;
@@ -745,6 +750,31 @@ export component PetuniaSlintShell inherits Window {
     callback brush-size-changed(float);
     callback brush-opacity-changed(float);
     callback shortcut-requested(string, bool, bool, bool);
+
+    // Cor e espessura de um handle do gizmo conforme o estado da interação.
+    function gizmo-handle-color(axis: int, base: color) -> color {
+        if root.gizmo-active-axis == axis {
+            return base;
+        }
+        if root.gizmo-active-axis >= 0 {
+            // Durante o arrasto os outros eixos perdem presença.
+            return base.transparentize(0.72);
+        }
+        if root.gizmo-hover-axis == axis {
+            return base.transparentize(0.18);
+        }
+        return base;
+    }
+
+    function gizmo-handle-width(axis: int) -> length {
+        if root.gizmo-active-axis == axis {
+            return 4px;
+        }
+        if root.gizmo-hover-axis == axis {
+            return 3.5px;
+        }
+        return 2.5px;
+    }
 
     changed command-search-visible => { root.command-selection = 0; }
     changed width => { root.compact-shell = self.width < 1100px; }
@@ -1122,6 +1152,7 @@ export component PetuniaSlintShell inherits Window {
                         property <bool> is-tool-drag: false;
                         property <bool> is-loop-drag: false;
                         property <bool> is-slice-drag: false;
+                        property <bool> is-gizmo-drag: false;
                         property <bool> tool-drag-fine: false;
                         property <string> local-kind: "";
 
@@ -1162,7 +1193,12 @@ export component PetuniaSlintShell inherits Window {
                                 } else if event.button == PointerEventButton.left
                                     && !event.modifiers.shift
                                     && !event.modifiers.alt {
-                                    if root.active-workspace == "PAINT" {
+                                    // O gizmo tem picking próprio: clicar num
+                                    // handle restringe a transformação ao eixo.
+                                    if root.gizmo-hover-axis >= 0 {
+                                        is-gizmo-drag = true;
+                                        root.gizmo-drag-begin(self.mouse-x / 1px, self.mouse-y / 1px);
+                                    } else if root.active-workspace == "PAINT" {
                                         is-painting = true;
                                         root.viewport-paint-begin(self.mouse-x / 1px, self.mouse-y / 1px);
                                     } else if root.active-tool == "slice" {
@@ -1205,11 +1241,23 @@ export component PetuniaSlintShell inherits Window {
                                     root.viewport-transform-end();
                                     is-slice-drag = false;
                                 }
+                                if is-gizmo-drag {
+                                    root.gizmo-drag-end();
+                                    is-gizmo-drag = false;
+                                }
                             }
                         }
 
                         moved => {
-                            if root.tool-modal-active && root.tool-activation == "instant" && !self.pressed {
+                            if !self.pressed {
+                                // Preselection: o handle sob o cursor destaca
+                                // antes do clique.
+                                root.gizmo-hover(self.mouse-x / 1px, self.mouse-y / 1px);
+                            }
+                            if is-gizmo-drag {
+                                moved-since-down = true;
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                            } else if root.tool-modal-active && root.tool-activation == "instant" && !self.pressed {
                                 root.tool-modal-hovered((self.mouse-y - last-y) / 1px);
                                 last-x = self.mouse-x;
                                 last-y = self.mouse-y;
@@ -1395,38 +1443,40 @@ export component PetuniaSlintShell inherits Window {
                         height: parent.height;
                         background: transparent;
 
+                        // Hierarquia do gizmo: o eixo ativo domina, o eixo sob o
+                        // cursor clareia, os demais esmaecem durante o arrasto.
                         Path {
                             commands: root.gizmo-x-commands;
-                            stroke: DesignTokens.axis-x;
-                            stroke-width: 2.5px;
+                            stroke: root.gizmo-handle-color(0, DesignTokens.axis-x);
+                            stroke-width: root.gizmo-handle-width(0);
                             fill: transparent;
                         }
                         Path {
                             commands: root.gizmo-y-commands;
-                            stroke: DesignTokens.axis-y;
-                            stroke-width: 2.5px;
+                            stroke: root.gizmo-handle-color(1, DesignTokens.axis-y);
+                            stroke-width: root.gizmo-handle-width(1);
                             fill: transparent;
                         }
                         Path {
                             commands: root.gizmo-z-commands;
-                            stroke: DesignTokens.axis-z;
-                            stroke-width: 2.5px;
+                            stroke: root.gizmo-handle-color(2, DesignTokens.axis-z);
+                            stroke-width: root.gizmo-handle-width(2);
                             fill: transparent;
                         }
                         Path {
                             commands: root.gizmo-x-arrow-commands;
                             stroke: transparent;
-                            fill: DesignTokens.axis-x;
+                            fill: root.gizmo-handle-color(0, DesignTokens.axis-x);
                         }
                         Path {
                             commands: root.gizmo-y-arrow-commands;
                             stroke: transparent;
-                            fill: DesignTokens.axis-y;
+                            fill: root.gizmo-handle-color(1, DesignTokens.axis-y);
                         }
                         Path {
                             commands: root.gizmo-z-arrow-commands;
                             stroke: transparent;
-                            fill: DesignTokens.axis-z;
+                            fill: root.gizmo-handle-color(2, DesignTokens.axis-z);
                         }
                         Rectangle {
                             x: gizmo-origin-x - 4px;
