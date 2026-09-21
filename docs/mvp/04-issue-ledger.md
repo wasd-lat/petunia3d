@@ -41,7 +41,7 @@
 | ISSUE-008 | HIGH | Model | Extrude/Inset/Bevel/Extrude Individual/Scale Selection one-shot. | PARTIAL — Extrude, Extrude Individual, Inset, Bevel, Push/Pull e Scale Selection viraram sessões paramétricas com preview, Tool Properties e undo único. |
 | ISSUE-009 | HIGH | Paint | Sem UI de layers, effects, fill scope, lock, projeção, formas e canvas 2D. | OPEN |
 | ISSUE-010 | HIGH | UV | Sem UV Editor 2D; seams e diagnósticos inacessíveis. | PARTIAL — o painel de estatísticas agora mostra ilhas, sobreposições, faces de área zero, cantos fora de faixa e stretch reais. Falta o editor 2D, seams e visualização de ilhas. |
-| ISSUE-011 | HIGH | Global | Sem splitters reais; painéis não redimensionam nem persistem. | OPEN |
+| ISSUE-011 | HIGH | Global | Sem splitters reais; painéis não redimensionam nem persistem. | FIXED — divisor vertical no dock Context (208..560 px, dono `UiState::right_width`) e divisor horizontal na Asset Library (132..520 px, dono `UiState::shell_asset_library_height`); a memória de layout por workspace passou a carregar a largura do inspetor. |
 | ISSUE-012 | HIGH | Global | Sem Outliner funcional completo (rename F2, reorder, context menu). | PARTIAL — seleção, visibilidade, lock e exclusão funcionam; faltam rename, reorder e context menu. |
 | ISSUE-013 | HIGH | Global | Sem menus File/Edit/View/Window; i18n ausente na UI Slint. | OPEN |
 | ISSUE-014 | HIGH | File | Sem autosave/recovery na UI Slint. | OPEN |
@@ -51,3 +51,6 @@
 | ISSUE-018 | HIGH | Global | Controles numéricos, sliders, dropdowns, modais e popovers do shell ainda não existem como componentes reutilizáveis. | OPEN |
 | ISSUE-019 | HIGH | Global | Strings públicas da UI Slint são literais em inglês; sistema de `TextId` não está ligado ao shell. | OPEN |
 | ISSUE-020 | MEDIUM | Global | Tokens do shell cobrem apenas parte da paleta do contrato (faltam `surface-overlay`, `control-*`, `disabled`, estados de perigo/aviso). | OPEN |
+| ISSUE-021 | MEDIUM | Global | Divisores: só o dock Context e a Asset Library são redimensionáveis; a coluna de ferramentas e as duas colunas de ferramentas do MODEL continuam fixas. | OPEN |
+| ISSUE-022 | MEDIUM | Global | O divisor da Asset Library não tem memória por workspace e o divisor não aparece quando a gaveta está fechada, então abrir a gaveta é pré-requisito para ajustar altura. | OPEN |
+| ISSUE-023 | HIGH | Global | Divisores não têm caminho de teclado: a `accessible-action-set-value` foi removida até os divisores suportarem passo por seta, então leitor de tela só anuncia o valor. | OPEN |
