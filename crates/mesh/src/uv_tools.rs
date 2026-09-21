@@ -1,6 +1,6 @@
 //! UV islands, packing, texel density and diagnostics (UV0 only).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use super::{Mesh, edge_key};
 
@@ -227,7 +227,7 @@ impl Mesh {
         let mut zero_area = 0;
         let mut oor = 0;
         let mut stretch_sum = 0.0;
-        let mut stretch_max = 0.0;
+        let mut stretch_max: f32 = 0.0;
         let mut stretch_n = 0.0;
         for face in &self.faces {
             if face.uv.len() < 3 || face.verts.len() < 3 {
@@ -241,7 +241,6 @@ impl Mesh {
             }
             let a = self.verts[face.verts[0] as usize].vec();
             let b = self.verts[face.verts[1] as usize].vec();
-            let c = self.verts[face.verts[2] as usize].vec();
             let world = (b - a).length().max(1e-8);
             let uv_len = (glam::Vec2::from_array(face.uv[1]) - glam::Vec2::from_array(face.uv[0]))
                 .length()

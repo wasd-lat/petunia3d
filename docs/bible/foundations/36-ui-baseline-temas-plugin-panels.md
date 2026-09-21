@@ -11,7 +11,18 @@ Este capítulo congela a **UI Baseline Final V1** do Petunia3D e define duas sup
 
 **UI BASELINE FINAL V1 — APPROVED.**
 
-A stack `Rust 2024 + egui + eframe + egui-wgpu + wgpu` passa de working-validation para **baseline final da implementação**. O vertical slice do capítulo 31 continua obrigatório, mas agora funciona como **teste de conformance e integração**, não como votação periódica sobre a stack. Reabertura exige bloqueador estrutural real + ADR explícito.
+**Decisão 2026-09-20: Slint é o frontend de produção.** A crate `petunia_ui_slint`
+(`crates/ui-slint/`) é a interface principal do Petunia3D, construída com Slint 1.18.
+O binário `petunia3d` executa o shell Slint por padrão; a UI egui (`crates/ui/`) é
+legado de transição acessível via `--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`.
+
+Os princípios, medidas, workspaces e contratos de acessibilidade deste capítulo são
+**toolkit-neutros** — aplicam-se independentemente do frontend. A migração para Slint
+preserva esses contratos; o domínio (`petunia_core`, `petunia_commands`, `petunia_project`,
+`petunia_config`) não conhece Slint nem egui.
+
+O vertical slice do capítulo 31 continua obrigatório como **teste de conformance e
+integração**. Reabertura da arquitetura exige bloqueador estrutural real + ADR explícito.
 
 # Princípios congelados
 
@@ -54,19 +65,17 @@ Preservar aproximadamente `480 × 360` logical px de viewport antes de ceder mai
 
 # Layout e docking
 
-`egui_tiles` é **BASELINE**, sempre atrás de `PetuniaLayoutAdapter`.
+O shell Slint (`crates/ui-slint/ui/app.slint`) usa **layout declarativo nativo**
+(grid, horizontal, vertical, flex) com constraints Slint (`preferred-width`,
+`min-width`, `max-width`, `horizontal-stretch`, `vertical-stretch`). O Petunia
+controla o grafo de regiões. Capacidade interna de tabs/tiles não implica docking
+livre ao usuário.
 
-> **Status de implementação (2026-09-16).** `egui_tiles` ainda **não é dependência**
-do workspace: o macro-layout hoje é o dock próprio controlado descrito abaixo, e
-nenhum `PetuniaLayoutAdapter` existe. A promoção para baseline real está na Wave 2
-da *Egui Ecosystem Final Push Directive* (§31, §43). Até lá, esta seção é a
-decisão arquitetural, não uma descrição do código.
->
-> **Regra de layout derivada (§17 da diretriz):** raw egui para micro-layout
-> simples; bibliotecas especializadas para problemas especializados; tipos de
-> terceiros sempre confinados a adapters. Responsividade manual
-> (`available_width() < N`), divisão manual de largura e `spacing_mut()` fora de
-> foundation/adapter são proibidos em product code.
+> **Histórico (legado egui):** a stack anterior usava `egui_tiles` como baseline
+> de macro-layout atrás de `PetuniaLayoutAdapter`. Essa crate permanece no workspace
+> para retrocompatibilidade da UI legado, mas não recebe novas features. A
+> responsividade no Slint é expressa em unidades lógicas e constraints declarativas;
+> cálculo manual de larguras em Rust (`if available_width < N`) é proibido.
 
 O Petunia controla o grafo de regiões. Capacidade interna de tabs/tiles não implica docking livre ao usuário.
 
@@ -259,8 +268,9 @@ Community Plugins podem criar **novos painéis completos**, porém somente atrav
 
 A regra anterior “sem UI nativa arbitrária” passa a significar:
 
-> **Sem acesso cru a egui, wgpu, Painter, raw input, ponteiros ou markup arbitrário.** Plugins podem compor interfaces ricas usando componentes públicos e estáveis do Petunia.
-> 
+> **Sem acesso cru a Slint, egui, wgpu, Painter, raw input, ponteiros ou markup
+> arbitrário.** Plugins podem compor interfaces ricas usando componentes públicos
+> e estáveis do Petunia, independentemente do frontend de produção.
 
 # Panel Registry
 
@@ -412,7 +422,7 @@ Theme package puramente declarativo não recebe capability de execução.
 # Segurança e isolamento
 
 - um Lua State por plugin;
-- sem `egui::Ui`/wgpu/raw window handle;
+- sem acesso a toolkit de UI (`egui::Ui`, `slint::ComponentHandle`), wgpu ou raw window handle;
 - sem filesystem/networking sem capability;
 - render errors ficam confinados ao plugin panel;
 - repeated failures podem suspender apenas aquele panel/plugin;
@@ -452,23 +462,30 @@ Isso garante que um Community Plugin continue legível em Petunia Dark, High Con
 
 Plugins podem embutir bundles de tradução namespaced. Panel metadata e labels devem poder usar localization keys; fallback explícito para a língua do manifest.
 
-# Crates UI — promoção final
+# Crates UI — estado atual (2026-09-20)
 
-Após a decisão da UI baseline:
+**Frontend de produção:** `petunia_ui_slint` (Slint 1.18) em `crates/ui-slint/`.
+Componentes declarativos em `ui/app.slint` (`TopAction`, `ToolButton`,
+`NumericField`, `Vector3Field`, `InspectorSection`, `ColorSwatch`) são a
+linguagem visual pública. Ícones via `lucide-slint` (`=1.47.0`).
 
-- `egui_extras` → **BASELINE**;
-- `egui_ltreeview` → **BASELINE** atrás de `PetuniaTreeAdapter`;
-- `egui_tiles` → **BASELINE** atrás de `PetuniaLayoutAdapter` (ainda não é dependência — Wave 2 da diretriz);
-- `egui_taffy` → **BASELINE** atrás de `PetuniaTaffyLayout` (hoje só piloto em `flex_layout.rs`);
-- `egui_dnd` → **BASELINE** atrás de `PetuniaDragAdapter`;
-- `egui_animation` → **BASELINE** atrás de `PetuniaMotion`;
-- ícones genéricos → **`iconflow`** com os packs oficiais `tabler`, `iconoir`, `phosphor`, `lucide` (`extended-icon-packs`) + o pack próprio **Petunia** para conceitos 3D. `egui-lucide`/`egui-phosphor` deixam de ser a rota de baseline;
-- `egui-phosphor` → **REFERENCE/MONITOR**;
-- `egui-file-dialog` → **OPTIONAL**, não default; usar dialogs nativos do SO no fluxo padrão;
-- `egui_kittest`, `egui_inspection`, `egui_mcp` → **DEV BASELINE**;
-- demais classifications do capítulo 35 permanecem válidas salvo decisão posterior explícita.
+**Legado de transição:** `crates/ui/` (egui 0.36) e `crates/app/` (host egui)
+permanecem no workspace para retrocompatibilidade, acessíveis via
+`--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`. Não recebem novas features de
+product UI. As crates egui especializadas abaixo são relevantes somente para
+o legado:
 
-Ferramentas de domínio como Extrude/Bevel/Cut/Fuse/Connect/UV usam ícones próprios Petunia quando Lucide não representar semanticamente a operação.
+- `egui_extras`, `egui_ltreeview`, `egui_tiles`, `egui_taffy`, `egui_dnd`,
+  `egui_animation` → **LEGADO** (baseline da UI egui arquivada);
+- `iconflow` com packs oficiais (`tabler`, `iconoir`, `phosphor`, `lucide`) +
+  pack **Petunia** para conceitos 3D → usado no legado;
+- `egui-file-dialog` → **LEGADO**; o Slint usa `rfd::AsyncFileDialog` em
+  `files.rs`;
+- `egui_kittest`, `egui_inspection`, `egui_mcp` → **LEGADO** (dev tools da
+  UI egui).
+
+Ferramentas de domínio como Extrude/Bevel/Cut/Fuse/Connect/UV usam ícones
+próprios Petunia quando Lucide não representar semanticamente a operação.
 
 # Input e navigation baseline
 
@@ -533,6 +550,20 @@ capítulo é reaberto pela decisão.
 
 # Viewport adapter final
 
+O viewport adapter é **toolkit-neutro**. `PetuniaRenderer` (`crates/render/`)
+não conhece Slint nem egui; o adapter é a única fronteira que conhece ambos.
+
+**Slint (produção):**
+
+```
+Slint TouchArea
+→ viewport_gpu.rs (textura WGPU compartilhada → slint::Image)
+→ PetuniaRenderer
+→ wgpu
+```
+
+**egui (legado):**
+
 ```
 egui layout
 → allocate viewport Rect/input/clip
@@ -542,11 +573,11 @@ egui layout
 → wgpu
 ```
 
-`PetuniaRenderer` permanece sem dependência de egui. O adapter é a única fronteira que conhece ambos.
+Repaint é event-driven em idle e contínuo somente quando interação/motion/job
+visual exigir.
 
-Repaint é event-driven em idle e contínuo somente quando interação/motion/job visual exigir.
-
-V1 possui um viewport 3D principal por workspace. Multi-viewport/quad-view fica para evolução posterior.
+V1 possui um viewport 3D principal por workspace. Multi-viewport/quad-view
+fica para evolução posterior.
 
 # Testes e conformance
 

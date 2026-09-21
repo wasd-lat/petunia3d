@@ -12,6 +12,8 @@ petunia_core = { workspace = true }
 petunia_project = { workspace = true }
 petunia_render = { workspace = true }
 petunia_render_wgpu = { path = "../render-wgpu" }
+petunia_module_paint = { path = "../module-paint" }
+petunia_module_uv = { path = "../module-uv" }
 uuid = { workspace = true }
 glam = { workspace = true }
 wgpu = { workspace = true }

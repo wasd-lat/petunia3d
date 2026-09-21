@@ -905,7 +905,8 @@ impl PaintModule {
                             .collect()
                     })
                     .unwrap_or_default();
-                if let Some(o) = state.project.assets.get_mut(state.project.active)
+                let active = state.project.active;
+                if let Some(o) = state.project.assets.get_mut(active)
                     && let Some(stack) = o.paint_stack.as_mut()
                     && let Some(layer) = stack.active_mut()
                     && !layer.locked
@@ -934,7 +935,8 @@ impl PaintModule {
     ) -> Option<uuid::Uuid> {
         Self::ensure_stack(state);
         state.checkpoint("add decal");
-        let id = state.project.assets.get_mut(state.project.active).and_then(|o| {
+        let active = state.project.active;
+        let id = state.project.assets.get_mut(active).and_then(|o| {
             let stack = o.paint_stack.as_mut()?;
             let decal = DecalLayer::new(image, center_uv, scale_uv, rotation_rad);
             Some(stack.add_layer(PaintLayer::new_decal("Decal", decal)))
@@ -946,10 +948,11 @@ impl PaintModule {
     pub fn add_layer_group(state: &mut AppState, name: &str) -> Option<uuid::Uuid> {
         Self::ensure_stack(state);
         state.checkpoint("add layer group");
+        let active = state.project.active;
         state
             .project
             .assets
-            .get_mut(state.project.active)
+            .get_mut(active)
             .and_then(|o| o.paint_stack.as_mut().map(|s| s.add_group(name)))
     }
 }

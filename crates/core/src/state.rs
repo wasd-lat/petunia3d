@@ -1874,6 +1874,8 @@ impl AppState {
             .commands
             .get(id)
             .ok_or_else(|| crate::command::CommandError::UnknownCommand(id.to_string()))?;
+        cmd.can_execute(self)
+            .map_err(|reason| crate::command::CommandError::Execution(reason.to_string()))?;
         crate::command::CommandDispatcher::dispatch(self, cmd.as_ref())
     }
 

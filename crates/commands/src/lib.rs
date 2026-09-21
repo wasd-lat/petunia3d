@@ -110,11 +110,7 @@ impl<T: Clone> UndoStack<T> {
         let history_entries = entries.len();
         let history_bytes = self.undo_bytes.saturating_add(self.redo_bytes);
         let largest_entry = entries.iter().copied().max().unwrap_or(0);
-        let average_entry = if history_entries == 0 {
-            0
-        } else {
-            history_bytes / history_entries
-        };
+        let average_entry = history_bytes.checked_div(history_entries).unwrap_or(0);
         HistoryMetrics {
             history_entries,
             history_bytes,

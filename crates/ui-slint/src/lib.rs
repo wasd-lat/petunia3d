@@ -1,14 +1,18 @@
-//! Frontend experimental Slint do Petunia3D.
+//! Frontend de produção do Petunia3D em Slint 1.18.
 //!
-//! Esta crate é deliberadamente paralela à UI egui existente. O shell em Slint
-//! emite intenções; o domínio continua em `petunia_core` e a integração de GPU
-//! é realizada pelo adapter `WgpuViewport` ou fallback `PlaceholderViewport`.
+//! O shell em Slint emite intenções (`UiIntent`); o domínio continua em
+//! `petunia_core`, `petunia_commands` e `petunia_project`. A integração de GPU
+//! é realizada pelo adapter `WgpuViewport` ou fallback `Software3dViewport`.
+//!
+//! A UI egui (`crates/ui/`) é legado de transição, acessível via
+//! `--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub mod commands;
 pub mod files;
+mod input;
 pub mod numeric;
 pub mod overlay;
 pub mod theme;
@@ -17,9 +21,10 @@ pub mod viewport_soft;
 
 pub use viewport_soft::Software3dViewport;
 
-use commands::{CommandContext, CommandDescriptor, CommandId, CommandRegistry};
+use commands::CommandId;
 use numeric::NumericFieldState;
-use overlay::{OverlayEntry, OverlayKind, OverlayStack};
+use overlay::{OverlayEntry, OverlayId, OverlayKind, OverlayStack};
+use petunia_config::keybinds::Mods2;
 use petunia_core::{AppState, Camera, SelectionDomain, Workspace};
 use petunia_project::Project;
 use slint::ComponentHandle;
@@ -40,6 +45,27 @@ pub enum ViewportGesture {
     Orbit { dx: f32, dy: f32 },
     Pan { dx: f32, dy: f32 },
     Zoom { delta: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewportRenderState {
+    pub shading: petunia_render::Shading,
+    pub xray: bool,
+    pub show_triangulation: bool,
+    pub textured: bool,
+    pub show_wireframe_overlay: bool,
+}
+
+impl Default for ViewportRenderState {
+    fn default() -> Self {
+        Self {
+            shading: petunia_render::Shading::Solid,
+            xray: false,
+            show_triangulation: false,
+            textured: false,
+            show_wireframe_overlay: false,
+        }
+    }
 }
 
 /// Ação semântica emitida pelo shell Slint.
@@ -226,7 +252,12 @@ pub trait PetuniaViewport: Send {
     fn update(&mut self, dt_seconds: f32);
     fn set_workspace(&mut self, workspace: Workspace);
     fn set_selection_domain(&mut self, domain: SelectionDomain);
-    fn render_frame(&mut self, _project: &Project, _camera: &Camera) -> Option<slint::Image> {
+    fn render_frame(
+        &mut self,
+        _project: &Project,
+        _camera: &Camera,
+        _state: ViewportRenderState,
+    ) -> Option<slint::Image> {
         None
     }
 }
@@ -277,8 +308,13 @@ impl PetuniaViewport for Box<dyn PetuniaViewport> {
         (**self).set_selection_domain(domain);
     }
 
-    fn render_frame(&mut self, project: &Project, camera: &Camera) -> Option<slint::Image> {
-        (**self).render_frame(project, camera)
+    fn render_frame(
+        &mut self,
+        project: &Project,
+        camera: &Camera,
+        state: ViewportRenderState,
+    ) -> Option<slint::Image> {
+        (**self).render_frame(project, camera, state)
     }
 }
 
@@ -288,7 +324,6 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub state: AppState,
     pub viewport: V,
     pub overlays: OverlayStack,
-    pub commands: CommandRegistry,
     pub scene_drawer_visible: bool,
     pub asset_library_visible: bool,
     pub command_search_visible: bool,
@@ -304,7 +339,6 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             state,
             viewport,
             overlays: OverlayStack::default(),
-            commands: CommandRegistry::new(),
             scene_drawer_visible: false,
             asset_library_visible: false,
             command_search_visible: false,
@@ -333,32 +367,44 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         match intent {
             UiIntent::SetWorkspace(workspace) => self.state.switch_workspace(workspace),
             UiIntent::SaveProject => {
-                self.state.set_status("save requested by Slint frontend");
+                if let Some(path) = self.state.project.project_path.clone() {
+                    self.apply(UiIntent::SaveProjectTo(PathBuf::from(path)));
+                } else {
+                    self.state.set_status("Save As required");
+                }
             }
             UiIntent::OpenCommandSearch => {
                 self.command_search_visible = true;
                 self.overlays.push(OverlayEntry {
+                    id: OverlayId::CommandPalette,
                     kind: OverlayKind::Modal,
                     pinned: false,
-                    accepts_outside_click: true,
+                    dismiss_on_escape: true,
+                    dismiss_on_click_away: true,
                 });
             }
             UiIntent::OpenSettings => {
                 self.settings_visible = true;
                 self.overlays.push(OverlayEntry {
+                    id: OverlayId::Settings,
                     kind: OverlayKind::Modal,
                     pinned: false,
-                    accepts_outside_click: true,
+                    dismiss_on_escape: true,
+                    dismiss_on_click_away: true,
                 });
             }
             UiIntent::ToggleSceneDrawer => {
                 self.scene_drawer_visible = !self.scene_drawer_visible;
                 if self.scene_drawer_visible {
                     self.overlays.push(OverlayEntry {
+                        id: OverlayId::SceneDrawer,
                         kind: OverlayKind::Drawer,
                         pinned: false,
-                        accepts_outside_click: true,
+                        dismiss_on_escape: true,
+                        dismiss_on_click_away: true,
                     });
+                } else {
+                    self.overlays.remove(OverlayId::SceneDrawer);
                 }
             }
             UiIntent::ExecuteCommand(id) => {
@@ -383,6 +429,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 {
                     self.state.set_status(format!("failed to save: {err}"));
                 } else {
+                    self.state.project.project_path = Some(path.display().to_string());
                     self.state.mark_document_clean();
                     self.state
                         .set_status(format!("project saved: {}", path.display()));
@@ -393,6 +440,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     self.state.project.palette = project.palette.clone();
                     self.state.project.project = project;
                     self.state.project.undo.clear();
+                    self.state.project.project_path = Some(path.display().to_string());
                     self.state.mark_document_clean();
                     self.state
                         .set_status(format!("project opened: {}", path.display()));
@@ -423,12 +471,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     .set_status(format!("Primitiva adicionada: {:?}", kind));
             }
             UiIntent::DeleteActiveAsset => {
-                if let Some(active_id) = self.state.project.active().map(|a| a.id) {
-                    self.state.project.assets.retain(|a| a.id != active_id);
-                    self.state.project.active = self.state.project.assets.len().saturating_sub(1);
-                    self.state.sync_selection();
-                    self.state.mark_dirty();
-                    self.state.set_status("Objeto ativo removido.");
+                if let Err(error) = self
+                    .state
+                    .dispatch(&petunia_core::DeleteAssetCmd { asset_index: None })
+                {
+                    self.state.set_status(error.to_string());
                 }
             }
             UiIntent::SetPaintColor(color) => {
@@ -443,6 +490,38 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             UiIntent::SetActiveTool(tool) => {
                 self.state.session.tools.active_tool = tool.clone();
                 self.state.set_status(format!("Ferramenta ativa: {tool}"));
+                match tool.as_str() {
+                    "move" => {
+                        if let Err(error) = self.state.begin_modal(petunia_core::ModalKind::Move) {
+                            self.state.set_status(error.to_string());
+                        }
+                    }
+                    "rotate" => {
+                        if let Err(error) = self.state.begin_modal(petunia_core::ModalKind::Rotate)
+                        {
+                            self.state.set_status(error.to_string());
+                        }
+                    }
+                    "scale" => {
+                        if let Err(error) = self.state.begin_modal(petunia_core::ModalKind::Scale) {
+                            self.state.set_status(error.to_string());
+                        }
+                    }
+                    "cut" => {
+                        if let Some(mesh) = self.state.project.active_mesh().cloned() {
+                            self.state.session.tools.cut_session =
+                                Some(petunia_core::CutSession::new(mesh));
+                            self.state
+                                .set_status("Cut: choose two edge points in the viewport");
+                        }
+                    }
+                    "fill" => {
+                        let count =
+                            petunia_module_paint::PaintModule::fill_selection(&mut self.state);
+                        self.state.set_status(format!("Filled {count} points"));
+                    }
+                    _ => {}
+                }
             }
             UiIntent::SelectSceneAsset(id_str) => {
                 if let Some(idx) = uuid::Uuid::parse_str(&id_str)
@@ -454,24 +533,31 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     self.state.session.selection.asset = Some(id);
                     self.state.sync_selection();
                     self.state.mark_dirty();
+                    self.reset_transform_fields();
                 }
             }
             UiIntent::ToggleSceneAssetVisibility(id_str) => {
-                if let Some(asset) = uuid::Uuid::parse_str(&id_str)
+                if let Some(asset_index) = uuid::Uuid::parse_str(&id_str)
                     .ok()
-                    .and_then(|id| self.state.project.assets.iter_mut().find(|a| a.id == id))
+                    .and_then(|id| self.state.project.assets.iter().position(|a| a.id == id))
+                    && let Err(error) =
+                        self.state
+                            .dispatch(&petunia_core::ToggleVisibilityAssetCmd {
+                                asset_index: Some(asset_index),
+                            })
                 {
-                    asset.visible = !asset.visible;
-                    self.state.mark_dirty();
+                    self.state.set_status(error.to_string());
                 }
             }
             UiIntent::ToggleSceneAssetLock(id_str) => {
-                if let Some(asset) = uuid::Uuid::parse_str(&id_str)
+                if let Some(asset_index) = uuid::Uuid::parse_str(&id_str)
                     .ok()
-                    .and_then(|id| self.state.project.assets.iter_mut().find(|a| a.id == id))
+                    .and_then(|id| self.state.project.assets.iter().position(|a| a.id == id))
+                    && let Err(error) = self.state.dispatch(&petunia_core::ToggleLockAssetCmd {
+                        asset_index: Some(asset_index),
+                    })
                 {
-                    asset.locked = !asset.locked;
-                    self.state.mark_dirty();
+                    self.state.set_status(error.to_string());
                 }
             }
             UiIntent::SetTheme(theme_id) => {
@@ -499,10 +585,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 self.asset_library_visible = !self.asset_library_visible;
                 if self.asset_library_visible {
                     self.overlays.push(OverlayEntry {
+                        id: OverlayId::AssetLibrary,
                         kind: OverlayKind::Drawer,
                         pinned: false,
-                        accepts_outside_click: true,
+                        dismiss_on_escape: true,
+                        dismiss_on_click_away: true,
                     });
+                } else {
+                    self.overlays.remove(OverlayId::AssetLibrary);
                 }
             }
             UiIntent::ResetCamera => {
@@ -545,26 +635,148 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn render_viewport(&mut self) -> Option<slint::Image> {
-        self.viewport
-            .render_frame(&self.state.project, &self.state.session.camera)
+        let render_state = ViewportRenderState {
+            shading: self.state.session.shading,
+            xray: self.state.session.show_xray,
+            show_triangulation: self.state.session.show_triangulation,
+            textured: self.state.session.textured,
+            show_wireframe_overlay: self.state.session.show_wireframe_overlay,
+        };
+        self.viewport.render_frame(
+            &self.state.project,
+            &self.state.session.camera,
+            render_state,
+        )
+    }
+
+    pub fn resize_viewport(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+        self.viewport.resize(width, height);
+        self.state.session.camera.aspect = width as f32 / height as f32;
+        self.state.mark_dirty();
+    }
+
+    pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
+        let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
+        let ndc_y = 1.0 - normalized_y.clamp(0.0, 1.0) * 2.0;
+        let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
+
+        if self.state.workspace == Workspace::Paint {
+            if let Some((face, hit)) = pick_face_hit(&self.state, origin, direction) {
+                let tool = self.state.session.tools.active_tool.as_str();
+                let brush = match tool {
+                    "eraser" => petunia_core::BrushType::Eraser,
+                    "fill" => petunia_core::BrushType::Fill,
+                    "picker" => petunia_core::BrushType::Eyedropper,
+                    _ => petunia_core::BrushType::Soft,
+                };
+                if brush == petunia_core::BrushType::Eyedropper {
+                    if let Some(mesh) = self.state.project.active_mesh()
+                        && let Some(&vi) = mesh.faces.get(face).and_then(|f| f.verts.first())
+                    {
+                        petunia_module_paint::PaintModule::eyedrop_vertex(
+                            &mut self.state,
+                            vi as usize,
+                        );
+                    }
+                } else {
+                    let radius = (self.state.session.tools.paint_radius * 8.0).max(1.0) as u32;
+                    let strength = self.state.session.tools.paint_strength;
+                    let isolate = self.state.session.tools.paint_isolate_selection;
+                    petunia_module_paint::PaintModule::paint_mesh_3d(
+                        &mut self.state,
+                        face,
+                        hit,
+                        brush,
+                        radius,
+                        strength,
+                        isolate,
+                    );
+                }
+            }
+            self.state.mark_dirty();
+            return;
+        }
+
+        match self.state.selection_domain() {
+            SelectionDomain::Object => {
+                let mut best = None;
+                for (index, asset) in self.state.project.assets.iter().enumerate() {
+                    if !asset.visible || asset.mesh.verts.is_empty() {
+                        continue;
+                    }
+                    let center = glam::Vec3::from_array(asset.mesh.selection_center());
+                    let along = (center - origin).dot(direction);
+                    if along < 0.0 {
+                        continue;
+                    }
+                    let distance = (center - (origin + direction * along)).length();
+                    let radius = asset
+                        .mesh
+                        .verts
+                        .iter()
+                        .map(|vertex| (vertex.vec() - center).length())
+                        .fold(0.0_f32, f32::max)
+                        .max(0.15);
+                    if distance <= radius && best.is_none_or(|(_, depth)| along < depth) {
+                        best = Some((index, along));
+                    }
+                }
+                if let Some((index, _)) = best {
+                    self.state.project.active = index;
+                    self.state.session.selection.asset = Some(self.state.project.assets[index].id);
+                }
+            }
+            SelectionDomain::Vertex => {
+                if let Some((index, _)) = self.state.pick_vertex(origin, direction)
+                    && let Some(mesh) = self.state.project.active_mesh_mut()
+                {
+                    if !extend {
+                        mesh.deselect_all();
+                    }
+                    if let Some(vertex) = mesh.verts.get_mut(index) {
+                        vertex.selected = !extend || !vertex.selected;
+                    }
+                }
+            }
+            SelectionDomain::Face => {
+                if let Some((face, _)) = pick_face_hit(&self.state, origin, direction)
+                    && let Some(mesh) = self.state.project.active_mesh_mut()
+                {
+                    if !extend {
+                        for current in &mut mesh.faces {
+                            current.selected = false;
+                        }
+                    }
+                    if let Some(current) = mesh.faces.get_mut(face) {
+                        current.selected = true;
+                    }
+                }
+            }
+            SelectionDomain::Edge => {
+                if let Some((index, _)) = self.state.pick_vertex(origin, direction)
+                    && let Some(mesh) = self.state.project.active_mesh_mut()
+                {
+                    mesh.sync_edge_selection_from_verts();
+                    if let Some(vertex) = mesh.verts.get_mut(index) {
+                        vertex.selected = true;
+                    }
+                    mesh.sync_edge_selection_from_verts();
+                }
+            }
+        }
+        self.state.sync_selection();
+        self.state.mark_dirty();
+        self.reset_transform_fields();
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.cancel_transform() {
+            return true;
+        }
         if let Some(entry) = self.overlays.esc() {
-            match entry.kind {
-                OverlayKind::Drawer => {
-                    self.scene_drawer_visible = false;
-                    self.asset_library_visible = false;
-                }
-                OverlayKind::Modal => {
-                    if self.command_search_visible {
-                        self.command_search_visible = false;
-                    } else if self.settings_visible {
-                        self.settings_visible = false;
-                    }
-                }
-                _ => {}
-            }
+            self.hide_overlay(entry.id);
             true
         } else {
             false
@@ -573,17 +785,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     pub fn handle_click_away(&mut self) -> bool {
         if let Some(entry) = self.overlays.click_away() {
-            match entry.kind {
-                OverlayKind::Drawer => {
-                    self.scene_drawer_visible = false;
-                    self.asset_library_visible = false;
-                }
-                OverlayKind::Modal => {
-                    self.command_search_visible = false;
-                    self.settings_visible = false;
-                }
-                _ => {}
-            }
+            self.hide_overlay(entry.id);
             true
         } else {
             false
@@ -592,6 +794,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     pub fn execute_command(&mut self, id: CommandId) {
         self.command_search_visible = false;
+        self.overlays.remove(OverlayId::CommandPalette);
         match id {
             CommandId::SaveProject => self.apply(UiIntent::SaveProject),
             CommandId::OpenProject => self.state.set_status("open requested by Slint frontend"),
@@ -626,20 +829,24 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             CommandId::PaintEraser => self.apply(UiIntent::SetActiveTool("eraser".to_string())),
             CommandId::PaintFill => self.apply(UiIntent::SetActiveTool("fill".to_string())),
             CommandId::UvUnwrap => {
-                self.state.set_status("UV Unwrap solicitado.");
+                if let Err(error) = self.state.dispatch_command("uv.unwrap_auto") {
+                    self.state.set_status(error.to_string());
+                }
             }
             CommandId::UvPackIslands => {
-                self.state.set_status("UV Pack Islands solicitado.");
+                if let Err(error) = self.state.dispatch_command("uv.pack_islands") {
+                    self.state.set_status(error.to_string());
+                }
             }
             CommandId::FrameSelection => {
-                self.state
-                    .set_status("command executed: model.frame_selection");
+                if let Err(error) = self.state.dispatch_command("view.frame_selection") {
+                    self.state.set_status(error.to_string());
+                }
             }
             CommandId::ToggleWireframe => {
-                self.state.session.show_wireframe_overlay =
-                    !self.state.session.show_wireframe_overlay;
-                self.state
-                    .set_status("command executed: view.toggle_wireframe");
+                if let Err(error) = self.state.dispatch_command("view.toggle_wireframe") {
+                    self.state.set_status(error.to_string());
+                }
             }
             CommandId::OpenSettings => self.apply(UiIntent::OpenSettings),
             CommandId::ToggleSceneDrawer => self.apply(UiIntent::ToggleSceneDrawer),
@@ -654,14 +861,62 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
     }
 
-    pub fn search_commands(&self, query: &str) -> Vec<CommandDescriptor> {
-        self.commands.search(
-            query,
-            CommandContext {
-                workspace: self.state.workspace,
-                selection: self.state.selection_domain(),
-            },
-        )
+    pub fn search_commands(&self, query: &str) -> Vec<petunia_core::CommandPaletteItem> {
+        self.state.commands.query(query, &self.state)
+    }
+
+    pub fn execute_core_command(&mut self, id: &str) -> Result<(), petunia_core::CommandError> {
+        self.command_search_visible = false;
+        self.overlays.remove(OverlayId::CommandPalette);
+        match id {
+            "uv.unwrap" => self.state.dispatch_command("uv.unwrap_auto"),
+            "uv.pack_islands" => self.state.dispatch_command("uv.pack_islands"),
+            "model.frame_selection" => self.state.dispatch_command("view.frame_selection"),
+            other => self.state.dispatch_command(other),
+        }
+    }
+
+    pub fn route_shortcut(&mut self, text: &str, ctrl: bool, shift: bool, alt: bool) -> bool {
+        let Some(key) = input::key_code_from_slint(text) else {
+            return false;
+        };
+        let mods = Mods2 { ctrl, shift, alt };
+        let Some(action) = self.state.ui.keybinds.find(key, mods).map(str::to_owned) else {
+            return false;
+        };
+        match action.as_str() {
+            "global.undo" => self.apply(UiIntent::Undo),
+            "global.redo" => self.apply(UiIntent::Redo),
+            "global.reset_camera" => self.apply(UiIntent::ResetCamera),
+            "global.toggle_projection" => self.apply(UiIntent::ToggleProjection),
+            "model.select_object" => {
+                self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Object))
+            }
+            "model.select_vertex" => {
+                self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex))
+            }
+            "model.select_edge" => self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge)),
+            "model.select_face" => self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face)),
+            "model.move" => self.apply(UiIntent::SetActiveTool("move".into())),
+            "model.rotate" => self.apply(UiIntent::SetActiveTool("rotate".into())),
+            "model.scale" => self.apply(UiIntent::SetActiveTool("scale".into())),
+            "model.frame_selection" => {
+                let _ = self.execute_core_command("view.frame_selection");
+            }
+            "model.extrude" => {
+                let _ = self.execute_core_command("model.extrude");
+            }
+            "model.inset" => {
+                let _ = self.execute_core_command("model.inset");
+            }
+            "model.bevel" => {
+                let _ = self.execute_core_command("model.bevel");
+            }
+            "model.delete" => self.apply(UiIntent::DeleteActiveAsset),
+            "paint.paint" => self.apply(UiIntent::SetActiveTool("brush".into())),
+            _ => return false,
+        }
+        true
     }
 
     pub fn scrub_transform(
@@ -671,6 +926,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         delta: f32,
         fine: bool,
     ) -> f32 {
+        if self.state.session.tools.modal.is_none()
+            && let Err(error) = self.begin_transform(kind)
+        {
+            self.state.set_status(error.to_string());
+            return self.transform_value(kind, axis.min(2));
+        }
         let axis = axis.min(2);
         let field = match kind {
             TransformKind::Position => &mut self.position[axis],
@@ -678,8 +939,75 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             TransformKind::Scale => &mut self.scale[axis],
         };
         let new_val = field.scrub(delta, fine);
-        self.state.mark_dirty();
+        let components = match kind {
+            TransformKind::Position => self.position.map(|field| field.value()),
+            TransformKind::Rotation => self.rotation.map(|field| field.value()),
+            TransformKind::Scale => self.scale.map(|field| field.value()),
+        };
+        if let Err(error) = self
+            .state
+            .update_modal_components(glam::Vec3::from_array(components))
+        {
+            self.state.set_status(error.to_string());
+        }
         new_val
+    }
+
+    pub fn begin_transform(&mut self, kind: TransformKind) -> Result<(), petunia_core::ModalError> {
+        self.reset_transform_fields();
+        let modal_kind = match kind {
+            TransformKind::Position => petunia_core::ModalKind::Move,
+            TransformKind::Rotation => petunia_core::ModalKind::Rotate,
+            TransformKind::Scale => petunia_core::ModalKind::Scale,
+        };
+        self.state.begin_modal(modal_kind)
+    }
+
+    pub fn commit_transform(&mut self) -> bool {
+        self.state.commit_modal()
+    }
+
+    pub fn commit_transform_text(
+        &mut self,
+        kind: TransformKind,
+        axis: usize,
+        text: &str,
+    ) -> Result<f32, numeric::NumericInputError> {
+        let axis = axis.min(2);
+        if self.state.session.tools.modal.is_none()
+            && let Err(error) = self.begin_transform(kind)
+        {
+            self.state.set_status(error.to_string());
+            return Err(numeric::NumericInputError::Invalid);
+        }
+        let field = match kind {
+            TransformKind::Position => &mut self.position[axis],
+            TransformKind::Rotation => &mut self.rotation[axis],
+            TransformKind::Scale => &mut self.scale[axis],
+        };
+        field.begin_edit();
+        let value = field.commit_text(text)?;
+        let components = match kind {
+            TransformKind::Position => self.position.map(|field| field.value()),
+            TransformKind::Rotation => self.rotation.map(|field| field.value()),
+            TransformKind::Scale => self.scale.map(|field| field.value()),
+        };
+        if self
+            .state
+            .update_modal_components(glam::Vec3::from_array(components))
+            .is_ok()
+        {
+            self.state.commit_modal();
+        }
+        Ok(value)
+    }
+
+    pub fn cancel_transform(&mut self) -> bool {
+        let cancelled = self.state.cancel_modal();
+        if cancelled {
+            self.reset_transform_fields();
+        }
+        cancelled
     }
 
     pub fn view_model(&self) -> ShellViewModel {
@@ -710,44 +1038,135 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.viewport
             .set_selection_domain(self.state.selection_domain());
     }
-}
 
-/// Executa o shell experimental Slint com WGPU real (se disponível) ou fallback Placeholder.
-pub fn run() -> Result<(), slint::PlatformError> {
-    // Garante que o Slint utilize OpenGL (FemtoVG) por padrão no Linux, evitando incompatibilidades
-    // conhecidas de apresentação de superfície WGPU em drivers gráficos legados (ex: Intel Gen 7 / Ivy Bridge).
-    if std::env::var("SLINT_BACKEND").is_err() {
-        // SAFETY: Chamado no ponto de entrada antes de inicializar threads adicionais.
-        unsafe {
-            std::env::set_var("SLINT_BACKEND", "femtovg");
+    fn reset_transform_fields(&mut self) {
+        for field in &mut self.position {
+            field.set_value(0.0);
+        }
+        for field in &mut self.rotation {
+            field.set_value(0.0);
+        }
+        for field in &mut self.scale {
+            field.set_value(1.0);
         }
     }
 
-    println!("🌸 Petunia3D — Shell Slint Experimental");
-    println!(
-        "🖥️  Backend de janela Slint: {}",
-        std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "default".into())
-    );
+    fn transform_value(&self, kind: TransformKind, axis: usize) -> f32 {
+        match kind {
+            TransformKind::Position => self.position[axis].value(),
+            TransformKind::Rotation => self.rotation[axis].value(),
+            TransformKind::Scale => self.scale[axis].value(),
+        }
+    }
 
+    fn hide_overlay(&mut self, id: OverlayId) {
+        match id {
+            OverlayId::CommandPalette => self.command_search_visible = false,
+            OverlayId::Settings => self.settings_visible = false,
+            OverlayId::SceneDrawer => self.scene_drawer_visible = false,
+            OverlayId::AssetLibrary => self.asset_library_visible = false,
+        }
+    }
+}
+
+fn pick_face_hit(
+    state: &AppState,
+    origin: glam::Vec3,
+    direction: glam::Vec3,
+) -> Option<(usize, glam::Vec3)> {
+    let mesh = state.project.active_mesh()?;
+    let mut best = None;
+    for (face_index, face) in mesh.faces.iter().enumerate() {
+        if face.verts.len() < 3 {
+            continue;
+        }
+        let p0 = mesh.verts[face.verts[0] as usize].vec();
+        for triangle in 1..face.verts.len() - 1 {
+            let p1 = mesh.verts[face.verts[triangle] as usize].vec();
+            let p2 = mesh.verts[face.verts[triangle + 1] as usize].vec();
+            if let Some(distance) = ray_triangle(origin, direction, p0, p1, p2)
+                && best.is_none_or(|(_, current)| distance < current)
+            {
+                best = Some((face_index, distance));
+            }
+        }
+    }
+    best.map(|(face, distance)| (face, origin + direction * distance))
+}
+
+fn ray_triangle(
+    origin: glam::Vec3,
+    direction: glam::Vec3,
+    p0: glam::Vec3,
+    p1: glam::Vec3,
+    p2: glam::Vec3,
+) -> Option<f32> {
+    let edge1 = p1 - p0;
+    let edge2 = p2 - p0;
+    let pvec = direction.cross(edge2);
+    let det = edge1.dot(pvec);
+    if det.abs() < 1e-7 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let tvec = origin - p0;
+    let u = tvec.dot(pvec) * inv;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let qvec = tvec.cross(edge1);
+    let v = direction.dot(qvec) * inv;
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    let distance = edge2.dot(qvec) * inv;
+    (distance > 1e-4).then_some(distance)
+}
+
+/// Executa o frontend de produção com composição WGPU direta ou fallback software.
+pub fn run() -> Result<(), slint::PlatformError> {
+    let gpu_context = viewport_gpu::WgpuViewport::create_wgpu_context().ok();
+    if let Some((instance, adapter, device, queue)) = gpu_context.as_ref() {
+        slint::BackendSelector::new()
+            .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::Manual {
+                instance: instance.clone(),
+                adapter: adapter.clone(),
+                device: device.clone(),
+                queue: queue.clone(),
+            })
+            .select()?;
+    }
+
+    println!("Petunia3D - Slint production frontend");
     let window = PetuniaSlintShell::new()?;
     let state = AppState::default();
+    let has_gpu_viewport = gpu_context.is_some();
 
-    let mut viewport: Box<dyn PetuniaViewport> =
-        match viewport_gpu::WgpuViewport::try_create_default(1024, 768) {
-            Ok(gpu_viewport) => {
-                println!("📐 Viewport 3D: Acelerador GPU WGPU Ativo");
-                Box::new(gpu_viewport)
-            }
-            Err(err) => {
-                println!("📐 Viewport 3D: Renderizador 3D Software Ativo ({err})");
-                Box::new(Software3dViewport::new(1024, 768))
-            }
-        };
+    let mut viewport: Box<dyn PetuniaViewport> = if let Some((_, _, device, queue)) = gpu_context {
+        println!("Viewport backend: shared WGPU fast path");
+        Box::new(viewport_gpu::WgpuViewport::new(
+            Arc::new(device),
+            Arc::new(queue),
+            1024,
+            768,
+        ))
+    } else {
+        println!("Viewport backend: software compatibility path");
+        Box::new(Software3dViewport::new(1024, 768))
+    };
 
-    if let Some(frame) = viewport.render_frame(&state.project, &state.session.camera) {
+    let render_state = ViewportRenderState {
+        shading: state.session.shading,
+        xray: state.session.show_xray,
+        show_triangulation: state.session.show_triangulation,
+        textured: state.session.textured,
+        show_wireframe_overlay: state.session.show_wireframe_overlay,
+    };
+    if let Some(frame) = viewport.render_frame(&state.project, &state.session.camera, render_state)
+    {
         window.set_viewport_image(frame);
     }
-    window.set_has_gpu_viewport(true);
+    window.set_has_gpu_viewport(has_gpu_viewport);
 
     let bridge = Arc::new(Mutex::new(SlintUiBridge::new(state, viewport)));
     connect_callbacks(&window, Arc::clone(&bridge));
@@ -756,9 +1175,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         .expect("Slint bridge mutex poisoned during startup")
         .view_model();
     sync_window_properties(&window, &vm);
-    println!(
-        "🚀 Janela aberta com sucesso. Pressione Ctrl+C no terminal ou feche a janela para sair."
-    );
+    println!("Petunia3D window ready");
     window.run()
 }
 
@@ -827,6 +1244,21 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window: &PetuniaSlintShell,
     bridge: Arc<Mutex<SlintUiBridge<V>>>,
 ) {
+    let shortcut_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_shortcut_requested(move |text, ctrl, shift, alt| {
+        if let Ok(mut bridge) = shortcut_bridge.lock() {
+            bridge.route_shortcut(text.as_str(), ctrl, shift, alt);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
     let workspace_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_workspace_changed(move |workspace| {
@@ -848,6 +1280,21 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let save_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_save_requested(move || {
+        let existing = save_bridge
+            .lock()
+            .ok()
+            .and_then(|bridge| bridge.state.project.project_path.clone());
+        if let Some(path) = existing {
+            if let Ok(mut bridge) = save_bridge.lock() {
+                bridge.apply(UiIntent::SaveProjectTo(PathBuf::from(path)));
+                let vm = bridge.view_model();
+                if let Some(window) = window_weak.upgrade() {
+                    window.set_saved(vm.saved);
+                    window.set_status_message(vm.status_message.as_str().into());
+                }
+            }
+            return;
+        }
         let bridge = Arc::clone(&save_bridge);
         let window_weak = window_weak.clone();
         let _ = slint::spawn_local(async move {
@@ -860,6 +1307,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 let vm = bridge.view_model();
                 if let Some(window) = window_weak.upgrade() {
                     window.set_saved(vm.saved);
+                    window.set_status_message(vm.status_message.as_str().into());
                 }
             }
         });
@@ -889,6 +1337,48 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         });
     });
 
+    let file_command_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_command_file_action(move |id| {
+        let bridge = Arc::clone(&file_command_bridge);
+        let window_weak = window_weak.clone();
+        let id = id.to_string();
+        let _ = slint::spawn_local(async move {
+            let service = files::FileDialogService::new();
+            let path = match id.as_str() {
+                "file.open" => service.open_project().await,
+                "file.save" | "file.save_as" => service.save_project().await,
+                _ => None,
+            };
+            let Some(path) = path else {
+                return;
+            };
+            if let Ok(mut bridge) = bridge.lock() {
+                let intent = if id == "file.open" {
+                    UiIntent::OpenProjectFrom(path)
+                } else {
+                    UiIntent::SaveProjectTo(path)
+                };
+                bridge.apply(intent);
+                bridge.command_search_visible = false;
+                bridge.overlays.remove(OverlayId::CommandPalette);
+                let vm = bridge.view_model();
+                let new_frame = if id == "file.open" {
+                    bridge.render_viewport()
+                } else {
+                    None
+                };
+                if let Some(window) = window_weak.upgrade() {
+                    window.set_command_search_visible(false);
+                    sync_window_properties(&window, &vm);
+                    if let Some(frame) = new_frame {
+                        window.set_viewport_image(frame);
+                    }
+                }
+            }
+        });
+    });
+
     let search_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_search_requested(move || {
@@ -898,9 +1388,11 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 .search_commands("")
                 .into_iter()
                 .map(|cmd| CommandItem {
-                    id: cmd.id.as_str().into(),
-                    label: cmd.label_key.into(),
-                    shortcut: cmd.shortcut.unwrap_or("").into(),
+                    id: cmd.id.into(),
+                    label: cmd.label.into(),
+                    shortcut: cmd.shortcut.unwrap_or_default().into(),
+                    available: cmd.is_available,
+                    disabled_reason: cmd.disabled_reason.unwrap_or_default().into(),
                 })
                 .collect();
             if let Some(window) = window_weak.upgrade() {
@@ -935,6 +1427,13 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let scene_pin_bridge = Arc::clone(&bridge);
+    window.on_scene_pin_requested(move |pinned| {
+        if let Ok(mut bridge) = scene_pin_bridge.lock() {
+            bridge.overlays.set_pinned(OverlayId::SceneDrawer, pinned);
+        }
+    });
+
     let query_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_command_query_changed(move |query| {
@@ -943,9 +1442,11 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 .search_commands(query.as_str())
                 .into_iter()
                 .map(|cmd| CommandItem {
-                    id: cmd.id.as_str().into(),
-                    label: cmd.label_key.into(),
-                    shortcut: cmd.shortcut.unwrap_or("").into(),
+                    id: cmd.id.into(),
+                    label: cmd.label.into(),
+                    shortcut: cmd.shortcut.unwrap_or_default().into(),
+                    available: cmd.is_available,
+                    disabled_reason: cmd.disabled_reason.unwrap_or_default().into(),
                 })
                 .collect()
         } else {
@@ -960,11 +1461,11 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let exec_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_command_executed(move |id_str| {
-        let Some(id) = CommandId::from_id_str(id_str.as_str()) else {
-            return;
-        };
         if let Ok(mut bridge) = exec_bridge.lock() {
-            bridge.execute_command(id);
+            let result = bridge.execute_core_command(id_str.as_str());
+            if let Err(error) = result {
+                bridge.state.set_status(error.to_string());
+            }
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -1039,6 +1540,63 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let transform_begin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_transform_scrub_started(move |kind_str| {
+        let kind = match kind_str.as_str() {
+            "pos" => TransformKind::Position,
+            "rot" => TransformKind::Rotation,
+            "scale" => TransformKind::Scale,
+            _ => return,
+        };
+        if let Ok(mut bridge) = transform_begin_bridge.lock()
+            && let Err(error) = bridge.begin_transform(kind)
+        {
+            bridge.state.set_status(error.to_string());
+            if let Some(window) = window_weak.upgrade() {
+                window.set_status_message(error.to_string().into());
+            }
+        }
+    });
+
+    let transform_finish_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_transform_scrub_finished(move || {
+        if let Ok(mut bridge) = transform_finish_bridge.lock() {
+            bridge.commit_transform();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let transform_text_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_transform_text_committed(move |kind_str, axis, text| {
+        let kind = match kind_str.as_str() {
+            "pos" => TransformKind::Position,
+            "rot" => TransformKind::Rotation,
+            "scale" => TransformKind::Scale,
+            _ => return,
+        };
+        if let Ok(mut bridge) = transform_text_bridge.lock() {
+            if let Err(error) = bridge.commit_transform_text(kind, axis as usize, text.as_str()) {
+                bridge
+                    .state
+                    .set_status(format!("Invalid numeric value: {error:?}"));
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let orbit_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_viewport_orbit(move |dx, dy| {
@@ -1071,6 +1629,36 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
                 window.set_viewport_image(frame);
+            }
+        }
+    });
+
+    let resize_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_resized(move |width, height| {
+        let width = width.round().max(1.0) as u32;
+        let height = height.round().max(1.0) as u32;
+        if let Ok(mut bridge) = resize_bridge.lock() {
+            bridge.resize_viewport(width, height);
+            let new_frame = bridge.render_viewport();
+            if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                window.set_viewport_image(frame);
+            }
+        }
+    });
+
+    let viewport_select_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_select(move |x, y, extend| {
+        if let Ok(mut bridge) = viewport_select_bridge.lock() {
+            bridge.select_viewport(x, y, extend);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -1432,14 +2020,40 @@ mod tests {
 
     #[test]
     fn command_search_filters_by_active_workspace() {
-        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
         let results = bridge.search_commands("cube");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].id, CommandId::AddCube);
+        assert!(results.iter().any(|item| item.id == "model.add_cube"));
+        assert!(
+            results
+                .iter()
+                .all(|item| !item.label.starts_with("commands."))
+        );
+    }
 
-        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
-        let results_paint = bridge.search_commands("cube");
-        assert!(results_paint.is_empty());
+    #[test]
+    fn command_search_uses_current_keymap_shortcuts() {
+        let mut state = AppState::default();
+        state.ui.keybinds.remove_binding("model.add_cube");
+        let bridge = SlintUiBridge::new(state, PlaceholderViewport::default());
+
+        let item = bridge
+            .search_commands("Add Cube")
+            .into_iter()
+            .find(|item| item.id == "model.add_cube")
+            .unwrap();
+
+        assert_eq!(item.shortcut, None);
+    }
+
+    #[test]
+    fn core_palette_command_executes_through_canonical_dispatcher() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let before = bridge.state.project.assets.len();
+
+        bridge.execute_core_command("model.add_cube").unwrap();
+
+        assert_eq!(bridge.state.project.assets.len(), before + 1);
+        assert!(bridge.state.project.undo.can_undo());
     }
 
     #[test]
@@ -1451,13 +2065,89 @@ mod tests {
 
         let pos_x_fine = bridge.scrub_transform(TransformKind::Position, 0, 2.0, true);
         assert_eq!(pos_x_fine, 0.52);
+        assert_eq!(bridge.view_model().position[0], 0.52);
+
+        assert!(bridge.commit_transform());
 
         let scale_z = bridge.scrub_transform(TransformKind::Scale, 2, -100.0, false);
         assert_eq!(scale_z, 0.001);
 
         let vm = bridge.view_model();
-        assert_eq!(vm.position[0], 0.52);
+        assert_eq!(vm.position[0], 0.0);
         assert_eq!(vm.scale[2], 0.001);
+    }
+
+    #[test]
+    fn transform_scrub_changes_geometry_and_commits_one_undo_step() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let before = bridge.state.project.active_mesh().unwrap().verts.clone();
+
+        bridge.begin_transform(TransformKind::Position).unwrap();
+        bridge.scrub_transform(TransformKind::Position, 0, 10.0, false);
+        bridge.scrub_transform(TransformKind::Position, 0, 10.0, false);
+        assert!(bridge.commit_transform());
+
+        let after = &bridge.state.project.active_mesh().unwrap().verts;
+        assert!(
+            after
+                .iter()
+                .zip(&before)
+                .all(|(after, before)| { (after.pos[0] - before.pos[0] - 2.0).abs() < 1.0e-6 })
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.undo());
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .verts
+                .iter()
+                .zip(&before)
+                .all(|(restored, before)| restored.pos == before.pos)
+        );
+    }
+
+    #[test]
+    fn escape_cancels_transform_without_closing_the_underlying_overlay() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::ToggleSceneDrawer);
+        let before = bridge.state.project.active_mesh().unwrap().verts.clone();
+        bridge.begin_transform(TransformKind::Position).unwrap();
+        bridge.scrub_transform(TransformKind::Position, 1, 10.0, false);
+
+        assert!(bridge.handle_escape());
+        assert!(bridge.scene_drawer_visible);
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .verts
+                .iter()
+                .zip(&before)
+                .all(|(restored, before)| restored.pos == before.pos)
+        );
+        assert_eq!(bridge.view_model().position, [0.0; 3]);
+    }
+
+    #[test]
+    fn selecting_another_asset_resets_transform_operation_values() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        bridge.begin_transform(TransformKind::Position).unwrap();
+        bridge.scrub_transform(TransformKind::Position, 0, 10.0, false);
+        bridge.commit_transform();
+        assert_eq!(bridge.view_model().position[0], 1.0);
+
+        let first_id = bridge.state.project.assets[0].id.to_string();
+        bridge.apply(UiIntent::SelectSceneAsset(first_id));
+
+        assert_eq!(bridge.view_model().position, [0.0; 3]);
+        assert_eq!(bridge.view_model().rotation, [0.0; 3]);
+        assert_eq!(bridge.view_model().scale, [1.0; 3]);
     }
 
     #[test]
@@ -1488,6 +2178,18 @@ mod tests {
     }
 
     #[test]
+    fn viewport_resize_updates_backend_and_camera_aspect() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+        bridge.resize_viewport(800, 500);
+
+        assert_eq!(bridge.viewport.width, 800);
+        assert_eq!(bridge.viewport.height, 500);
+        assert!((bridge.state.session.camera.aspect - 1.6).abs() < f32::EPSILON);
+        assert!(!bridge.state.is_document_dirty());
+    }
+
+    #[test]
     fn bridge_saves_and_loads_project_file() {
         let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
         let temp_dir = tempfile::tempdir().expect("tempdir");
@@ -1498,7 +2200,8 @@ mod tests {
         assert!(!bridge.view_model().saved);
 
         bridge.apply(UiIntent::SaveProjectTo(temp_path.clone()));
-        assert!(temp_path.exists());
+        let status = bridge.view_model().status_message.clone();
+        assert!(temp_path.exists(), "project save failed: {status}");
         assert!(bridge.view_model().saved);
 
         bridge.state.project.name = "Modified Project".into();
@@ -1536,13 +2239,18 @@ mod tests {
 
         bridge.apply(UiIntent::ToggleSceneAssetVisibility(asset_id.clone()));
         assert!(!bridge.state.project.assets[0].visible);
+        assert!(bridge.state.is_document_dirty());
+        assert!(bridge.state.undo());
+        assert!(bridge.state.project.assets[0].visible);
 
         bridge.apply(UiIntent::ToggleSceneAssetLock(asset_id));
         assert!(bridge.state.project.assets[0].locked);
+        assert!(bridge.state.undo());
+        assert!(!bridge.state.project.assets[0].locked);
 
         let vm = bridge.view_model();
-        assert!(!vm.scene_items[0].visible);
-        assert!(vm.scene_items[0].locked);
+        assert!(vm.scene_items[0].visible);
+        assert!(!vm.scene_items[0].locked);
     }
 
     #[test]
@@ -1661,22 +2369,14 @@ mod tests {
         assert_eq!(bridge.state.session.tools.active_tool, "fill");
 
         bridge.execute_command(CommandId::UvUnwrap);
-        assert!(bridge.view_model().status_message.contains("UV Unwrap"));
+        assert!(bridge.view_model().status_message.contains("Auto UV"));
 
         bridge.execute_command(CommandId::UvPackIslands);
-        assert!(
-            bridge
-                .view_model()
-                .status_message
-                .contains("UV Pack Islands")
-        );
+        assert!(bridge.view_model().status_message.contains("Packed"));
 
         bridge.execute_command(CommandId::DeleteSelected);
-        assert_eq!(bridge.state.project.assets.len(), 0);
-        assert_eq!(
-            bridge.view_model().active_object_title,
-            "No Object Selected"
-        );
+        assert_eq!(bridge.state.project.assets.len(), 1);
+        assert!(bridge.state.is_document_dirty());
     }
 
     #[test]
@@ -1762,6 +2462,49 @@ mod tests {
         assert!(bridge.asset_library_visible);
         assert!(bridge.handle_click_away());
         assert!(!bridge.asset_library_visible);
+    }
+
+    #[test]
+    fn closing_one_drawer_does_not_close_or_leave_a_ghost_for_another() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::ToggleSceneDrawer);
+        bridge.apply(UiIntent::ToggleAssetLibrary);
+        bridge.apply(UiIntent::ToggleSceneDrawer);
+
+        assert!(!bridge.scene_drawer_visible);
+        assert!(bridge.asset_library_visible);
+        assert_eq!(bridge.overlays.len(), 1);
+        assert!(bridge.handle_escape());
+        assert!(!bridge.asset_library_visible);
+        assert!(!bridge.handle_escape());
+    }
+
+    #[test]
+    fn modal_identity_preserves_lifo_when_multiple_modals_are_open() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::OpenCommandSearch);
+        bridge.apply(UiIntent::OpenSettings);
+
+        assert!(bridge.handle_escape());
+        assert!(!bridge.settings_visible);
+        assert!(bridge.command_search_visible);
+        assert!(bridge.handle_escape());
+        assert!(!bridge.command_search_visible);
+    }
+
+    #[test]
+    fn delete_is_dirty_and_undo_restores_the_asset() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        bridge.state.mark_document_clean();
+        let before = bridge.state.project.assets.len();
+
+        bridge.apply(UiIntent::DeleteActiveAsset);
+
+        assert_eq!(bridge.state.project.assets.len(), before - 1);
+        assert!(bridge.state.is_document_dirty());
+        assert!(bridge.state.undo());
+        assert_eq!(bridge.state.project.assets.len(), before);
     }
 
     #[test]
