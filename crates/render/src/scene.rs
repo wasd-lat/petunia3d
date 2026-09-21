@@ -16,9 +16,9 @@ pub type ColoredLine = ([f32; 3], [f32; 3], [f32; 3]);
 
 /// Linhas dos eixos mundiais cartesianos (X=vermelho, Y=verde, Z=azul).
 pub fn world_axes_lines(extent: f32) -> Vec<ColoredLine> {
-    let axis_x = [0.88, 0.24, 0.26];
-    let axis_y = [0.38, 0.79, 0.20];
-    let axis_z = [0.19, 0.51, 0.96];
+    let axis_x = AXIS_X;
+    let axis_y = AXIS_Y;
+    let axis_z = AXIS_Z;
     vec![
         ([-extent, 0.0, 0.0], [extent, 0.0, 0.0], axis_x),
         ([0.0, -extent, 0.0], [0.0, extent, 0.0], axis_y),
@@ -38,7 +38,11 @@ pub fn grid_lines_custom(
     let extent = size.max(1.0);
     let step = spacing.clamp(0.1, extent);
     let op = opacity.clamp(0.05, 1.0);
-    let minor = [0.22 * op * 2.5, 0.22 * op * 2.5, 0.24 * op * 2.5];
+
+    // Hierarquia do grid: cada 10ª linha é "major" e recebe mais contraste. É
+    // isso que dá noção de escala sem o grid competir com o objeto.
+    let minor = [0.16 * op, 0.17 * op, 0.20 * op];
+    let major = [0.28 * op, 0.30 * op, 0.34 * op];
 
     let steps = (extent / step).ceil() as i32;
     for i in -steps..=steps {
@@ -46,8 +50,9 @@ pub fn grid_lines_custom(
         if f.abs() > extent + 1e-4 {
             continue;
         }
-        v.push(([f, 0.0, -extent], [f, 0.0, extent], minor));
-        v.push(([-extent, 0.0, f], [extent, 0.0, f], minor));
+        let color = if i % 10 == 0 { major } else { minor };
+        v.push(([f, 0.0, -extent], [f, 0.0, extent], color));
+        v.push(([-extent, 0.0, f], [extent, 0.0, f], color));
     }
 
     if show_iso {
@@ -80,8 +85,27 @@ pub fn grid_lines_custom(
         }
     }
 
+    // Eixos por último, com peso próprio: são a referência mais forte do grid
+    // e precisam vencer as linhas sem dominar o objeto.
+    let axis_extent = extent;
+    v.push((
+        [-axis_extent, 0.0, 0.0],
+        [axis_extent, 0.0, 0.0],
+        [AXIS_X[0] * 0.62, AXIS_X[1] * 0.62, AXIS_X[2] * 0.62],
+    ));
+    v.push((
+        [0.0, 0.0, -axis_extent],
+        [0.0, 0.0, axis_extent],
+        [AXIS_Z[0] * 0.62, AXIS_Z[1] * 0.62, AXIS_Z[2] * 0.62],
+    ));
+
     v
 }
+
+/// Cores canônicas dos eixos (X vermelho, Y verde, Z azul).
+pub const AXIS_X: [f32; 3] = [0.88, 0.24, 0.26];
+pub const AXIS_Y: [f32; 3] = [0.38, 0.79, 0.20];
+pub const AXIS_Z: [f32; 3] = [0.19, 0.51, 0.96];
 
 /// Grid estilo Blender no plano XZ (semi-eixo 20).
 pub fn grid_lines() -> Vec<ColoredLine> {
@@ -168,3 +192,58 @@ pub const QUAD_UVS_TOP_LEFT: [[f32; 2]; 4] = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0]
 
 /// UVs com V flipado (origem GL embaixo).
 pub const QUAD_UVS_GL: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+#[cfg(test)]
+mod grid_hierarchy_tests {
+    use super::*;
+
+    fn is_axis(line: &ColoredLine) -> bool {
+        let (a, b, c) = line;
+        // Um eixo tem uma componente zerada nos dois extremos e cor saturada.
+        (a[0] == 0.0 && b[0] == 0.0)
+            || (a[2] == 0.0 && b[2] == 0.0) && c.iter().any(|channel| *channel > 0.2)
+    }
+
+    #[test]
+    fn the_grid_has_minor_and_major_levels() {
+        let lines = grid_lines_custom(20.0, 1.0, 0.5, false, 30.0);
+        let brightness: Vec<f32> = lines.iter().map(|(_, _, c)| c[0] + c[1] + c[2]).collect();
+        let darkest = brightness.iter().cloned().fold(f32::MAX, f32::min);
+        let brightest = brightness.iter().cloned().fold(f32::MIN, f32::max);
+        assert!(
+            brightest > darkest * 1.4,
+            "linhas major precisam se destacar das minor: {darkest} vs {brightest}"
+        );
+    }
+
+    #[test]
+    fn the_grid_never_outshines_the_selection_colour() {
+        // A hierarquia exigida: seleção muito mais forte que grid.
+        let lines = grid_lines_custom(20.0, 1.0, 1.0, false, 30.0);
+        for (_, _, color) in &lines {
+            let luminance = color[0] + color[1] + color[2];
+            assert!(
+                luminance < 1.4,
+                "nenhuma linha de grid pode chegar perto da seleção: {color:?}"
+            );
+        }
+        let select = crate::scene::SELECT_COLOR;
+        let select_luminance = select[0] + select[1] + select[2];
+        assert!(select_luminance > 1.5, "seleção precisa ser quente e forte");
+    }
+
+    #[test]
+    fn the_axis_lines_are_present_and_toned_down() {
+        let lines = grid_lines_custom(20.0, 1.0, 0.4, false, 30.0);
+        let axes: Vec<&ColoredLine> = lines.iter().filter(|line| is_axis(line)).collect();
+        assert!(
+            axes.len() >= 2,
+            "X e Z precisam existir, veio {}",
+            axes.len()
+        );
+        for (_, _, color) in axes {
+            let luminance = color[0] + color[1] + color[2];
+            assert!(luminance < 1.6, "eixo não pode dominar o objeto: {color:?}");
+        }
+    }
+}

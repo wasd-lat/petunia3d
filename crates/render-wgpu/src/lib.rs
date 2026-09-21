@@ -137,6 +137,8 @@ pub struct Renderer {
     pub show_grid: bool,
     last_fingerprint: Option<SceneFingerprint>,
     last_domain: Option<petunia_core::SelectionDomain>,
+    /// Passo do grid atualmente na GPU, para reconstruir só ao cruzar degrau.
+    grid_step: f32,
     mesh_rebuilds: u64,
     skipped_frames: u64,
 }
@@ -398,8 +400,41 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Passo do grid correspondente a uma escala visível.
+fn adaptive_grid_step(visible_height: f32) -> f32 {
+    if visible_height > 60.0 {
+        10.0
+    } else if visible_height > 24.0 {
+        5.0
+    } else if visible_height > 8.0 {
+        1.0
+    } else if visible_height > 3.0 {
+        0.5
+    } else {
+        0.1
+    }
+}
+
 fn grid_lines() -> Vec<LineVertex> {
     petunia_render::scene::grid_lines()
+        .into_iter()
+        .flat_map(|(a, b, c)| {
+            [
+                LineVertex { pos: a, color: c },
+                LineVertex { pos: b, color: c },
+            ]
+        })
+        .collect()
+}
+
+/// Grid adaptativo: o passo acompanha a escala visível da câmera.
+///
+/// Afastado, o passo cresce (linhas de 1 m desapareceriam no moiré);
+/// aproximado, subdivide. O grid nunca fica nem ilegível nem dominante.
+fn adaptive_grid_lines(visible_height: f32) -> Vec<LineVertex> {
+    let step = adaptive_grid_step(visible_height);
+    let extent = (step * 40.0).clamp(20.0, 400.0);
+    petunia_render::scene::grid_lines_custom(extent, step, 0.42, false, 30.0)
         .into_iter()
         .flat_map(|(a, b, c)| {
             [
@@ -995,6 +1030,7 @@ impl Renderer {
             show_grid: true,
             last_fingerprint: None,
             last_domain: None,
+            grid_step: 1.0,
             mesh_rebuilds: 0,
             skipped_frames: 0,
         }
@@ -1073,6 +1109,18 @@ impl Renderer {
         if self.last_domain != Some(edit_domain) {
             self.last_domain = Some(edit_domain);
             self.last_fingerprint = None;
+        }
+        // Grid adaptativo: reconstrói só quando a escala visível cruza um degrau.
+        let wanted_step = adaptive_grid_step(camera.visible_height());
+        if (wanted_step - self.grid_step).abs() > f32::EPSILON {
+            self.grid_step = wanted_step;
+            let grid = adaptive_grid_lines(camera.visible_height());
+            self.grid_count = grid.len() as u32;
+            self.grid_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("simple3d-grid"),
+                contents: bytemuck::cast_slice(&grid),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
         }
         // Fonte de luz por modo: Solid/Material usam o estúdio fixo da viewport,
         // Rendered usa a primeira luz habilitada da cena. Sem luz na cena o

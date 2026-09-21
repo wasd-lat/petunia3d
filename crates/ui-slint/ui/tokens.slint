@@ -1,5 +1,9 @@
 export global DesignTokens {
-    in-out property <color> canvas: #151619;
+    // Fundo da viewport: mais escuro e mais neutro que os painéis, para a área
+    // de trabalho parecer um espaço independente (item 39 da spec).
+    in-out property <color> canvas: #101114;
+    /// Realce de hover sobre a geometria, mais sutil que a seleção.
+    in-out property <color> hover: #7f8ea3;
     in-out property <color> surface: #1d1f23;
     in-out property <color> surface-raised: #25282e;
     in-out property <color> surface-hover: #30343b;
