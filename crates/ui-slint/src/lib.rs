@@ -5307,12 +5307,12 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let gizmo_hover_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_gizmo_hover(move |x, y| {
-        if let Ok(mut bridge) = gizmo_hover_bridge.lock() {
-            if bridge.hover_gizmo(x, y) {
-                let vm = bridge.view_model();
-                if let Some(window) = window_weak.upgrade() {
-                    sync_window_properties(&window, &vm);
-                }
+        if let Ok(mut bridge) = gizmo_hover_bridge.lock()
+            && bridge.hover_gizmo(x, y)
+        {
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
             }
         }
     });
