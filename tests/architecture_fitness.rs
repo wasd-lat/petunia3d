@@ -508,3 +508,37 @@ fn project_and_persistence_must_not_depend_on_egui() {
         }
     }
 }
+
+#[test]
+fn petunia_core_must_not_depend_on_render() {
+    let content = fs::read_to_string(root_dir().join("crates/core/Cargo.toml")).unwrap();
+    assert!(
+        !content.contains("petunia_render"),
+        "VIOLAÇÃO: petunia_core não pode depender de petunia_render"
+    );
+}
+
+#[test]
+fn mcp_must_not_own_project_or_undo() {
+    let content = fs::read_to_string(root_dir().join("crates/mcp/src/server.rs")).unwrap();
+    assert!(
+        !content.contains("UndoStack<Project>"),
+        "VIOLAÇÃO: MCP não pode possuir UndoStack<Project>"
+    );
+    assert!(
+        !content.contains("struct McpDomain"),
+        "VIOLAÇÃO: MCP não pode possuir McpDomain"
+    );
+}
+
+#[test]
+fn cli_and_ffi_must_not_call_tool_apply() {
+    let cli = fs::read_to_string(root_dir().join("crates/cli/src/main.rs")).unwrap();
+    let ffi = fs::read_to_string(root_dir().join("crates/ffi/src/lib.rs")).unwrap();
+    assert!(!cli.contains("ExtrudeTool::"), "CLI não pode chamar ExtrudeTool");
+    assert!(!ffi.contains("ExtrudeTool::"), "FFI não pode chamar ExtrudeTool");
+    assert!(
+        !ffi.contains("PrimitivesTool::"),
+        "FFI não pode chamar PrimitivesTool"
+    );
+}

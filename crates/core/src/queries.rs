@@ -59,6 +59,18 @@ pub struct ToolStatusDto {
     pub status: String,
 }
 
+/// UV diagnostics DTO for the UV workspace / future Inspector.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct UvDiagnosticsDto {
+    pub island_count: usize,
+    pub overlapping_islands: usize,
+    pub zero_area_faces: usize,
+    pub out_of_range_corners: usize,
+    pub mean_stretch: f32,
+    pub max_stretch: f32,
+    pub texel_density: f32,
+}
+
 impl AppState {
     /// Consulta imutável da hierarquia completa de objetos e coleções da cena.
     pub fn query_scene_hierarchy(&self) -> SceneHierarchyDto {
@@ -136,6 +148,28 @@ impl AppState {
             has_cut_session: self.cut_session.is_some(),
             has_pointer_session: self.pointer_session.is_some(),
             status: self.ui.status.clone(),
+        }
+    }
+
+    pub fn query_uv_diagnostics(&self) -> UvDiagnosticsDto {
+        let Some(mesh) = self.project.active_mesh() else {
+            return UvDiagnosticsDto::default();
+        };
+        let d = mesh.uv_diagnostics();
+        let tex_w = self
+            .project
+            .active()
+            .and_then(|a| a.texture.as_ref())
+            .map(|c| c.w)
+            .unwrap_or(256);
+        UvDiagnosticsDto {
+            island_count: d.island_count,
+            overlapping_islands: d.overlapping_islands,
+            zero_area_faces: d.zero_area_faces,
+            out_of_range_corners: d.out_of_range_corners,
+            mean_stretch: d.mean_stretch,
+            max_stretch: d.max_stretch,
+            texel_density: mesh.texel_density(tex_w, false),
         }
     }
 

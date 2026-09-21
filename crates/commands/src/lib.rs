@@ -1,17 +1,45 @@
 //! Petunia3D — Undo/Redo via Command Pattern (snapshots).
 //!
-//! Regra do spec: operações destrutivas são comandos desfazíveis.
-//! Snapshots clonados são suficientes para low-poly (malhas pequenas) e
-//! mantêm a implementação simples e correta. Cap de 100 níveis.
+//! Destructive operations are undoable commands. Snapshots of the affected
+//! document are acceptable for V1. History is bounded by a **byte budget**
+//! (default 256 MiB), discarding oldest entries first — not a fixed op count.
+
+/// Default history memory budget (ch. 16): 256 MiB per document.
+pub const DEFAULT_HISTORY_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+
+/// Snapshot of history memory use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HistoryMetrics {
+    pub history_entries: usize,
+    pub history_bytes: usize,
+    pub largest_entry: usize,
+    pub average_entry: usize,
+}
+
+#[derive(Debug, Clone)]
+struct HistoryEntry<T> {
+    label: String,
+    value: T,
+    bytes: usize,
+}
 
 /// Pilha genérica de undo/redo sobre estado clonável com rastreamento determinístico de estado salvo/dirty.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UndoStack<T: Clone> {
-    undo: Vec<(String, T)>,
-    redo: Vec<(String, T)>,
+    undo: Vec<HistoryEntry<T>>,
+    redo: Vec<HistoryEntry<T>>,
     cap: usize,
+    byte_budget: usize,
+    undo_bytes: usize,
+    redo_bytes: usize,
     clean_version: Option<usize>,
     current_version: usize,
+}
+
+impl<T: Clone> Default for UndoStack<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: Clone> UndoStack<T> {
@@ -19,20 +47,80 @@ impl<T: Clone> UndoStack<T> {
         Self {
             undo: Vec::new(),
             redo: Vec::new(),
-            cap: 100,
+            cap: 4096,
+            byte_budget: DEFAULT_HISTORY_BUDGET_BYTES,
+            undo_bytes: 0,
+            redo_bytes: 0,
             clean_version: Some(0),
             current_version: 0,
         }
     }
 
+    pub fn with_budget(byte_budget: usize) -> Self {
+        let mut s = Self::new();
+        s.byte_budget = byte_budget.max(1);
+        s
+    }
+
+    pub fn set_byte_budget(&mut self, bytes: usize) {
+        self.byte_budget = bytes.max(1);
+        self.evict_to_budget();
+    }
+
     /// Salva o estado ATUAL antes de uma mutação (chamar antes de mudar).
     pub fn checkpoint(&mut self, label: impl Into<String>, current: &T) {
-        self.undo.push((label.into(), current.clone()));
+        self.checkpoint_sized(label, current, estimate_bytes(current));
+    }
+
+    /// Checkpoint with an explicit payload size (preferred for `Project`).
+    pub fn checkpoint_sized(&mut self, label: impl Into<String>, current: &T, bytes: usize) {
+        let bytes = bytes.max(1);
+        self.undo.push(HistoryEntry {
+            label: label.into(),
+            value: current.clone(),
+            bytes,
+        });
+        self.undo_bytes = self.undo_bytes.saturating_add(bytes);
         self.current_version = self.current_version.saturating_add(1);
-        if self.undo.len() > self.cap {
+        self.redo_bytes = 0;
+        self.redo.clear();
+        self.evict_to_budget();
+        while self.undo.len() > self.cap {
+            if let Some(old) = self.undo.first() {
+                self.undo_bytes = self.undo_bytes.saturating_sub(old.bytes);
+            }
             self.undo.remove(0);
         }
-        self.redo.clear();
+    }
+
+    fn evict_to_budget(&mut self) {
+        while self.undo_bytes > self.byte_budget && self.undo.len() > 1 {
+            let old = self.undo.remove(0);
+            self.undo_bytes = self.undo_bytes.saturating_sub(old.bytes);
+        }
+    }
+
+    pub fn metrics(&self) -> HistoryMetrics {
+        let entries: Vec<usize> = self
+            .undo
+            .iter()
+            .map(|e| e.bytes)
+            .chain(self.redo.iter().map(|e| e.bytes))
+            .collect();
+        let history_entries = entries.len();
+        let history_bytes = self.undo_bytes.saturating_add(self.redo_bytes);
+        let largest_entry = entries.iter().copied().max().unwrap_or(0);
+        let average_entry = if history_entries == 0 {
+            0
+        } else {
+            history_bytes / history_entries
+        };
+        HistoryMetrics {
+            history_entries,
+            history_bytes,
+            largest_entry,
+            average_entry,
+        }
     }
 
     pub fn can_undo(&self) -> bool {
@@ -42,10 +130,10 @@ impl<T: Clone> UndoStack<T> {
         !self.redo.is_empty()
     }
     pub fn undo_label(&self) -> Option<&str> {
-        self.undo.last().map(|(l, _)| l.as_str())
+        self.undo.last().map(|e| e.label.as_str())
     }
     pub fn redo_label(&self) -> Option<&str> {
-        self.redo.last().map(|(l, _)| l.as_str())
+        self.redo.last().map(|e| e.label.as_str())
     }
     pub fn depth(&self) -> (usize, usize) {
         (self.undo.len(), self.redo.len())
@@ -73,26 +161,46 @@ impl<T: Clone> UndoStack<T> {
 
     /// Desfaz: guarda estado atual no redo, retorna estado anterior.
     pub fn undo(&mut self, current: T) -> Option<T> {
-        let (label, prev) = self.undo.pop()?;
+        let prev = self.undo.pop()?;
+        self.undo_bytes = self.undo_bytes.saturating_sub(prev.bytes);
         self.current_version = self.current_version.saturating_sub(1);
-        self.redo.push((label, current));
-        Some(prev)
+        let current_bytes = estimate_bytes(&current);
+        self.redo.push(HistoryEntry {
+            label: prev.label,
+            value: current,
+            bytes: current_bytes,
+        });
+        self.redo_bytes = self.redo_bytes.saturating_add(current_bytes);
+        Some(prev.value)
     }
 
     /// Refaz: guarda estado atual no undo, retorna próximo estado.
     pub fn redo(&mut self, current: T) -> Option<T> {
-        let (label, next) = self.redo.pop()?;
+        let next = self.redo.pop()?;
+        self.redo_bytes = self.redo_bytes.saturating_sub(next.bytes);
         self.current_version = self.current_version.saturating_add(1);
-        self.undo.push((label, current));
-        Some(next)
+        let current_bytes = estimate_bytes(&current);
+        self.undo.push(HistoryEntry {
+            label: next.label,
+            value: current,
+            bytes: current_bytes,
+        });
+        self.undo_bytes = self.undo_bytes.saturating_add(current_bytes);
+        Some(next.value)
     }
 
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.undo_bytes = 0;
+        self.redo_bytes = 0;
         self.current_version = 0;
         self.clean_version = Some(0);
     }
+}
+
+fn estimate_bytes<T>(value: &T) -> usize {
+    std::mem::size_of_val(value).max(1)
 }
 
 /// Trait genérica para comandos executáveis e transacionais.
@@ -197,5 +305,18 @@ mod tests {
         let mut val = 10;
         assert!(cmd.execute(&mut val).is_ok());
         assert_eq!(val, 15);
+    }
+
+    #[test]
+    fn byte_budget_evicts_oldest_not_by_count() {
+        let mut st: UndoStack<Vec<u8>> = UndoStack::with_budget(64);
+        for i in 0..8 {
+            let cur = vec![i; 20];
+            st.checkpoint_sized("step", &cur, 20);
+        }
+        let metrics = st.metrics();
+        assert!(metrics.history_bytes <= 64);
+        assert!(metrics.history_entries <= 4);
+        assert!(metrics.largest_entry <= 20);
     }
 }

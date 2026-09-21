@@ -7,9 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 petunia_core = { workspace = true }
-petunia_mesh = { workspace = true }
 petunia_project = { workspace = true }
-petunia_commands = { workspace = true }
 rmcp = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

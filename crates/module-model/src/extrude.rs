@@ -30,13 +30,10 @@ impl Tool for ExtrudeTool {
 impl ExtrudeTool {
     pub fn apply(state: &mut AppState) {
         let d = state.extrude_dist;
-        state.checkpoint("extrude");
-        if let Some(m) = state.project.active_mesh_mut() {
-            m.extrude_selected(d);
+        let cmd = petunia_core::ExtrudeSelectedCmd { dist: d };
+        if let Err(err) = state.dispatch(&cmd) {
+            state.set_status(format!("extrude: {err}"));
         }
-        state.set_status(format!("extrude {d}"));
-        state.sync_selection();
-        state.emit_mesh_changed();
     }
 
     pub fn apply_individual(state: &mut AppState) {

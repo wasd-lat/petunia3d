@@ -26,6 +26,7 @@ fn main() -> Result<()> {
         "bible-check" => bible::check(&root_dir(), false)?,
         "bible-lock" => bible::check(&root_dir(), true)?,
         "arch-check" => task_arch_check()?,
+        "verify" => task_verify()?,
         "ui-check" => task_ui_check()?,
         "ui-guard" => {
             let rest: Vec<String> = args.collect();
@@ -65,6 +66,7 @@ COMANDOS:
     bible-check   Valida o caderno canônico (docs/bible/), links, vocabulário e congelamento do site
     bible-lock    Regenera o lock do site congelado (somente após decisão explícita de descongelar)
     arch-check    Valida a integridade dos relatórios da auditoria arquitetural
+    verify        Gate backend read-only (fmt, check, tests, clippy, arch-check)
     ui-check      Valida o mapa de componentes UI (docs/public/ui-map.json) contra o código
     ui-guard      Guarda de arquitetura da UI (§36/§37 da diretiva Egui Ecosystem Final Push)
                   Reporta, por regra, ocorrências em product code versus foundation/adapter.
@@ -676,8 +678,8 @@ fn task_arch_check() -> Result<()> {
     let checks = [
         (
             "crates/core/Cargo.toml",
-            &["egui ="][..],
-            "petunia_core não pode depender de egui",
+            &["egui =", "petunia_render"][..],
+            "petunia_core não pode depender de egui nem petunia_render",
         ),
         (
             "crates/config/Cargo.toml",
@@ -1272,5 +1274,79 @@ fn task_arch_check() -> Result<()> {
     println!(
         "🏛️ Progresso de remediação: GAUNTLETS G0 a G10, WAVE 1 e WAVE 2 100% CONCLUÍDOS COM SUCESSO!"
     );
+
+    // P0 architecture: MCP must not own Project/UndoStack; CLI/FFI must not
+    // call Tool::apply for domain mutation.
+    let mcp_src = root.join("crates/mcp/src/server.rs");
+    let mcp = std::fs::read_to_string(&mcp_src).unwrap_or_default();
+    if mcp.contains("UndoStack<Project>") || mcp.contains("struct McpDomain") {
+        bail!("Violação P0: MCP não pode possuir Project/UndoStack próprio");
+    }
+    if !mcp.contains("dispatch_intent") && !mcp.contains("state.dispatch") {
+        bail!("Violação P0: MCP deve despachar pela Application API");
+    }
+    for (rel, marker) in [
+        ("crates/cli/src/main.rs", "Tool::apply"),
+        ("crates/cli/src/main.rs", "ExtrudeTool::"),
+        ("crates/ffi/src/lib.rs", "ExtrudeTool::"),
+        ("crates/ffi/src/lib.rs", "PrimitivesTool::"),
+        ("crates/core/Cargo.toml", "petunia_render"),
+    ] {
+        let content = std::fs::read_to_string(root.join(rel)).unwrap_or_default();
+        if content.contains(marker) {
+            bail!("Violação P0: {rel} ainda contém '{marker}'");
+        }
+    }
+    println!("✅ Invariantes P0 (command spine / MCP / core↛render) validadas.");
+    Ok(())
+}
+
+fn run_cargo(root: &Path, args: &[&str]) -> Result<()> {
+    let status = Command::new("cargo")
+        .args(args)
+        .current_dir(root)
+        .status()
+        .with_context(|| format!("falha ao executar cargo {}", args.join(" ")))?;
+    if !status.success() {
+        bail!("cargo {} falhou", args.join(" "));
+    }
+    Ok(())
+}
+
+/// Read-only backend gate. Does not format or rewrite UI files.
+fn task_verify() -> Result<()> {
+    let root = root_dir();
+    println!("🔎 cargo xtask verify (read-only backend gate)");
+    run_cargo(&root, &["check", "--workspace"])?;
+    run_cargo(
+        &root,
+        &[
+            "test",
+            "-p",
+            "petunia_core",
+            "-p",
+            "petunia_commands",
+            "-p",
+            "petunia_project",
+            "-p",
+            "petunia_mesh",
+            "-p",
+            "petunia_cli",
+            "-p",
+            "petunia_ffi",
+            "-p",
+            "petunia_mcp",
+            "-p",
+            "petunia_plugins",
+            "-p",
+            "petunia_module_model",
+            "-p",
+            "petunia_module_paint",
+            "--",
+            "--test-threads=8",
+        ],
+    )?;
+    task_arch_check()?;
+    println!("✅ verify: backend gate concluído (read-only).");
     Ok(())
 }

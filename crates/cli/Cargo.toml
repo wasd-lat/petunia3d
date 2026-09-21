@@ -15,7 +15,9 @@ petunia_core = { workspace = true }
 petunia_mesh = { workspace = true }
 petunia_project = { workspace = true }
 petunia_commands = { workspace = true }
-petunia_module_model = { workspace = true }
 petunia_mcp = { workspace = true }
 anyhow = { workspace = true }
 glam = { workspace = true }
+
+[dev-dependencies]
+petunia_module_model = { workspace = true }

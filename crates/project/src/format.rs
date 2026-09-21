@@ -1,20 +1,45 @@
-//! Formato `.petunia`: binário compacto versionado (postcard).
-//! V1: `PetuniaFile { version: 1, project }`. Migrações futuras comparam
-//! `version` e convertem.
+//! Formato `.petunia`.
+//!
+//! Canonical V1 (ch. 16): ZIP container
+//! ```text
+//! project.petunia
+//! ├ manifest.json
+//! ├ document.json
+//! ├ textures/
+//! ├ references/
+//! └ thumbnails/
+//! ```
+//!
+//! Loader also accepts the legacy postcard blob (`PETUNIA\0` + version +
+//! Project) and migrates it into the live Document. New saves always write
+//! the ZIP container. `.pkg` remains a separate portable package.
 
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use std::io::{Cursor, Read, Write};
 
 use super::Project;
+use crate::io_atomic::atomic_write;
 
 pub const PROJECT_VERSION: u32 = 1;
 const MAGIC: &[u8; 8] = b"PETUNIA\0";
+const ZIP_MAGIC: [u8; 2] = [0x50, 0x4B]; // "PK"
+const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_UNCOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_ZIP_ENTRIES: usize = 4096;
+const MAX_JSON_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct PetuniaFile {
     magic: [u8; 8],
     version: u32,
     project: Project,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ManifestV1 {
+    format: String,
+    version: u32,
+    name: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +50,8 @@ pub enum ProjectError {
     Format(String),
     #[error("versão {0} não suportada (máx {1})")]
     Version(u32, u32),
+    #[error("arquivo excede o limite de tamanho ({0} bytes)")]
+    TooLarge(u64),
 }
 
 /// Salva o projeto no disco utilizando escrita atômica segura (P3D-001).
@@ -32,61 +59,121 @@ pub fn save(project: &Project, path: &std::path::Path) -> Result<(), ProjectErro
     save_atomic(project, path)
 }
 
-/// Salva o projeto de forma atômica e resiliente a falhas:
-/// 1. Serializa para buffer binário postcard;
-/// 2. Cria arquivo temporário oculto no mesmo diretório (.petunia.tmp.{uuid});
-/// 3. Grava e realiza sync_all() garantindo persistência física;
-/// 4. Renomeia atomicamente sobre o destino final.
-///
-/// Em caso de qualquer erro, o arquivo de destino original permanece 100% intacto.
-pub fn save_atomic(project: &Project, path: &std::path::Path) -> Result<(), ProjectError> {
-    let file = PetuniaFile {
-        magic: *MAGIC,
+/// Serializes `project` as a ZIP V1 container (no extra Project clone).
+pub fn encode_zip(project: &Project) -> Result<Vec<u8>, ProjectError> {
+    let manifest = ManifestV1 {
+        format: "petunia".into(),
         version: PROJECT_VERSION,
-        project: project.clone(),
+        name: project.name.clone(),
     };
-    let bytes = postcard::to_allocvec(&file).map_err(|e| ProjectError::Format(e.to_string()))?;
-
-    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    if !parent.as_os_str().is_empty() {
-        std::fs::create_dir_all(parent).map_err(|e| ProjectError::Io(e.to_string()))?;
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| ProjectError::Format(e.to_string()))?
+        .into_bytes();
+    let document_json =
+        serde_json::to_vec(project).map_err(|e| ProjectError::Format(e.to_string()))?;
+    if document_json.len() as u64 > MAX_UNCOMPRESSED_BYTES {
+        return Err(ProjectError::TooLarge(document_json.len() as u64));
     }
 
-    let file_stem = path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("project");
-    let temp_file_name = format!(".{file_stem}.tmp.{}", uuid::Uuid::new_v4());
-    let temp_path = parent.join(temp_file_name);
-
-    let write_res = (|| -> Result<(), std::io::Error> {
-        let mut temp_file = std::fs::File::create(&temp_path)?;
-        temp_file.write_all(&bytes)?;
-        temp_file.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_res {
-        let _ = std::fs::remove_file(&temp_path);
-        return Err(ProjectError::Io(e.to_string()));
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("manifest.json", opts)
+            .map_err(|e| ProjectError::Format(e.to_string()))?;
+        zip.write_all(&manifest_json)
+            .map_err(|e| ProjectError::Io(e.to_string()))?;
+        zip.start_file("document.json", opts)
+            .map_err(|e| ProjectError::Format(e.to_string()))?;
+        zip.write_all(&document_json)
+            .map_err(|e| ProjectError::Io(e.to_string()))?;
+        zip.finish()
+            .map_err(|e| ProjectError::Format(e.to_string()))?;
     }
+    Ok(cursor.into_inner())
+}
 
-    if let Err(e) = std::fs::rename(&temp_path, path) {
-        let _ = std::fs::remove_file(&temp_path);
-        return Err(ProjectError::Io(e.to_string()));
-    }
-
-    Ok(())
+/// Salva o projeto de forma atômica e resiliente a falhas.
+pub fn save_atomic(project: &Project, path: &std::path::Path) -> Result<(), ProjectError> {
+    let bytes = encode_zip(project)?;
+    atomic_write(path, &bytes).map_err(|e| ProjectError::Io(e.to_string()))
 }
 
 pub fn load(path: &std::path::Path) -> Result<Project, ProjectError> {
+    let meta = std::fs::metadata(path).map_err(|e| ProjectError::Io(e.to_string()))?;
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(ProjectError::TooLarge(meta.len()));
+    }
     let bytes = std::fs::read(path).map_err(|e| ProjectError::Io(e.to_string()))?;
     load_bytes(&bytes)
 }
 
-/// Parses a project from raw bytes (fuzz boundary P0-13: never panics on
-/// hostile input, only returns typed errors).
+/// Parses a project from raw bytes (fuzz boundary: never panics on hostile input).
 pub fn load_bytes(bytes: &[u8]) -> Result<Project, ProjectError> {
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(ProjectError::TooLarge(bytes.len() as u64));
+    }
+    if bytes.len() >= 2 && bytes[0] == ZIP_MAGIC[0] && bytes[1] == ZIP_MAGIC[1] {
+        return load_zip(bytes);
+    }
+    load_legacy_postcard(bytes)
+}
+
+fn load_zip(bytes: &[u8]) -> Result<Project, ProjectError> {
+    let cursor = Cursor::new(bytes);
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| ProjectError::Format(e.to_string()))?;
+    if archive.len() > MAX_ZIP_ENTRIES {
+        return Err(ProjectError::Format("too many zip entries".into()));
+    }
+    let mut uncompressed: u64 = 0;
+    let mut document = None;
+    let mut manifest_version = PROJECT_VERSION;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| ProjectError::Format(e.to_string()))?;
+        let name = entry.name().to_string();
+        if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
+            return Err(ProjectError::Format(format!("path traversal: {name}")));
+        }
+        let size = entry.size();
+        uncompressed = uncompressed.saturating_add(size);
+        if uncompressed > MAX_UNCOMPRESSED_BYTES {
+            return Err(ProjectError::TooLarge(uncompressed));
+        }
+        if name == "manifest.json" {
+            let mut buf = String::new();
+            entry
+                .read_to_string(&mut buf)
+                .map_err(|e| ProjectError::Format(e.to_string()))?;
+            let manifest: ManifestV1 =
+                serde_json::from_str(&buf).map_err(|e| ProjectError::Format(e.to_string()))?;
+            if manifest.version > PROJECT_VERSION {
+                return Err(ProjectError::Version(manifest.version, PROJECT_VERSION));
+            }
+            manifest_version = manifest.version;
+        } else if name == "document.json" {
+            if size as usize > MAX_JSON_BYTES {
+                return Err(ProjectError::TooLarge(size));
+            }
+            let mut buf = Vec::new();
+            entry
+                .read_to_end(&mut buf)
+                .map_err(|e| ProjectError::Format(e.to_string()))?;
+            document = Some(buf);
+        }
+    }
+    let _ = manifest_version;
+    let doc = document.ok_or_else(|| ProjectError::Format("document.json ausente".into()))?;
+    let mut project: Project =
+        serde_json::from_slice(&doc).map_err(|e| ProjectError::Format(e.to_string()))?;
+    project.validate();
+    Ok(project)
+}
+
+fn load_legacy_postcard(bytes: &[u8]) -> Result<Project, ProjectError> {
     let file: PetuniaFile =
         postcard::from_bytes(bytes).map_err(|e| ProjectError::Format(e.to_string()))?;
     if file.magic != *MAGIC {
@@ -95,7 +182,6 @@ pub fn load_bytes(bytes: &[u8]) -> Result<Project, ProjectError> {
     if file.version > PROJECT_VERSION {
         return Err(ProjectError::Version(file.version, PROJECT_VERSION));
     }
-    // v1 -> v1: valida o trust boundary (M2/M3/M4) e converte se preciso
     let mut project = file.project;
     project.validate();
     Ok(project)
@@ -117,7 +203,9 @@ mod tests {
         let q = load(&path).unwrap();
         assert_eq!(q.assets.len(), 2);
         assert_eq!(q.assets[1].name, "Plane");
-        assert_eq!(q.assets[1].id, p.assets[1].id); // UUID persistente
+        assert_eq!(q.assets[1].id, p.assets[1].id);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..2], b"PK");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -132,7 +220,6 @@ mod tests {
 
     #[test]
     fn hostile_project_normalized() {
-        // M2/M3/M4: projeto corrompido abre sem panic e normalizado
         use super::super::{Asset, Canvas};
         use petunia_mesh::{Face, Mesh, Vertex};
         let bad_mesh = Mesh {
@@ -144,6 +231,7 @@ mod tests {
                 material_slot: None,
             }],
             selected_edges: Default::default(),
+            uv_seams: Default::default(),
         };
         let bad = super::super::Project {
             id: uuid::Uuid::new_v4(),
@@ -168,6 +256,7 @@ mod tests {
                 tags: vec![],
                 modifiers: vec![],
                 paint_stack: None,
+                eval_cache: None,
             }],
             active: 42,
             palette: vec![],
@@ -191,20 +280,39 @@ mod tests {
 
     #[test]
     fn test_future_version_rejected() {
+        let manifest = serde_json::json!({
+            "format": "petunia",
+            "version": 999,
+            "name": "future"
+        });
+        let document = serde_json::to_vec(&Project::new()).unwrap();
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut cursor);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("manifest.json", opts).unwrap();
+            zip.write_all(manifest.to_string().as_bytes()).unwrap();
+            zip.start_file("document.json", opts).unwrap();
+            zip.write_all(&document).unwrap();
+            zip.finish().unwrap();
+        }
+        let bytes = cursor.into_inner();
+        let res = load_bytes(&bytes);
+        assert!(matches!(res, Err(ProjectError::Version(999, 1))));
+    }
+
+    #[test]
+    fn legacy_postcard_still_loads() {
         let p = Project::new();
         let file = PetuniaFile {
             magic: *MAGIC,
-            version: 999, // Versão futura
-            project: p,
+            version: 1,
+            project: p.clone(),
         };
         let bytes = postcard::to_allocvec(&file).unwrap();
-        let dir = std::env::temp_dir();
-        let path = dir.join("petunia_test_future_ver.petunia");
-        std::fs::write(&path, bytes).unwrap();
-
-        let res = load(&path);
-        assert!(matches!(res, Err(ProjectError::Version(999, 1))));
-        let _ = std::fs::remove_file(&path);
+        let loaded = load_bytes(&bytes).unwrap();
+        assert_eq!(loaded.assets.len(), p.assets.len());
+        assert_eq!(loaded.assets[0].name, "Cube");
     }
 
     #[test]
@@ -241,23 +349,26 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("project.petunia");
 
-        // Salva versão original válida
         save(&original, &path).unwrap();
         let valid_bytes = std::fs::read(&path).unwrap();
 
-        // Tentativa de salvar num caminho inválido onde o diretório pai é um arquivo comum
         let invalid_path = path.join("sub_project.petunia");
         let mut corrupt_attempt = Project::new();
         corrupt_attempt.name = "Corrupt".to_string();
         let err = save(&corrupt_attempt, &invalid_path);
         assert!(err.is_err(), "Deve falhar ao tentar salvar sob um arquivo");
 
-        // O arquivo original deve permanecer 100% inalterado
         let current_bytes = std::fs::read(&path).unwrap();
         assert_eq!(current_bytes, valid_bytes);
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.name, "Original Intact");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn oversized_input_is_rejected() {
+        let huge = vec![0u8; (MAX_FILE_BYTES as usize) + 1];
+        assert!(matches!(load_bytes(&huge), Err(ProjectError::TooLarge(_))));
     }
 }

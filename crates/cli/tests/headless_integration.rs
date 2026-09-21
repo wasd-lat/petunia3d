@@ -218,19 +218,20 @@ fn test_headless_export_obj_and_glb() {
 }
 
 #[test]
-fn test_headless_complete_session_performance() {
+fn test_headless_complete_session_roundtrip() {
     let start = Instant::now();
 
     let mut state = AppState::new("en");
     ProjectService::new_project(&mut state);
 
-    // Adiciona modelo
+    // Adiciona modelo pelo caminho canônico de comando
     PrimitivesTool::add_primitive(&mut state, "Cylinder8");
 
-    // Seleciona e extrude
+    // Seleciona e extrude (spine de comando)
     state.dispatch(&SelectAllCmd).expect("SelectAll");
-    state.extrude_dist = 2.0;
-    ExtrudeTool::apply(&mut state);
+    state
+        .dispatch(&petunia_core::ExtrudeSelectedCmd { dist: 2.0 })
+        .expect("Extrude");
 
     // Undo e Redo
     assert!(state.undo());
@@ -243,15 +244,20 @@ fn test_headless_complete_session_performance() {
     ProjectService::save_project(&mut state, &prj_file).expect("Save");
     ProjectService::export_glb(&state, &[state.project.active], &glb_file).expect("Export");
 
+    // Determinismo: recarregar preserva a cena; sem assert de tempo de parede.
+    let mut reloaded = AppState::new("en");
+    ProjectService::load_project(&mut reloaded, &prj_file).expect("Reload");
+    assert_eq!(
+        reloaded.project.assets.len(),
+        state.project.assets.len(),
+        "roundtrip deve preservar contagem de assets"
+    );
+    let glb_bytes = std::fs::read(&glb_file).expect("Ler GLB");
+    assert_eq!(&glb_bytes[0..4], b"glTF", "magic GLB válido");
+
     let elapsed = start.elapsed();
     println!("⏱️ Sessão headless completa executada em: {:.2?}", elapsed);
 
     let _ = std::fs::remove_file(prj_file);
     let _ = std::fs::remove_file(glb_file);
-
-    assert!(
-        elapsed.as_millis() < 250,
-        "Sessão completa deve executar em menos de 250ms (executou em {:.2?})",
-        elapsed
-    );
 }

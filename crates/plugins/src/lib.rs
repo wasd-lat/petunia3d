@@ -15,8 +15,10 @@
 //! Validated CommandIntent / query DTOs out (execution stays with the app)
 //! ```
 
+pub mod dispatch;
 pub mod host;
 
+pub use dispatch::{answer_query, apply_intents};
 pub use host::{
     CapabilityError, Host, HostConfig, LuaCommand, PluginCapabilities, PluginError, PluginId,
     ValidatedIntent,

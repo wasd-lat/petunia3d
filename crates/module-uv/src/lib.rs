@@ -124,17 +124,73 @@ impl UvModule {
 
     /// Executa unwrap automático genérico usando o provider xatlas (P1-06 / P3D-064).
     pub fn unwrap_auto(state: &mut AppState) -> Result<usize, String> {
-        state.checkpoint("uv auto unwrap");
-        let res = if let Some(m) = state.project.active_mesh_mut() {
-            m.unwrap_auto().map_err(|e| e.to_string())
-        } else {
-            Err("Nenhum asset ativo".into())
-        };
-        if res.is_ok() {
-            state.uv_selected.clear();
-            state.emit_mesh_changed();
+        state
+            .dispatch(&petunia_core::UnwrapAutoCmd)
+            .map_err(|e| e.to_string())?;
+        Ok(state
+            .project
+            .active_mesh()
+            .map(|m| m.uv_islands().len())
+            .unwrap_or(0))
+    }
+
+    pub fn pack_islands(state: &mut AppState, padding: f32) -> Result<usize, String> {
+        state
+            .dispatch(&petunia_core::UvPackIslandsCmd { padding })
+            .map_err(|e| e.to_string())?;
+        Ok(state
+            .project
+            .active_mesh()
+            .map(|m| m.uv_islands().len())
+            .unwrap_or(0))
+    }
+
+    pub fn project_from_view(state: &mut AppState) -> Result<(), String> {
+        state
+            .dispatch(&petunia_core::UvProjectFromViewCmd)
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn mark_selected_seams(state: &mut AppState) {
+        state.checkpoint("mark seam");
+        if let Some(m) = state.project.active_mesh_mut() {
+            let edges: Vec<(u32, u32)> = m.selected_edges.iter().copied().collect();
+            for (a, b) in edges {
+                m.mark_seam(a, b);
+            }
         }
-        res
+        state.emit_mesh_changed();
+    }
+
+    pub fn clear_selected_seams(state: &mut AppState) {
+        state.checkpoint("clear seam");
+        if let Some(m) = state.project.active_mesh_mut() {
+            let edges: Vec<(u32, u32)> = m.selected_edges.iter().copied().collect();
+            for (a, b) in edges {
+                m.clear_seam(a, b);
+            }
+        }
+        state.emit_mesh_changed();
+    }
+
+    pub fn diagnostics(state: &AppState) -> Option<petunia_mesh::uv_tools::UvDiagnostics> {
+        state.project.active_mesh().map(|m| m.uv_diagnostics())
+    }
+
+    pub fn texel_density(state: &AppState, texture_w: u32) -> f32 {
+        state
+            .project
+            .active_mesh()
+            .map(|m| m.texel_density(texture_w, false))
+            .unwrap_or(0.0)
+    }
+
+    pub fn normalize_texel_density(state: &mut AppState, texture_w: u32, target: f32) {
+        state.checkpoint("normalize texel density");
+        if let Some(m) = state.project.active_mesh_mut() {
+            m.normalize_texel_density(texture_w, target);
+        }
+        state.emit_mesh_changed();
     }
 }
 

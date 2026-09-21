@@ -15,7 +15,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
-petunia_render = { workspace = true }
 tracing = { workspace = true }
 slotmap = { workspace = true }
 rayon = { workspace = true }
@@ -37,4 +36,8 @@ tempfile = { workspace = true }
 
 [[bench]]
 name = "core_jobs"
+harness = false
+
+[[bench]]
+name = "command_spine"
 harness = false

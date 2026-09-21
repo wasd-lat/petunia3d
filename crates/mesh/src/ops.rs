@@ -219,6 +219,13 @@ impl Mesh {
 
     // ---------------- operações ----------------
 
+    pub fn extrude_selected_result(&mut self, dist: f32) -> crate::TopologyResult {
+        let vb = self.verts.len();
+        let fb = self.faces.len();
+        self.extrude_selected(dist);
+        crate::TopologyResult::from_counts(vb, fb, self.verts.len(), self.faces.len())
+    }
+
     pub fn extrude_selected(&mut self, dist: f32) {
         if !dist.is_finite() {
             return;

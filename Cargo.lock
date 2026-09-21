@@ -5618,7 +5618,6 @@ dependencies = [
  "petunia_config",
  "petunia_mesh",
  "petunia_project",
- "petunia_render",
  "proptest",
  "rayon",
  "schemars",
@@ -5638,7 +5637,6 @@ dependencies = [
  "glam 0.27.0",
  "petunia_core",
  "petunia_mesh",
- "petunia_module_model",
  "petunia_project",
  "serde",
  "serde_json",
@@ -5649,9 +5647,7 @@ dependencies = [
 name = "petunia_mcp"
 version = "0.1.0"
 dependencies = [
- "petunia_commands",
  "petunia_core",
- "petunia_mesh",
  "petunia_project",
  "rmcp 3.3.0",
  "schemars",
@@ -5752,6 +5748,9 @@ dependencies = [
 [[package]]
 name = "petunia_render"
 version = "0.1.0"
+dependencies = [
+ "petunia_core",
+]
 
 [[package]]
 name = "petunia_render_gl"

@@ -30,11 +30,8 @@ impl Tool for InsetTool {
 impl InsetTool {
     pub fn apply(state: &mut AppState) {
         let f = state.inset_factor;
-        state.checkpoint("inset");
-        if let Some(m) = state.project.active_mesh_mut() {
-            m.inset_selected(f);
+        if let Err(err) = state.dispatch(&petunia_core::InsetFacesCmd { factor: f }) {
+            state.set_status(format!("inset: {err}"));
         }
-        state.sync_selection();
-        state.emit_mesh_changed();
     }
 }

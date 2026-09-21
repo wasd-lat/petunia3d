@@ -27,7 +27,9 @@ pub use animation::{
 };
 pub use autosave::{AutosaveConfig, AutosaveService, RecoveryInfo, SessionLockInfo};
 pub use export::{ExportError, export_gltf, export_obj};
-pub use import_gltf::{GltfImportError, GltfSummary, parse_gltf_json};
+pub use import_gltf::{
+    GltfImportError, GltfSummary, GlbMeshes, import_glb_bytes, parse_gltf_json,
+};
 pub use import_obj::{ObjImportError, import_obj_bytes};
 pub use io_atomic::{AtomicIoError, TempScope, atomic_write};
 pub use material::{AlphaMode, Material, ShaderProfile, TextureChannel};
@@ -206,6 +208,8 @@ pub struct Asset {
     pub tags: Vec<String>,
     #[serde(default)]
     pub modifiers: Vec<ModifierInstance>,
+    #[serde(skip)]
+    eval_cache: Option<(u64, u64, Mesh)>,
 }
 
 impl Asset {
@@ -226,6 +230,7 @@ impl Asset {
             tags: Vec::new(),
             modifiers: Vec::new(),
             paint_stack: None,
+            eval_cache: None,
         }
     }
 
@@ -238,6 +243,16 @@ impl Asset {
     /// Render, preview e export usam este resultado; edição continua operando
     /// sobre `mesh`, preservando a natureza não destrutiva da pilha.
     pub fn evaluated_mesh(&self) -> Mesh {
+        let key = (
+            self.mesh.verts.len() as u64 * 1_000_003
+                + self.mesh.faces.len() as u64,
+            self.modifiers.len() as u64,
+        );
+        if let Some((k0, k1, cached)) = &self.eval_cache
+            && (*k0, *k1) == key
+        {
+            return cached.clone();
+        }
         let mut mesh = self.mesh.clone();
         for modifier in &self.modifiers {
             if !modifier.enabled {
@@ -255,6 +270,23 @@ impl Asset {
             }
         }
         mesh
+    }
+
+    /// Cache-aware evaluation. Callers with `&mut Asset` reuse the last result.
+    pub fn evaluated_mesh_cached(&mut self) -> &Mesh {
+        let key = (
+            self.mesh.verts.len() as u64 * 1_000_003 + self.mesh.faces.len() as u64,
+            self.modifiers.len() as u64,
+        );
+        let miss = self
+            .eval_cache
+            .as_ref()
+            .is_none_or(|(k0, k1, _)| (*k0, *k1) != key);
+        if miss {
+            let mesh = self.evaluated_mesh();
+            self.eval_cache = Some((key.0, key.1, mesh));
+        }
+        &self.eval_cache.as_ref().unwrap().2
     }
 
     /// Duplicata com novo UUID.
@@ -478,6 +510,19 @@ pub struct Project {
     pub skeletons: Vec<Skeleton>,
     #[serde(default)]
     pub animations: Vec<AnimationAsset>,
+    /// Scene-level revision counters for GPU invalidation (not hashed content).
+    #[serde(default)]
+    pub topology_revision: u64,
+    #[serde(default)]
+    pub position_revision: u64,
+    #[serde(default)]
+    pub selection_revision: u64,
+    #[serde(default)]
+    pub material_revision: u64,
+    #[serde(default)]
+    pub texture_revision: u64,
+    #[serde(default)]
+    pub transform_revision: u64,
 }
 
 impl Default for Project {
@@ -498,11 +543,58 @@ impl Default for Project {
             materials: vec![Material::new("Default Material")],
             skeletons: Vec::new(),
             animations: Vec::new(),
+            topology_revision: 0,
+            position_revision: 0,
+            selection_revision: 0,
+            material_revision: 0,
+            texture_revision: 0,
+            transform_revision: 0,
         }
     }
 }
 
 impl Project {
+    pub fn bump_topology(&mut self) {
+        self.topology_revision = self.topology_revision.wrapping_add(1);
+    }
+    pub fn bump_positions(&mut self) {
+        self.position_revision = self.position_revision.wrapping_add(1);
+    }
+    pub fn bump_selection(&mut self) {
+        self.selection_revision = self.selection_revision.wrapping_add(1);
+    }
+    pub fn bump_materials(&mut self) {
+        self.material_revision = self.material_revision.wrapping_add(1);
+    }
+    pub fn bump_textures(&mut self) {
+        self.texture_revision = self.texture_revision.wrapping_add(1);
+    }
+
+    /// Approximate owned payload size for history eviction (meshes + textures).
+    pub fn estimated_bytes(&self) -> usize {
+        let mut n = std::mem::size_of::<Self>();
+        for asset in &self.assets {
+            n = n.saturating_add(asset.mesh.verts.len().saturating_mul(32));
+            n = n.saturating_add(asset.mesh.faces.len().saturating_mul(48));
+            if let Some(tex) = asset.texture.as_ref() {
+                n = n.saturating_add(tex.pixels.len());
+            }
+            if let Some(stack) = asset.paint_stack.as_ref() {
+                for layer in &stack.layers {
+                    if let Some(cv) = layer.canvas() {
+                        n = n.saturating_add(cv.pixels.len());
+                    }
+                }
+            }
+        }
+        for mat in &self.materials {
+            if let Some(tex) = mat.albedo_texture.as_ref() {
+                n = n.saturating_add(tex.pixels.len());
+            }
+        }
+        n.max(1)
+    }
+
     pub fn new() -> Self {
         let def_mat = Material::new("Default Material");
         let def_mat_id = def_mat.id;
@@ -524,6 +616,12 @@ impl Project {
             materials: vec![def_mat],
             skeletons: Vec::new(),
             animations: Vec::new(),
+            topology_revision: 0,
+            position_revision: 0,
+            selection_revision: 0,
+            material_revision: 0,
+            texture_revision: 0,
+            transform_revision: 0,
         }
     }
 

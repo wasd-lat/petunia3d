@@ -164,6 +164,7 @@ impl Mesh {
                 Face::new(vec![1, 2, 6, 5]),
             ],
             selected_edges: HashSet::new(),
+            uv_seams: HashSet::new(),
         };
         m.project_planar();
         m
@@ -183,6 +184,7 @@ impl Mesh {
                 vec![[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]],
             )],
             selected_edges: HashSet::new(),
+            uv_seams: HashSet::new(),
         };
         m.project_planar();
         m
@@ -297,6 +299,7 @@ impl Mesh {
                 Face::new(vec![1, 2, 6, 5]),
             ],
             selected_edges: HashSet::new(),
+            uv_seams: HashSet::new(),
         };
         m.project_planar();
         m
@@ -327,6 +330,7 @@ impl Mesh {
                 Face::new(vec![1, 5, 3]),    // lateral dir
             ],
             selected_edges: HashSet::new(),
+            uv_seams: HashSet::new(),
         };
         m.project_planar();
         m
