@@ -99,9 +99,13 @@ pub use viewport_query::{
 
 pub use modal::{ModalConstraint, ModalError, ModalKind, ModalOp};
 
+/// Malha, reexportada para os shells que manipulam geometria sem depender de `petunia_mesh`.
+pub use petunia_mesh::Mesh;
 /// Ponto de corte de aresta da faca, reexportado para os shells não dependerem
 /// de `petunia_mesh` diretamente.
 pub use petunia_mesh::knife::EdgePoint as CutEdgePoint;
+/// Anel de faces/arestas do loop cut, reexportado pelo mesmo motivo.
+pub use petunia_mesh::loop_cut::{LoopCutError, LoopRing};
 
 #[cfg(test)]
 mod preview_tests;

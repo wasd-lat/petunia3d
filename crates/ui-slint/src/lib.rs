@@ -313,6 +313,9 @@ pub struct ShellViewModel {
     pub label_delete: String,
     pub label_duplicate: String,
     pub themes: Vec<ThemeEntryModel>,
+    pub loop_cut_active: bool,
+    pub loop_cut_slide: f32,
+    pub loop_cut_cuts: i32,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -463,6 +466,9 @@ impl ShellViewModel {
             label_delete: String::new(),
             label_duplicate: String::new(),
             themes: Vec::new(),
+            loop_cut_active: false,
+            loop_cut_slide: 0.0,
+            loop_cut_cuts: 1,
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -584,6 +590,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub context_menu: Option<ContextMenuState>,
     /// Menu da barra superior aberto, se houver.
     pub menu_open: Option<MenuKind>,
+    /// Sessão de loop cut com slide interativo (P3D-131).
+    pub loop_cut: Option<LoopCutSessionState>,
     /// Autosave rotativo do shell (P3D-002). Nunca sobrescreve o arquivo oficial.
     pub autosave: petunia_core::AutosaveService,
     /// Snapshot de recuperação detectado no arranque, aguardando decisão.
@@ -663,6 +671,16 @@ impl MenuKind {
     }
 }
 
+/// Estado da sessão de loop cut ativa no shell.
+#[derive(Debug, Clone)]
+pub struct LoopCutSessionState {
+    pub ring: petunia_core::LoopRing,
+    pub cuts: usize,
+    pub slide: f32,
+    /// Malha anterior ao preview: toda reconstrução parte daqui, nunca do preview.
+    pub source: petunia_core::Mesh,
+}
+
 /// Tema disponível no registry, já marcado como ativo ou não.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeEntryModel {
@@ -698,6 +716,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             rename_draft: None,
             context_menu: None,
             menu_open: None,
+            loop_cut: None,
             autosave: petunia_core::AutosaveService::default(),
             pending_recovery: None,
             position: [
@@ -1305,6 +1324,131 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Abre a sessão de loop cut a partir da aresta selecionada.
+    pub fn begin_loop_cut(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh().cloned() else {
+            self.state.set_status("Loop Cut: no active mesh");
+            return false;
+        };
+        let Some(seed) = mesh.selected_edges.iter().copied().next() else {
+            self.state
+                .set_status("Loop Cut: select an edge on a quad ring first");
+            return false;
+        };
+        let Ok(ring) = petunia_core::LoopRing::discover(&mesh, seed) else {
+            self.state
+                .set_status("Loop Cut: the selected edge is not on a quad ring");
+            return false;
+        };
+        self.loop_cut = Some(LoopCutSessionState {
+            ring,
+            cuts: 1,
+            slide: 0.0,
+            source: mesh,
+        });
+        self.state.session.tools.active_tool = "loop_cut".to_string();
+        if !self.apply_loop_cut_preview() {
+            self.loop_cut = None;
+            return false;
+        }
+        self.state
+            .set_status("Loop Cut: drag to slide, Enter confirms, Esc cancels");
+        true
+    }
+
+    /// Ajusta o slide do loop cut e reconstrói a pré-visualização.
+    pub fn scrub_loop_cut(&mut self, delta_x: f32, fine: bool) -> bool {
+        let step = if fine { 0.0025 } else { 0.01 };
+        let Some(session) = self.loop_cut.as_mut() else {
+            return false;
+        };
+        session.slide = (session.slide + delta_x * step).clamp(-1.0, 1.0);
+        self.apply_loop_cut_preview()
+    }
+
+    /// Ajusta a quantidade de cortes paralelos (1..=32).
+    pub fn set_loop_cut_count(&mut self, cuts: usize) -> bool {
+        let Some(session) = self.loop_cut.as_mut() else {
+            return false;
+        };
+        let clamped = cuts.clamp(1, 32);
+        if session.cuts == clamped {
+            return false;
+        }
+        session.cuts = clamped;
+        self.apply_loop_cut_preview()
+    }
+
+    /// Reconstrói a malha a partir do snapshot da sessão, nunca do preview.
+    fn apply_loop_cut_preview(&mut self) -> bool {
+        let Some(session) = self.loop_cut.as_ref() else {
+            return false;
+        };
+        match session
+            .ring
+            .apply(&session.source, session.cuts, session.slide)
+        {
+            Ok(mesh) => {
+                if let Some(active) = self.state.project.active_mesh_mut() {
+                    *active = mesh;
+                }
+                self.state.emit_mesh_changed();
+                self.state.mark_dirty();
+                true
+            }
+            Err(error) => {
+                self.state.set_status(format!("Loop Cut: {error}"));
+                false
+            }
+        }
+    }
+
+    /// Confirma o loop cut como uma única operação de undo.
+    pub fn commit_loop_cut(&mut self) -> bool {
+        let Some(session) = self.loop_cut.take() else {
+            return false;
+        };
+        self.state.session.tools.active_tool = "select".to_string();
+        // O checkpoint precisa capturar a malha ANTES do corte, então o preview
+        // é desfeito primeiro e o resultado final é reaplicado depois.
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source.clone();
+        }
+        let Ok(cut) = session
+            .ring
+            .apply(&session.source, session.cuts, session.slide)
+        else {
+            self.state
+                .set_status("Loop Cut: topology refused at commit");
+            self.state.emit_mesh_changed();
+            return false;
+        };
+        self.state.checkpoint("loop cut");
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = cut;
+        }
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state
+            .set_status(format!("Loop cut ({})", session.cuts));
+        true
+    }
+
+    /// Abandona a sessão restaurando a malha original.
+    pub fn cancel_loop_cut(&mut self) -> bool {
+        let Some(session) = self.loop_cut.take() else {
+            return false;
+        };
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source;
+        }
+        self.state.session.tools.active_tool = "select".to_string();
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Loop Cut cancelled");
+        true
+    }
+
     /// Um clique de faca na viewport: primeiro ponto ancora, segundo corta.
     ///
     /// O ponto vem de `AppState::pick_edge`, então a faca corta a aresta que o
@@ -1766,6 +1910,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.cancel_transform();
             return true;
         }
+        if self.cancel_loop_cut() {
+            return true;
+        }
         if self.cancel_knife() {
             return true;
         }
@@ -1869,6 +2016,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         // próprias em vez de rodar como one-shot de valor fixo.
         if let Some(kind) = ToolModalKind::from_id(id) {
             self.begin_tool_modal(kind);
+            return Ok(());
+        }
+        if id == "model.loop_cut" {
+            self.begin_loop_cut();
             return Ok(());
         }
         match id {
@@ -2185,6 +2336,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     vm.menu_window_items = entries;
                 }
             }
+        }
+        if let Some(session) = &self.loop_cut {
+            vm.loop_cut_active = true;
+            vm.loop_cut_slide = session.slide;
+            vm.loop_cut_cuts = session.cuts as i32;
         }
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
@@ -2591,6 +2747,9 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_themes(theme_entries.as_slice().into());
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
+    window.set_loop_cut_active(vm.loop_cut_active);
+    window.set_loop_cut_slide(vm.loop_cut_slide);
+    window.set_loop_cut_cuts(vm.loop_cut_cuts);
     window.set_tool_modal_active(vm.tool_modal_active);
     window.set_tool_modal_title(vm.tool_modal_title.as_str().into());
     window.set_tool_modal_label(vm.tool_modal_label.as_str().into());
@@ -3306,6 +3465,77 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 return;
             }
             bridge.menu_item_invoked(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_scrub_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_scrubbed(move |delta| {
+        if let Ok(mut bridge) = loop_scrub_bridge.lock() {
+            bridge.scrub_loop_cut(delta, false);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_count_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_count_committed(move |text| {
+        if let Ok(mut bridge) = loop_count_bridge.lock() {
+            match text.trim().parse::<i32>() {
+                Ok(cuts) if cuts >= 1 => {
+                    bridge.set_loop_cut_count(cuts as usize);
+                }
+                _ => bridge
+                    .state
+                    .set_status("Loop Cut: cuts must be a whole number from 1 to 32"),
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_apply_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_apply(move || {
+        if let Ok(mut bridge) = loop_apply_bridge.lock() {
+            bridge.commit_loop_cut();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_cancel(move || {
+        if let Ok(mut bridge) = loop_cancel_bridge.lock() {
+            bridge.cancel_loop_cut();
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -5098,6 +5328,101 @@ mod tests {
         assert!(bridge.state.session.tools.cut_session.is_none());
         assert_eq!(bridge.state.session.tools.active_tool, "select");
         assert_eq!(bridge.state.ui.status, "Knife cancelled");
+    }
+
+    #[test]
+    fn loop_cut_session_slides_previews_and_commits_one_undo_entry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        let original = bridge.state.project.active_mesh().unwrap().clone();
+        // Uma aresta do cubo padrão está num anel de quads.
+        let seed = {
+            let mesh = bridge.state.project.active_mesh_mut().unwrap();
+            let face = mesh.faces[0].verts.clone();
+            let edge = (face[0], face[1]);
+            mesh.selected_edges.insert(edge);
+            edge
+        };
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .selected_edges
+                .contains(&seed)
+        );
+
+        assert!(bridge.begin_loop_cut(), "o anel precisa ser descoberto");
+        assert!(bridge.loop_cut.is_some());
+        let preview = bridge.state.project.active_mesh().unwrap().clone();
+        assert!(
+            preview.verts.len() > original.verts.len(),
+            "o preview precisa inserir vértices: {} -> {}",
+            original.verts.len(),
+            preview.verts.len()
+        );
+
+        assert!(
+            bridge.scrub_loop_cut(60.0, false),
+            "slide precisa reconstruir"
+        );
+        assert!(bridge.loop_cut.as_ref().unwrap().slide > 0.0);
+
+        assert!(bridge.set_loop_cut_count(3));
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().cuts, 3);
+        assert!(
+            bridge.state.project.active_mesh().unwrap().verts.len()
+                > bridge.state.project.undo.depth().0
+        );
+
+        assert!(bridge.commit_loop_cut());
+        assert!(bridge.loop_cut.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+
+        assert!(bridge.state.undo());
+        let restored = bridge.state.project.active_mesh().unwrap();
+        assert_eq!(restored.verts.len(), original.verts.len());
+        assert_eq!(restored.faces.len(), original.faces.len());
+    }
+
+    #[test]
+    fn loop_cut_cancel_restores_the_exact_original_mesh() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        let original = bridge.state.project.active_mesh().unwrap().clone();
+        {
+            let mesh = bridge.state.project.active_mesh_mut().unwrap();
+            let face = mesh.faces[0].verts.clone();
+            mesh.selected_edges.insert((face[0], face[1]));
+        }
+
+        assert!(bridge.begin_loop_cut());
+        assert!(bridge.scrub_loop_cut(-80.0, false));
+        assert!(bridge.cancel_loop_cut());
+
+        let restored = bridge.state.project.active_mesh().unwrap();
+        assert_eq!(restored.verts.len(), original.verts.len());
+        assert_eq!(restored.faces.len(), original.faces.len());
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "cancelar não pode empilhar histórico"
+        );
+    }
+
+    #[test]
+    fn loop_cut_refuses_without_a_selected_edge_and_says_why() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.begin_loop_cut());
+        assert!(bridge.loop_cut.is_none());
+        assert!(
+            bridge.state.ui.status.contains("select an edge"),
+            "veio: {}",
+            bridge.state.ui.status
+        );
     }
 
     #[test]
