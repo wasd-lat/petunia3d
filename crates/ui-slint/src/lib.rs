@@ -313,6 +313,8 @@ pub struct ShellViewModel {
     pub label_delete: String,
     pub label_duplicate: String,
     pub themes: Vec<ThemeEntryModel>,
+    pub paint_layers: Vec<PaintLayerModel>,
+    pub paint_layer_count: String,
     pub loop_cut_active: bool,
     pub loop_cut_slide: f32,
     pub loop_cut_cuts: i32,
@@ -466,6 +468,8 @@ impl ShellViewModel {
             label_delete: String::new(),
             label_duplicate: String::new(),
             themes: Vec::new(),
+            paint_layers: Vec::new(),
+            paint_layer_count: String::new(),
             loop_cut_active: false,
             loop_cut_slide: 0.0,
             loop_cut_cuts: 1,
@@ -669,6 +673,19 @@ impl MenuKind {
             ],
         }
     }
+}
+
+/// Camada de pintura publicada para o painel de camadas do shell.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaintLayerModel {
+    pub id: String,
+    pub name: String,
+    pub visible: bool,
+    pub locked: bool,
+    pub opacity: f32,
+    pub active: bool,
+    pub is_group: bool,
+    pub kind_label: String,
 }
 
 /// Estado da sessão de loop cut ativa no shell.
@@ -1322,6 +1339,148 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 .set_status(format!("Failed to discard snapshots: {error}")),
         }
         true
+    }
+
+    /// Mutações do stack de camadas do workspace PAINT.
+    ///
+    /// Todas passam por `ensure_stack` + checkpoint + recomposição: o raster
+    /// canônico é `Asset.paint_stack` e `Asset.texture` é só o cache composto.
+    fn mutate_paint_stack(
+        &mut self,
+        label: &str,
+        mutate: impl FnOnce(&mut petunia_project::paint_layers::PaintLayerStack) -> bool,
+    ) -> bool {
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let active = self.state.project.active;
+        let Some(asset) = self.state.project.assets.get_mut(active) else {
+            return false;
+        };
+        let Some(stack) = asset.paint_stack.as_mut() else {
+            return false;
+        };
+        if !mutate(stack) {
+            return false;
+        }
+        self.state.checkpoint(label);
+        petunia_module_paint::PaintModule::composite_active(&mut self.state);
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn add_paint_layer(&mut self) -> bool {
+        let (w, h) = self.paint_canvas_size();
+        self.mutate_paint_stack("add paint layer", |stack| {
+            stack.add_layer(petunia_project::paint_layers::PaintLayer::new(
+                format!("Layer {}", stack.layers.len() + 1),
+                w,
+                h,
+                [0, 0, 0, 0],
+            ));
+            true
+        })
+    }
+
+    pub fn add_paint_group(&mut self) -> bool {
+        self.mutate_paint_stack("add paint group", |stack| {
+            stack.add_group(format!("Group {}", stack.layers.len() + 1));
+            true
+        })
+    }
+
+    pub fn set_paint_layer_active(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("activate paint layer", |stack| stack.set_active(id))
+    }
+
+    pub fn toggle_paint_layer_visibility(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("toggle paint layer visibility", |stack| {
+            let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) else {
+                return false;
+            };
+            layer.visible = !layer.visible;
+            true
+        })
+    }
+
+    pub fn toggle_paint_layer_lock(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("toggle paint layer lock", |stack| {
+            let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) else {
+                return false;
+            };
+            layer.locked = !layer.locked;
+            true
+        })
+    }
+
+    pub fn remove_paint_layer(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("remove paint layer", |stack| {
+            // A última camada é a base do raster: removê-la deixaria o asset sem
+            // superfície de pintura.
+            if stack.layers.len() <= 1 {
+                return false;
+            }
+            stack.remove_layer(id)
+        })
+    }
+
+    /// Move a camada em `delta` posições na ordem de composição.
+    pub fn move_paint_layer(&mut self, id: &str, delta: i32) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("reorder paint layer", |stack| {
+            let Some(from) = stack.layers.iter().position(|layer| layer.id == id) else {
+                return false;
+            };
+            let to = from as i32 + delta;
+            if to < 0 || to as usize >= stack.layers.len() {
+                return false;
+            }
+            stack.move_layer(from, to as usize)
+        })
+    }
+
+    pub fn set_paint_layer_opacity(&mut self, id: &str, opacity: f32) -> bool {
+        if !opacity.is_finite() {
+            return false;
+        }
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let opacity = opacity.clamp(0.0, 1.0);
+        self.mutate_paint_stack("paint layer opacity", |stack| {
+            let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) else {
+                return false;
+            };
+            if (layer.opacity - opacity).abs() < f32::EPSILON {
+                return false;
+            }
+            layer.opacity = opacity;
+            true
+        })
+    }
+
+    fn paint_canvas_size(&self) -> (u32, u32) {
+        self.state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
+            .map(|canvas| (canvas.w, canvas.h))
+            .unwrap_or((256, 256))
     }
 
     /// Abre a sessão de loop cut a partir da aresta selecionada.
@@ -2337,6 +2496,45 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
         }
+        if let Some(stack) = self
+            .state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+        {
+            vm.paint_layers = stack
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(index, layer)| PaintLayerModel {
+                    id: layer.id.to_string(),
+                    name: layer.name.clone(),
+                    visible: layer.visible,
+                    locked: layer.locked,
+                    opacity: layer.opacity,
+                    active: index == stack.active_layer,
+                    is_group: layer.is_group,
+                    kind_label: match layer.kind {
+                        petunia_project::paint_layers::LayerKind::Raster(_) => "Raster",
+                        petunia_project::paint_layers::LayerKind::Decal(_) => "Decal",
+                        petunia_project::paint_layers::LayerKind::Effect(_) => "Effect",
+                    }
+                    .to_string(),
+                })
+                .collect();
+            let (width, height) = self
+                .state
+                .project
+                .assets
+                .get(self.state.project.active)
+                .and_then(|asset| asset.paint_stack.as_ref())
+                .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
+                .map(|canvas| (canvas.w, canvas.h))
+                .unwrap_or((0, 0));
+            vm.paint_layer_count =
+                format!("{} layer(s)  ·  {width} × {height}", stack.layers.len());
+        }
         if let Some(session) = &self.loop_cut {
             vm.loop_cut_active = true;
             vm.loop_cut_slide = session.slide;
@@ -2747,6 +2945,22 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_themes(theme_entries.as_slice().into());
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
+    window.set_paint_layer_count(vm.paint_layer_count.as_str().into());
+    let layer_entries: Vec<PaintLayerEntry> = vm
+        .paint_layers
+        .iter()
+        .map(|layer| PaintLayerEntry {
+            id: layer.id.as_str().into(),
+            name: layer.name.as_str().into(),
+            visible: layer.visible,
+            locked: layer.locked,
+            opacity: layer.opacity,
+            active: layer.active,
+            is_group: layer.is_group,
+            kind_label: layer.kind_label.as_str().into(),
+        })
+        .collect();
+    window.set_paint_layers(layer_entries.as_slice().into());
     window.set_loop_cut_active(vm.loop_cut_active);
     window.set_loop_cut_slide(vm.loop_cut_slide);
     window.set_loop_cut_cuts(vm.loop_cut_cuts);
@@ -3465,6 +3679,125 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 return;
             }
             bridge.menu_item_invoked(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    // Painel de camadas do PAINT: cada ação recompoe o raster canônico.
+    let paint_layer_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_added(move || {
+        if let Ok(mut bridge) = paint_layer_bridge.lock() {
+            bridge.add_paint_layer();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_group_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_group_added(move || {
+        if let Ok(mut bridge) = paint_group_bridge.lock() {
+            bridge.add_paint_group();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let paint_remove_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_removed(move |id| {
+        if let Ok(mut bridge) = paint_remove_bridge.lock() {
+            if !bridge.remove_paint_layer(id.as_str()) {
+                bridge.state.set_status("The last layer cannot be removed");
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_active_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_activated(move |id| {
+        if let Ok(mut bridge) = paint_active_bridge.lock() {
+            bridge.set_paint_layer_active(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let paint_vis_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_visibility_toggled(move |id| {
+        if let Ok(mut bridge) = paint_vis_bridge.lock() {
+            bridge.toggle_paint_layer_visibility(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_lock_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_lock_toggled(move |id| {
+        if let Ok(mut bridge) = paint_lock_bridge.lock() {
+            bridge.toggle_paint_layer_lock(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let paint_move_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_moved(move |id, delta| {
+        if let Ok(mut bridge) = paint_move_bridge.lock() {
+            bridge.move_paint_layer(id.as_str(), delta);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_opacity_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_opacity_set(move |id, opacity| {
+        if let Ok(mut bridge) = paint_opacity_bridge.lock() {
+            bridge.set_paint_layer_opacity(id.as_str(), opacity);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -5423,6 +5756,75 @@ mod tests {
             "veio: {}",
             bridge.state.ui.status
         );
+    }
+
+    #[test]
+    fn paint_layer_panel_adds_removes_reorders_and_composites() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+
+        assert!(bridge.add_paint_layer());
+        let layers = bridge.view_model().paint_layers;
+        assert_eq!(layers.len(), 2, "base + nova camada");
+        assert!(layers[1].active, "a camada nova vira ativa");
+        assert_eq!(layers[1].name, "Layer 2");
+        assert_eq!(layers[0].kind_label, "Raster");
+
+        let base_id = layers[0].id.clone();
+        let new_id = layers[1].id.clone();
+
+        assert!(bridge.toggle_paint_layer_visibility(&new_id));
+        assert!(!bridge.view_model().paint_layers[1].visible);
+        assert!(bridge.toggle_paint_layer_visibility(&new_id));
+
+        assert!(bridge.toggle_paint_layer_lock(&new_id));
+        assert!(bridge.view_model().paint_layers[1].locked);
+
+        assert!(bridge.set_paint_layer_opacity(&new_id, 0.25));
+        assert!((bridge.view_model().paint_layers[1].opacity - 0.25).abs() < 1.0e-6);
+
+        assert!(bridge.move_paint_layer(&new_id, -1));
+        let moved = bridge.view_model().paint_layers;
+        assert_eq!(moved[0].id, new_id, "desceu na ordem de composição");
+        assert_eq!(moved[1].id, base_id);
+
+        assert!(bridge.remove_paint_layer(&new_id));
+        assert_eq!(bridge.view_model().paint_layers.len(), 1);
+    }
+
+    #[test]
+    fn paint_layer_panel_refuses_to_remove_the_last_layer() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.add_paint_layer();
+        let layers = bridge.view_model().paint_layers;
+        assert!(bridge.remove_paint_layer(&layers[1].id));
+        let remaining = bridge.view_model().paint_layers;
+        assert_eq!(remaining.len(), 1);
+
+        assert!(
+            !bridge.remove_paint_layer(&remaining[0].id),
+            "a base do raster precisa sobreviver"
+        );
+        assert_eq!(bridge.view_model().paint_layers.len(), 1);
+    }
+
+    #[test]
+    fn paint_layer_mutations_reject_unknown_ids_and_non_finite_opacity() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        let unknown = uuid::Uuid::new_v4().to_string();
+        assert!(!bridge.toggle_paint_layer_visibility(&unknown));
+        assert!(!bridge.toggle_paint_layer_lock(&unknown));
+        assert!(!bridge.remove_paint_layer(&unknown));
+        assert!(!bridge.move_paint_layer(&unknown, 1));
+        assert!(!bridge.set_paint_layer_opacity(&unknown, 0.5));
+        assert!(!bridge.set_paint_layer_active(&unknown));
+        assert!(!bridge.set_paint_layer_opacity("not-a-uuid", 0.5));
+
+        let id = bridge.view_model().paint_layers[0].id.clone();
+        assert!(!bridge.set_paint_layer_opacity(&id, f32::NAN));
+        assert!(bridge.view_model().paint_layers[0].opacity.is_finite());
     }
 
     #[test]

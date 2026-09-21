@@ -17,6 +17,17 @@ export struct ThemeEntry {
     active: bool,
 }
 
+export struct PaintLayerEntry {
+    id: string,
+    name: string,
+    visible: bool,
+    locked: bool,
+    opacity: float,
+    active: bool,
+    is-group: bool,
+    kind-label: string,
+}
+
 export struct MenuEntry {
     id: string,
     label: string,
@@ -553,6 +564,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-preferences: "";
     in-out property <string> shell-info: "";
     in-out property <string> rename-value: "";
+    in-out property <[PaintLayerEntry]> paint-layers: [];
+    in-out property <string> paint-layer-count: "";
     in-out property <bool> loop-cut-active: false;
     in-out property <float> loop-cut-slide: 0.0;
     in-out property <int> loop-cut-cuts: 1;
@@ -597,6 +610,14 @@ export component PetuniaSlintShell inherits Window {
     callback tool-modal-cancel;
     callback loop-cut-scrubbed(float);
     callback loop-cut-count-committed(string);
+    callback paint-layer-added;
+    callback paint-layer-group-added;
+    callback paint-layer-removed(string);
+    callback paint-layer-activated(string);
+    callback paint-layer-visibility-toggled(string);
+    callback paint-layer-lock-toggled(string);
+    callback paint-layer-moved(string, int);
+    callback paint-layer-opacity-set(string, float);
     callback loop-cut-apply;
     callback loop-cut-cancel;
     callback inspector-width-changed(float);
@@ -1827,6 +1848,176 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "PAINT": VerticalLayout {
                             spacing: 10px;
+
+                            InspectorSection {
+                                title: "Layers";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    padding-top: 4px;
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 24px;
+
+                                        Text {
+                                            text: root.paint-layer-count;
+                                            color: DesignTokens.text-muted;
+                                            font-size: 10px;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 3px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            IconDisplay { icon: IconSet.Plus; size: 12px; stroke: DesignTokens.text-secondary; }
+                                            accessible-role: button;
+                                            accessible-label: "Add layer";
+                                            TouchArea { clicked => { root.paint-layer-added(); } }
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 3px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            IconDisplay { icon: IconSet.FolderOpen; size: 12px; stroke: DesignTokens.text-secondary; }
+                                            accessible-role: button;
+                                            accessible-label: "Add group";
+                                            TouchArea { clicked => { root.paint-layer-group-added(); } }
+                                        }
+                                    }
+
+                                    for layer in root.paint-layers: Rectangle {
+                                        height: 30px;
+                                        border-radius: 4px;
+                                        background: layer.active ? DesignTokens.surface-hover : transparent;
+                                        border-width: layer.active ? 1px : 0px;
+                                        border-color: DesignTokens.accent;
+
+                                        HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            spacing: 4px;
+                                            alignment: center;
+
+                                            TouchArea {
+                                                horizontal-stretch: 1;
+                                                clicked => { root.paint-layer-activated(layer.id); }
+
+                                                HorizontalLayout {
+                                                    spacing: 6px;
+                                                    alignment: center;
+
+                                                    IconDisplay {
+                                                        icon: layer.is-group ? IconSet.FolderOpen : IconSet.Square;
+                                                        size: 12px;
+                                                        stroke: layer.active ? DesignTokens.accent : DesignTokens.text-muted;
+                                                    }
+                                                    Text {
+                                                        text: layer.name;
+                                                        color: layer.active ? DesignTokens.text-primary : DesignTokens.text-secondary;
+                                                        font-size: 11px;
+                                                        font-weight: layer.active ? 600 : 400;
+                                                        vertical-alignment: center;
+                                                        horizontal-stretch: 1;
+                                                        overflow: elide;
+                                                    }
+                                                    Text {
+                                                        text: layer.kind-label;
+                                                        color: DesignTokens.text-muted;
+                                                        font-size: 9px;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay { icon: IconSet.ChevronUp; size: 11px; stroke: DesignTokens.text-muted; }
+                                                accessible-role: button;
+                                                accessible-label: "Move layer up";
+                                                TouchArea { clicked => { root.paint-layer-moved(layer.id, 1); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay { icon: IconSet.ChevronDown; size: 11px; stroke: DesignTokens.text-muted; }
+                                                accessible-role: button;
+                                                accessible-label: "Move layer down";
+                                                TouchArea { clicked => { root.paint-layer-moved(layer.id, -1); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay {
+                                                    icon: layer.visible ? IconSet.Eye : IconSet.EyeOff;
+                                                    size: 12px;
+                                                    stroke: layer.visible ? DesignTokens.text-secondary : DesignTokens.text-muted;
+                                                }
+                                                accessible-role: checkbox;
+                                                accessible-label: "Layer visible";
+                                                accessible-checked: layer.visible;
+                                                TouchArea { clicked => { root.paint-layer-visibility-toggled(layer.id); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay {
+                                                    icon: layer.locked ? IconSet.Lock : IconSet.LockOpen;
+                                                    size: 12px;
+                                                    stroke: layer.locked ? DesignTokens.accent : DesignTokens.text-muted;
+                                                }
+                                                accessible-role: checkbox;
+                                                accessible-label: "Layer locked";
+                                                accessible-checked: layer.locked;
+                                                TouchArea { clicked => { root.paint-layer-lock-toggled(layer.id); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay { icon: IconSet.Trash2; size: 11px; stroke: DesignTokens.danger; }
+                                                accessible-role: button;
+                                                accessible-label: "Remove layer";
+                                                TouchArea { clicked => { root.paint-layer-removed(layer.id); } }
+                                            }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 22px;
+
+                                        Text {
+                                            text: "Opacity";
+                                            color: DesignTokens.text-secondary;
+                                            font-size: 10px;
+                                            width: 52px;
+                                            vertical-alignment: center;
+                                        }
+                                        for layer in root.paint-layers: Rectangle {
+                                            visible: layer.active;
+                                            horizontal-stretch: 1;
+                                            height: 22px;
+
+                                            Slider {
+                                                minimum: 0.0;
+                                                maximum: 1.0;
+                                                value: layer.opacity;
+                                                changed(value) => { root.paint-layer-opacity-set(layer.id, value); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             InspectorSection {
                                 title: "Color Palette";
