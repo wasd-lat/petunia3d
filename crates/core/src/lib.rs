@@ -81,12 +81,12 @@ pub use snap::{
     snap_point_to_faces, snap_point_to_grid, snap_point_to_increment, snap_point_to_vertices,
 };
 pub use state::{
-    AnnotationItem, AnnotationStroke, AppState, DirtyReason, DockOrientation, DockSide,
-    DomainState, EditMode, EditorSession, GridSettings, Measurement, MeasurementItem,
-    PROPERTIES_DEFAULT_WIDTH, PROPERTIES_MAX_WIDTH, PROPERTIES_MIN_WIDTH, PivotPoint, ProfileState,
-    ProjectState, RefAxis, ReferenceImage, RenderResources, RenderStats,
-    SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT, SHELL_ASSET_LIBRARY_MAX_HEIGHT,
-    SHELL_ASSET_LIBRARY_MIN_HEIGHT, SceneFilter, SceneObjectState, Shading, TOOLBAR_DEFAULT_WIDTH,
+    ASSET_NAME_MAX_LEN, AnnotationItem, AnnotationStroke, AppState, AssetRenameError, DirtyReason,
+    DockOrientation, DockSide, DomainState, EditMode, EditorSession, GridSettings, Measurement,
+    MeasurementItem, PivotPoint, PROPERTIES_DEFAULT_WIDTH, PROPERTIES_MAX_WIDTH,
+    PROPERTIES_MIN_WIDTH, ProfileState, ProjectState, RefAxis, ReferenceImage, RenderResources,
+    RenderStats, SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT, SHELL_ASSET_LIBRARY_MAX_HEIGHT,
+    SHELL_ASSET_LIBRARY_MIN_HEIGHT, TOOLBAR_DEFAULT_WIDTH, SceneFilter, SceneObjectState, Shading,
     ToolState, TransformOrientation, UiDensity, UiState, WorkspaceUiMemory, workspace_index,
 };
 pub use viewport::{

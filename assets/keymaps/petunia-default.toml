@@ -12,6 +12,7 @@ help = "H"
 reset_camera = "Home"
 toggle_projection = "Numpad 5"
 cycle_mode = "Tab"
+rename = "F2"
 
 [paint]
 paint = "B"

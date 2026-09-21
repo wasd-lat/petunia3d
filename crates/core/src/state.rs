@@ -747,6 +747,22 @@ pub const SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT: f32 = 200.0;
 pub const SHELL_ASSET_LIBRARY_MIN_HEIGHT: f32 = 132.0;
 /// Teto da Asset Library: nunca cobre mais que isso da viewport.
 pub const SHELL_ASSET_LIBRARY_MAX_HEIGHT: f32 = 520.0;
+/// Limite canônico do nome de ativo (Outliner, inspetor e biblioteca).
+pub const ASSET_NAME_MAX_LEN: usize = 64;
+
+/// Recusa de renomeação de ativo.
+///
+/// A mensagem é o texto de status que o shell mostra: o domínio decide o
+/// motivo, a UI só apresenta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum AssetRenameError {
+    #[error("No active asset to rename")]
+    NoActiveAsset,
+    #[error("Asset name cannot be empty")]
+    EmptyName,
+    #[error("Asset name is limited to 64 characters")]
+    NameTooLong,
+}
 
 /// 4. ESTADO DE APRESENTAÇÃO E WIDGETS UI: campos visuais, abas, pesquisas e preferências.
 pub struct UiState {
@@ -1829,6 +1845,42 @@ impl AppState {
             return true;
         }
         false
+    }
+
+    /// Limite canônico do nome de ativo exibido no Outliner e nos painéis.
+    pub const fn asset_name_max_len() -> usize {
+        ASSET_NAME_MAX_LEN
+    }
+
+    /// Renomeia o ativo ativo (P3D-093).
+    ///
+    /// Retorna `Ok(true)` quando o nome mudou — uma única entrada de undo — e
+    /// `Ok(false)` quando o nome pedido já era o atual, para que confirmar sem
+    /// editar não empilhe histórico. Espaços nas pontas são removidos antes da
+    /// validação, então `"  Cube  "` vira `"Cube"` e `"   "` é recusado.
+    pub fn rename_active_asset(&mut self, name: &str) -> Result<bool, AssetRenameError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(AssetRenameError::EmptyName);
+        }
+        if trimmed.chars().count() > ASSET_NAME_MAX_LEN {
+            return Err(AssetRenameError::NameTooLong);
+        }
+        let index = self.project.active;
+        let Some(asset) = self.project.assets.get(index) else {
+            return Err(AssetRenameError::NoActiveAsset);
+        };
+        if asset.name == trimmed {
+            return Ok(false);
+        }
+        let previous = asset.name.clone();
+        self.checkpoint(&format!("rename: {trimmed}"));
+        if let Some(asset) = self.project.assets.get_mut(index) {
+            asset.name = trimmed.to_string();
+        }
+        self.set_status(format!("Renamed '{previous}' to '{trimmed}'"));
+        self.mark_dirty();
+        Ok(true)
     }
 
     /// Centraliza e enquadra a câmera 3D na geometria selecionada (ou em todo o modelo ativo).

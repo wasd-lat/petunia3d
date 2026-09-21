@@ -29,6 +29,7 @@ description: Atalhos do perfil canônico Petunia, gerados a partir do keymap (P3
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Shift+Z</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |

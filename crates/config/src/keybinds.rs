@@ -373,6 +373,7 @@ impl Keybinds {
             ("global.reset_camera", "Home"),
             ("global.toggle_projection", "O"),
             ("global.cycle_mode", "Tab"),
+            ("global.rename", "F2"),
             ("view.frame_all", "Home"),
             ("view.frame_selection", "F"),
             ("view.reset_camera", "Shift+Home"),

@@ -402,6 +402,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <length> gizmo-z-end-x: 0px;
     in-out property <length> gizmo-z-end-y: 0px;
     in-out property <bool> add-menu-open: false;
+    in-out property <bool> rename-active: false;
+    in-out property <string> rename-value: "";
     in-out property <bool> tool-modal-active: false;
     in-out property <string> tool-modal-title: "";
     in-out property <string> tool-modal-label: "";
@@ -443,6 +445,9 @@ export component PetuniaSlintShell inherits Window {
     callback tool-modal-cancel;
     callback inspector-width-changed(float);
     callback asset-library-height-changed(float);
+    callback rename-committed(string);
+    callback rename-edited(string);
+    callback rename-cancelled;
     callback open-project-requested;
     callback scene-select(string);
     callback scene-toggle-visibility(string);
@@ -1864,7 +1869,18 @@ export component PetuniaSlintShell inherits Window {
                                             stroke: item.selected ? DesignTokens.accent : DesignTokens.text-muted;
                                         }
 
-                                        Text {
+                                        if root.rename-active && item.selected: TextInput {
+                                            text: root.rename-value;
+                                            horizontal-stretch: 1;
+                                            font-size: 12px;
+                                            color: DesignTokens.text-primary;
+                                            single-line: true;
+                                            init => { self.focus(); }
+                                            edited => { root.rename-edited(self.text); }
+                                            accepted => { root.rename-committed(self.text); }
+                                        }
+
+                                        if !(root.rename-active && item.selected): Text {
                                             text: item.name;
                                             color: item.selected ? DesignTokens.text-primary : DesignTokens.text-secondary;
                                             font-size: 12px;

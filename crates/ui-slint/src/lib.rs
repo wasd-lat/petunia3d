@@ -271,6 +271,8 @@ pub struct ShellViewModel {
     pub add_menu_open: bool,
     pub inspector_width: f32,
     pub asset_library_height: f32,
+    pub rename_active: bool,
+    pub rename_value: String,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -379,6 +381,8 @@ impl ShellViewModel {
             add_menu_open: false,
             inspector_width: state.ui.right_width,
             asset_library_height: state.ui.shell_asset_library_height,
+            rename_active: false,
+            rename_value: String::new(),
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -494,6 +498,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     /// Ferramenta paramétrica modal ativa (Extrude, Inset, Bevel, Push/Pull).
     pub tool_modal: Option<ToolModalKind>,
     pub tool_modal_value: f32,
+    /// Renomeação inline do ativo selecionado (Outliner): `Some(nome em edição)`.
+    pub rename_draft: Option<String>,
 }
 
 impl<V: PetuniaViewport> SlintUiBridge<V> {
@@ -512,6 +518,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             add_menu_open: false,
             tool_modal: None,
             tool_modal_value: 0.0,
+            rename_draft: None,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -1006,6 +1013,44 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.ui.set_shell_asset_library_height(height)
     }
 
+    /// Abre a edição inline do nome do ativo selecionado.
+    pub fn begin_rename(&mut self) -> bool {
+        if self.rename_draft.is_some() {
+            return true;
+        }
+        let Some(asset) = self.state.project.active() else {
+            self.state
+                .set_status(petunia_core::AssetRenameError::NoActiveAsset.to_string());
+            return false;
+        };
+        self.rename_draft = Some(asset.name.clone());
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Confirma o nome em edição. O domínio decide validade e histórico.
+    pub fn commit_rename(&mut self, name: &str) -> bool {
+        if self.rename_draft.take().is_none() {
+            return false;
+        }
+        match self.state.rename_active_asset(name) {
+            Ok(_) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Abandona a edição sem tocar no documento.
+    pub fn cancel_rename(&mut self) -> bool {
+        if self.rename_draft.take().is_none() {
+            return false;
+        }
+        self.state.mark_dirty();
+        true
+    }
+
     /// Abre a sessão modal de uma ferramenta paramétrica com preview próprio.
     pub fn begin_tool_modal(&mut self, kind: ToolModalKind) -> bool {
         match self.state.begin_modal(kind.modal_kind()) {
@@ -1236,6 +1281,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.cancel_rename() {
+            return true;
+        }
         if self.cancel_paint_stroke() {
             return true;
         }
@@ -1427,6 +1475,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             "global.cycle_mode" => {
                 let _ = self.execute_core_command("select.cycle_domain");
             }
+            "global.rename" => {
+                self.begin_rename();
+            }
             "global.save_project" => self.apply(UiIntent::SaveProject),
             "global.help" => {
                 let _ = self.execute_core_command("help.documentation");
@@ -1562,6 +1613,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.asset_library_visible = self.asset_library_visible;
         vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
         vm.add_menu_open = self.add_menu_open;
+        if let Some(draft) = &self.rename_draft {
+            vm.rename_active = true;
+            vm.rename_value = draft.clone();
+        }
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
@@ -1851,6 +1906,8 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_gizmo_z_end_x(vm.gizmo.z_end_x);
     window.set_gizmo_z_end_y(vm.gizmo.z_end_y);
     window.set_add_menu_open(vm.add_menu_open);
+    window.set_rename_active(vm.rename_active);
+    window.set_rename_value(vm.rename_value.as_str().into());
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
     window.set_tool_modal_active(vm.tool_modal_active);
@@ -2468,6 +2525,39 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         if let Ok(mut bridge) = asset_height_bridge.lock()
             && bridge.set_asset_library_height(height)
         {
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let rename_edit_bridge = Arc::clone(&bridge);
+    window.on_rename_edited(move |text| {
+        if let Ok(mut bridge) = rename_edit_bridge.lock()
+            && let Some(draft) = bridge.rename_draft.as_mut()
+        {
+            *draft = text.to_string();
+        }
+    });
+
+    let rename_commit_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_rename_committed(move |text| {
+        if let Ok(mut bridge) = rename_commit_bridge.lock() {
+            bridge.commit_rename(text.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let rename_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_rename_cancelled(move || {
+        if let Ok(mut bridge) = rename_cancel_bridge.lock() {
+            bridge.cancel_rename();
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
@@ -3704,6 +3794,148 @@ mod tests {
 
         bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Model));
         assert_eq!(bridge.view_model().inspector_width, 420.0);
+    }
+
+    #[test]
+    fn rename_session_commits_one_undo_entry_and_trims_the_name() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let original = bridge.state.project.active().unwrap().name.clone();
+        assert_eq!(original, "Cube");
+
+        assert!(bridge.begin_rename());
+        assert!(bridge.view_model().rename_active);
+        assert_eq!(bridge.view_model().rename_value, original);
+
+        assert!(bridge.commit_rename("  Turret Base  "));
+        assert!(!bridge.view_model().rename_active);
+        assert_eq!(bridge.state.project.active().unwrap().name, "Turret Base");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.state.undo());
+        assert_eq!(bridge.state.project.active().unwrap().name, original);
+    }
+
+    #[test]
+    fn rename_rejects_empty_and_overlong_names_without_touching_history() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.begin_rename();
+        assert!(!bridge.commit_rename("   "));
+        assert_eq!(
+            bridge.state.ui.status,
+            petunia_core::AssetRenameError::EmptyName.to_string()
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert_eq!(bridge.state.project.active().unwrap().name, "Cube");
+
+        bridge.begin_rename();
+        let long = "x".repeat(petunia_core::ASSET_NAME_MAX_LEN + 1);
+        assert!(!bridge.commit_rename(&long));
+        assert_eq!(
+            bridge.state.ui.status,
+            petunia_core::AssetRenameError::NameTooLong.to_string()
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn confirming_an_unchanged_name_does_not_push_history() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.begin_rename();
+        assert!(bridge.commit_rename("Cube"));
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn escape_abandons_a_rename_draft_before_anything_else() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.begin_rename();
+        bridge.rename_draft = Some("Discarded".to_string());
+
+        assert!(bridge.handle_escape());
+        assert!(!bridge.view_model().rename_active);
+        assert_eq!(bridge.state.project.active().unwrap().name, "Cube");
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn f2_resolves_to_rename_in_the_canonical_keymap() {
+        let keybinds = petunia_config::keybinds::Keybinds::load_profile("petunia-default");
+        let f2 = input::key_code_from_slint("F2").expect("F2 precisa ser mapeável");
+        assert_eq!(
+            keybinds.find(f2, Default::default()),
+            Some("global.rename"),
+            "o keymap canônico precisa entregar global.rename para F2"
+        );
+
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.route_shortcut("F2", false, false, false));
+        assert!(bridge.view_model().rename_active);
+    }
+
+    /// O perfil de notebook usa F2 para seleção de aresta (não tem numpad), então
+    /// o arquivo precisa deslocar `rename` para Ctrl+F2 — senão as duas ações
+    /// disputariam a mesma tecla.
+    ///
+    /// O teste lê o TOML por caminho absoluto de propósito: `Keybinds::load_profile`
+    /// resolve `assets/keymaps/` relativo ao diretório de trabalho, e o CWD dos
+    /// testes é o diretório da crate.
+    #[test]
+    fn notebook_profile_moves_rename_off_the_edge_selection_key() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/keymaps/petunia-notebook.toml");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("falha ao ler {}: {e}", path.display()));
+        let mut section = String::new();
+        let mut bindings = std::collections::HashMap::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') && line.ends_with(']') {
+                section = line.trim_matches(['[', ']']).to_string();
+            } else if let Some((key, value)) = line.split_once('=')
+                && !key.trim_start().starts_with('#')
+            {
+                let value = value.trim().trim_matches('"').to_string();
+                bindings.insert(format!("{section}.{}", key.trim()), value);
+            }
+        }
+
+        assert_eq!(
+            bindings.get("model.select_edge").map(String::as_str),
+            Some("F2"),
+            "F2 continua sendo seleção de aresta neste perfil"
+        );
+        assert_eq!(
+            bindings.get("global.rename").map(String::as_str),
+            Some("Ctrl+F2"),
+            "o perfil precisa deslocar rename para não colidir com select_edge"
+        );
+
+        let canonical = petunia_config::keybinds::Keybinds::defaults();
+        let f2 = input::key_code_from_slint("F2").expect("F2 precisa ser mapeável");
+        assert_eq!(
+            canonical.find(f2, Default::default()),
+            Some("global.rename"),
+            "a lista canônica entrega F2 para rename"
+        );
+    }
+
+    /// Duas ações do mesmo namespace não podem dividir o mesmo atalho.
+    ///
+    /// Sobreposição entre namespaces diferentes é uma categoria à parte
+    /// (`ConflictKind::ContextOverlap`, onde `global` sombreia o resto) e é
+    /// detectada por `Keybinds::detect_conflicts`, não por este teste.
+    #[test]
+    fn canonical_keymap_has_no_duplicate_binding_inside_a_namespace() {
+        let canonical = petunia_config::keybinds::Keybinds::defaults();
+        let mut seen: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (action, shortcut) in canonical.all_bindings() {
+            let namespace = action.split('.').next().unwrap_or_default();
+            let key = format!("{namespace}:{shortcut}");
+            if let Some(previous) = seen.insert(key, action.clone()) {
+                panic!("{shortcut} está mapeado para {previous} e para {action} no mesmo namespace");
+            }
+        }
     }
 
     #[test]

@@ -10,7 +10,10 @@ use petunia_core::command::{
     SubdivideSelectionCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd,
     ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
 };
-use petunia_core::state::{AppState, EditMode};
+use petunia_core::state::{
+    ASSET_NAME_MAX_LEN, AppState, AssetRenameError, EditMode,
+};
+use petunia_core::ProjectService;
 
 #[test]
 fn test_add_primitive_commands_and_undo_redo() {
@@ -772,4 +775,47 @@ fn test_ui_state_defaults_wave_6() {
     let state = AppState::default();
     assert_eq!(state.ui.asset_thumbnail_size, 64.0);
     assert!(!state.ui.inspector_detached);
+}
+
+#[test]
+fn test_rename_active_asset_validates_and_commits_one_undo_entry() {
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    let original = state.project.active().unwrap().name.clone();
+    assert_eq!(original, "Cube");
+
+    // Nome vazio (ou só espaços) é recusado sem tocar no histórico.
+    assert_eq!(
+        state.rename_active_asset("   "),
+        Err(AssetRenameError::EmptyName)
+    );
+    assert_eq!(state.project.undo.depth(), (0, 0));
+
+    // Nome acima do limite canônico também.
+    let long = "x".repeat(ASSET_NAME_MAX_LEN + 1);
+    assert_eq!(
+        state.rename_active_asset(&long),
+        Err(AssetRenameError::NameTooLong)
+    );
+    assert_eq!(state.project.undo.depth(), (0, 0));
+
+    // Espaços nas pontas são removidos e o rename vira uma única entrada.
+    assert_eq!(state.rename_active_asset("  Turret Base  "), Ok(true));
+    assert_eq!(state.project.active().unwrap().name, "Turret Base");
+    assert_eq!(state.project.undo.depth(), (1, 0));
+
+    // Confirmar o mesmo nome é idempotente: sem entrada nova.
+    assert_eq!(state.rename_active_asset("Turret Base"), Ok(false));
+    assert_eq!(state.project.undo.depth(), (1, 0));
+
+    // O limite exato é aceito.
+    let exact = "y".repeat(ASSET_NAME_MAX_LEN);
+    assert_eq!(state.rename_active_asset(&exact), Ok(true));
+    assert_eq!(state.project.active().unwrap().name, exact);
+
+    // Undo volta para o nome anterior, não para o original.
+    assert!(state.undo());
+    assert_eq!(state.project.active().unwrap().name, "Turret Base");
+    assert!(state.undo());
+    assert_eq!(state.project.active().unwrap().name, original);
 }

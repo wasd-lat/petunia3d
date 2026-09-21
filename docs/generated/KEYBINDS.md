@@ -36,6 +36,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Shift+Z</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |
@@ -81,7 +82,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 
 ## Perfis Especializados em Disco
 
-### Perfil: `3ds-max` (45 atalhos)
+### Perfil: `3ds-max` (46 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -89,6 +90,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Y</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |
@@ -131,7 +133,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `blender` (45 atalhos)
+### Perfil: `blender` (46 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -139,6 +141,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Shift+Z</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |
@@ -181,7 +184,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `blender-notebook` (45 atalhos)
+### Perfil: `blender-notebook` (46 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -189,6 +192,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Shift+Z</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |
@@ -231,7 +235,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `cinema-4d` (45 atalhos)
+### Perfil: `cinema-4d` (46 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -239,6 +243,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Y</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |
@@ -281,7 +286,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `maya` (45 atalhos)
+### Perfil: `maya` (46 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -289,6 +294,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Y</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |
@@ -331,7 +337,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `petunia-notebook` (45 atalhos)
+### Perfil: `petunia-notebook` (46 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -339,6 +345,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>H</kbd> |
 | `global.redo` | <kbd>Ctrl+Shift+Z</kbd> |
+| `global.rename` | <kbd>Ctrl+F2</kbd> |
 | `global.reset_camera` | <kbd>Home</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |
@@ -381,7 +388,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `petunia-simple` (45 atalhos)
+### Perfil: `petunia-simple` (46 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -389,6 +396,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.cycle_mode` | <kbd>Tab</kbd> |
 | `global.help` | <kbd>F1</kbd> |
 | `global.redo` | <kbd>Ctrl+Y</kbd> |
+| `global.rename` | <kbd>F2</kbd> |
 | `global.reset_camera` | <kbd>Space</kbd> |
 | `global.save_project` | <kbd>Ctrl+S</kbd> |
 | `global.toggle_projection` | <kbd>O</kbd> |

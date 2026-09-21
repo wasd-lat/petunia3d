@@ -9,6 +9,9 @@ undo = "Ctrl+Z"
 redo = "Ctrl+Shift+Z"
 save_project = "Ctrl+S"
 reset_camera = "Home"
+# F2 é a tecla de seleção de aresta neste perfil (sem numpad), então renomear
+# usa Ctrl+F2 aqui para não disputar a mesma tecla.
+rename = "Ctrl+F2"
 
 [model]
 select_vertex = "F1"
