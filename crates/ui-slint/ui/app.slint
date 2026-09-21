@@ -527,6 +527,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> context-menu-title: "";
     in-out property <bool> context-menu-visible: true;
     in-out property <bool> context-menu-locked: false;
+    in-out property <string> boolean-operand-name: "";
+    in-out property <bool> boolean-ready: false;
     in-out property <bool> rename-active: false;
     in-out property <string> menu-open: "";
     property <length> menu-anchor-x: 0px;
@@ -620,6 +622,7 @@ export component PetuniaSlintShell inherits Window {
     callback loop-cut-count-committed(string);
     callback uv-seam-toggled;
     callback uv-seams-cleared;
+    callback boolean-operand-cleared;
     callback paint-fill-scope-set(string);
     callback paint-projection-set(string);
     callback paint-lock-set(string);
@@ -1560,6 +1563,70 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "MODEL": VerticalLayout {
                             spacing: 10px;
+
+                            if boolean-operand-name != "": InspectorSection {
+                                title: "Boolean";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: "Operand: \{root.boolean-operand-name}";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 11px;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.accent;
+                                            Text { text: "Fuse"; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Fuse with the operand";
+                                            TouchArea { clicked => { root.command-executed("model.fuse"); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Cut"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Cut the operand out of the active object";
+                                            TouchArea { clicked => { root.command-executed("model.cut"); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Intersect"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Intersect with the operand";
+                                            TouchArea { clicked => { root.command-executed("model.intersect"); } }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        height: 24px;
+                                        border-radius: 4px;
+                                        background: DesignTokens.surface-raised;
+                                        border-width: 1px;
+                                        border-color: DesignTokens.border;
+                                        Text { text: "Clear operand"; color: DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { clicked => { root.boolean-operand-cleared(); } }
+                                    }
+                                }
+                            }
 
                             if loop-cut-active: InspectorSection {
                                 title: "Loop Cut";
@@ -2806,6 +2873,11 @@ export component PetuniaSlintShell inherits Window {
                         label: "Frame Selection";
                         shortcut: "F";
                         clicked => { root.context-menu-action("frame"); }
+                    }
+                    ContextMenuItem {
+                        label: "Set as Boolean Operand";
+                        shortcut: "";
+                        clicked => { root.context-menu-action("boolean_operand"); }
                     }
 
                     Rectangle { height: 1px; background: DesignTokens.border; }

@@ -844,3 +844,83 @@ fn test_alias_does_not_duplicate_command_ids_in_the_catalog() {
     assert_eq!(canonical_meta.id, "edit.delete");
     assert_eq!(alias_meta.label, canonical_meta.label);
 }
+
+#[test]
+fn test_boolean_fuse_and_cut_between_active_and_operand() {
+    use petunia_core::BooleanOpCmd;
+    use petunia_mesh::boolean::BooleanOp;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    state.project.assets[0].mesh = petunia_mesh::Mesh::cube(2.0);
+    state.project.assets[0].name = "A".to_string();
+    let a_id = state.project.assets[0].id;
+
+    // Sem operando escolhido a operação precisa ser recusada.
+    assert!(
+        state
+            .dispatch(&BooleanOpCmd::new(BooleanOp::Union))
+            .is_err()
+    );
+    assert_eq!(state.project.assets.len(), 1);
+
+    // Cria B deslocado no eixo X para que a união tenha volume maior.
+    let mut b = petunia_mesh::Mesh::cube(2.0);
+    b.select_all();
+    b.translate_selected([1.0, 0.0, 0.0]);
+    b.deselect_all();
+    state.project.add("B", b);
+    let b_id = state.project.assets[1].id;
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+
+    let before = state.project.assets[0].mesh.verts.len();
+    assert!(state.dispatch(&BooleanOpCmd::new(BooleanOp::Union)).is_ok());
+    assert_eq!(state.project.assets.len(), 1, "B é consumido");
+    assert!(state.project.assets[0].mesh.verts.len() > before);
+    assert!(state.session.tools.boolean_operand.is_none());
+    assert_eq!(state.project.active, 0);
+    assert_eq!(state.project.assets[0].id, a_id);
+
+    // Undo restaura os dois objetos.
+    assert!(state.undo());
+    assert_eq!(state.project.assets.len(), 2);
+    assert!(state.project.assets.iter().any(|a| a.id == b_id));
+
+    // Cut: o operando precisa existir de novo.
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+    assert!(
+        state
+            .dispatch(&BooleanOpCmd::new(BooleanOp::Difference))
+            .is_ok()
+    );
+    assert_eq!(state.project.assets.len(), 1);
+    assert_eq!(state.project.assets[0].id, a_id);
+}
+
+#[test]
+fn test_boolean_refuses_the_active_asset_as_operand_and_missing_operand() {
+    use petunia_core::BooleanOpCmd;
+    use petunia_mesh::boolean::BooleanOp;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    let active = state.project.assets[0].id;
+
+    state.session.tools.boolean_operand = Some(active);
+    let err = state
+        .dispatch(&BooleanOpCmd::new(BooleanOp::Union))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("active"), "veio: {err}");
+    assert_eq!(state.project.assets.len(), 1);
+
+    state.session.tools.boolean_operand = Some(uuid::Uuid::new_v4());
+    assert!(
+        state
+            .dispatch(&BooleanOpCmd::new(BooleanOp::Difference))
+            .is_err()
+    );
+    assert_eq!(state.project.assets.len(), 1);
+}

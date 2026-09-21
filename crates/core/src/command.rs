@@ -671,6 +671,36 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "model.fuse",
+                "Fuse",
+                "Combine the active object with the boolean operand into one",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            BooleanOpCmd::new(petunia_mesh::boolean::BooleanOp::Union),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "model.cut",
+                "Cut",
+                "Subtract the boolean operand from the active object",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            BooleanOpCmd::new(petunia_mesh::boolean::BooleanOp::Difference),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "model.intersect",
+                "Intersect",
+                "Keep only the volume shared with the boolean operand",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            BooleanOpCmd::new(petunia_mesh::boolean::BooleanOp::Intersection),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.bevel",
                 "Bevel Edges",
                 "Bevel selected mesh edges",
@@ -2433,6 +2463,65 @@ impl Command for KnifeToolCmd {
         state.session.tools.active_tool = "cut".to_string();
         state.set_status("Knife: pick two edge points, Enter confirms");
         Ok(())
+    }
+}
+
+/// Operação booleana entre o ativo e o operando escolhido (Fuse/Cut/Intersect).
+#[derive(Debug, Clone, Copy)]
+pub struct BooleanOpCmd {
+    pub op: petunia_mesh::boolean::BooleanOp,
+}
+
+impl BooleanOpCmd {
+    pub const fn new(op: petunia_mesh::boolean::BooleanOp) -> Self {
+        Self { op }
+    }
+
+    const fn label_for(self) -> &'static str {
+        match self.op {
+            petunia_mesh::boolean::BooleanOp::Union => "fuse",
+            petunia_mesh::boolean::BooleanOp::Difference => "cut",
+            petunia_mesh::boolean::BooleanOp::Intersection => "intersect",
+        }
+    }
+}
+
+impl Command for BooleanOpCmd {
+    fn label(&self) -> &'static str {
+        self.label_for()
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.project.active_mesh().is_none() {
+            return Err("No active mesh");
+        }
+        let Some(operand) = state.session.tools.boolean_operand else {
+            return Err("Choose a boolean operand first");
+        };
+        if !state.project.assets.iter().any(|asset| asset.id == operand) {
+            return Err("The boolean operand no longer exists");
+        }
+        if state
+            .project
+            .active()
+            .is_some_and(|asset| asset.id == operand)
+        {
+            return Err("The boolean operand cannot be the active object");
+        }
+        Ok(())
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        match state.apply_boolean(self.op) {
+            Ok(verts) => {
+                state.set_status(format!(
+                    "{}: result with {verts} vertices",
+                    self.label_for()
+                ));
+                Ok(())
+            }
+            Err(error) => Err(CommandError::Execution(error.to_string())),
+        }
     }
 }
 

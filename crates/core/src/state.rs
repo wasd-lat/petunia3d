@@ -339,6 +339,9 @@ pub struct ToolState {
     pub pending_modal: Option<crate::modal::ModalKind>,
     pub pointer_session: Option<crate::modal::PointerSession>,
     pub cut_session: Option<crate::cutting_session::CutSession>,
+    /// Operando B das operações booleanas (Fuse/Cut/Intersect): o outro ativo
+    /// escolhido pelo usuário, distinto do ativo atual (A).
+    pub boolean_operand: Option<uuid::Uuid>,
     pub mesh_preview: Option<crate::mesh_preview::MeshPreview>,
     pub paint_color: [f32; 3],
     pub paint_radius: f32,
@@ -407,6 +410,7 @@ impl ToolState {
             pending_modal: None,
             pointer_session: None,
             cut_session: None,
+            boolean_operand: None,
             mesh_preview: None,
             paint_color: [1.0, 0.2, 0.2],
             paint_radius: 0.8,
@@ -1958,6 +1962,60 @@ impl AppState {
     /// Limite canônico do nome de ativo exibido no Outliner e nos painéis.
     pub const fn asset_name_max_len() -> usize {
         ASSET_NAME_MAX_LEN
+    }
+
+    /// Aplica uma operação booleana entre o ativo (A) e o operando (B).
+    ///
+    /// O resultado substitui a malha de A e B é removido da cena, que é o
+    /// comportamento canônico de Fuse/Cut sem o modificador Keep Parts.
+    pub fn apply_boolean(
+        &mut self,
+        op: petunia_mesh::boolean::BooleanOp,
+    ) -> Result<usize, petunia_mesh::boolean::BooleanError> {
+        use petunia_mesh::boolean::{BooleanError, boolean_meshes};
+        let operand_id = self
+            .session
+            .tools
+            .boolean_operand
+            .ok_or(BooleanError::InvalidInput("no operand selected"))?;
+        let active_index = self.project.active;
+        let operand_index = self
+            .project
+            .assets
+            .iter()
+            .position(|asset| asset.id == operand_id)
+            .ok_or(BooleanError::InvalidInput("operand no longer exists"))?;
+        if operand_index == active_index {
+            return Err(BooleanError::InvalidInput("operand is the active asset"));
+        }
+        // O provedor booleano exige triângulos fechados; a topologia de quads
+        // do Petunia é preservada em tudo o mais, então triangulamos só as cópias
+        // que entram no kernel.
+        let mut a = self.project.assets[active_index].mesh.clone();
+        let mut b = self.project.assets[operand_index].mesh.clone();
+        a.triangulate();
+        b.triangulate();
+        let result = boolean_meshes(&a, &b, op)?;
+        let verts = result.verts.len();
+
+        self.checkpoint(match op {
+            petunia_mesh::boolean::BooleanOp::Union => "fuse",
+            petunia_mesh::boolean::BooleanOp::Difference => "cut",
+            petunia_mesh::boolean::BooleanOp::Intersection => "intersect",
+        });
+        if let Some(asset) = self.project.assets.get_mut(active_index) {
+            asset.mesh = result;
+        }
+        // B é consumido: remover antes do ativo desloca o índice.
+        self.project.assets.remove(operand_index);
+        if operand_index < active_index {
+            self.project.active = active_index - 1;
+        }
+        self.session.tools.boolean_operand = None;
+        self.sync_selection();
+        self.emit_mesh_changed();
+        self.mark_dirty();
+        Ok(verts)
     }
 
     /// Renomeia o ativo ativo (P3D-093).

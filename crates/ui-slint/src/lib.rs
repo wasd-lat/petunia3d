@@ -279,6 +279,8 @@ pub struct ShellViewModel {
     pub context_menu_title: String,
     pub context_menu_visible: bool,
     pub context_menu_locked: bool,
+    pub boolean_operand_name: String,
+    pub boolean_ready: bool,
     pub menu_open: String,
     pub menu_file_label: String,
     pub menu_edit_label: String,
@@ -438,6 +440,8 @@ impl ShellViewModel {
             context_menu_title: String::new(),
             context_menu_visible: true,
             context_menu_locked: false,
+            boolean_operand_name: String::new(),
+            boolean_ready: false,
             menu_open: String::new(),
             menu_file_label: String::new(),
             menu_edit_label: String::new(),
@@ -1969,6 +1973,39 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Define o operando B das operações booleanas.
+    pub fn set_boolean_operand(&mut self, id: &str) -> bool {
+        let Ok(asset) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        if !self.state.project.assets.iter().any(|a| a.id == asset) {
+            return false;
+        }
+        self.state.session.tools.boolean_operand = Some(asset);
+        self.state
+            .set_status("Boolean operand set: Fuse, Cut or Intersect now applies");
+        true
+    }
+
+    pub fn clear_boolean_operand(&mut self) -> bool {
+        if self.state.session.tools.boolean_operand.take().is_none() {
+            return false;
+        }
+        self.state.set_status("Boolean operand cleared");
+        true
+    }
+
+    /// Executa Fuse/Cut/Intersect pelo id canônico do comando.
+    pub fn boolean_op(&mut self, id: &str) -> bool {
+        match self.execute_core_command(id) {
+            Ok(()) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
     /// Abre o menu de contexto do Outliner sobre a linha de `id`.
     ///
     /// O alvo é selecionado antes de abrir: as ações do menu operam sobre ele e
@@ -2026,6 +2063,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 let _ = self.state.dispatch_command("view.frame_selection");
                 true
             }
+            "boolean_operand" => self.set_boolean_operand(&id),
             "delete" => {
                 self.select_asset_by_id(menu.asset);
                 self.apply(UiIntent::DeleteActiveAsset);
@@ -2711,6 +2749,21 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 vm.context_menu_locked = asset.locked;
             }
         }
+        if let Some(operand) = self.state.session.tools.boolean_operand {
+            if let Some(asset) = self
+                .state
+                .project
+                .assets
+                .iter()
+                .find(|asset| asset.id == operand)
+            {
+                vm.boolean_operand_name = asset.name.clone();
+            } else {
+                vm.boolean_operand_name = "missing".to_string();
+            }
+        }
+        vm.boolean_ready = self.state.session.tools.boolean_operand.is_some()
+            && self.state.project.active_mesh().is_some();
         if let Some(kind) = self.menu_open {
             vm.menu_open = kind.id().to_string();
         }
@@ -3191,6 +3244,8 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_context_menu_title(vm.context_menu_title.as_str().into());
     window.set_context_menu_visible(vm.context_menu_visible);
     window.set_context_menu_locked(vm.context_menu_locked);
+    window.set_boolean_operand_name(vm.boolean_operand_name.as_str().into());
+    window.set_boolean_ready(vm.boolean_ready);
     window.set_menu_open(vm.menu_open.as_str().into());
     window.set_menu_file_label(vm.menu_file_label.as_str().into());
     window.set_menu_edit_label(vm.menu_edit_label.as_str().into());
@@ -3995,6 +4050,18 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 if let Some(frame) = new_frame {
                     window.set_viewport_image(frame);
                 }
+            }
+        }
+    });
+
+    let operand_clear_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_boolean_operand_cleared(move || {
+        if let Ok(mut bridge) = operand_clear_bridge.lock() {
+            bridge.clear_boolean_operand();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
             }
         }
     });
@@ -6523,6 +6590,66 @@ mod tests {
             "veio: {}",
             bridge.state.ui.status
         );
+    }
+
+    #[test]
+    fn boolean_operand_flows_from_the_outliner_to_a_real_fuse() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        assert_eq!(bridge.state.project.assets.len(), 2);
+        let sphere_id = bridge.state.project.assets[1].id;
+
+        // Desloca a esfera para fora do cubo: a união de um cubo com uma esfera
+        // concêntrica seria o próprio cubo e o teste não provaria nada.
+        {
+            let mesh = &mut bridge.state.project.assets[1].mesh;
+            mesh.select_all();
+            mesh.translate_selected([1.6, 0.0, 0.0]);
+            mesh.deselect_all();
+        }
+
+        // Escolhe a esfera como operando e volta o ativo para o cubo.
+        assert!(bridge.set_boolean_operand(&sphere_id.to_string()));
+        assert!(bridge.view_model().boolean_ready);
+        bridge.state.project.active = 0;
+        let before = bridge.state.project.assets[0].mesh.verts.len();
+
+        assert!(bridge.boolean_op("model.fuse"));
+        assert_eq!(
+            bridge.state.project.assets.len(),
+            1,
+            "o operando é consumido"
+        );
+        assert!(bridge.state.project.assets[0].mesh.verts.len() > before);
+        assert!(bridge.state.session.tools.boolean_operand.is_none());
+        assert_eq!(bridge.view_model().boolean_operand_name, "");
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn boolean_op_without_an_operand_is_refused_and_says_why() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.view_model().boolean_ready);
+        assert!(!bridge.boolean_op("model.fuse"));
+        assert_eq!(bridge.state.project.assets.len(), 1);
+        assert!(
+            bridge.state.ui.status.contains("operand"),
+            "veio: {}",
+            bridge.state.ui.status
+        );
+    }
+
+    #[test]
+    fn context_menu_marks_the_clicked_asset_as_the_boolean_operand() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Cone));
+        let cone = bridge.state.project.assets[1].id;
+        bridge.open_context_menu(&cone.to_string(), 10.0, 10.0);
+        assert!(bridge.context_menu_action("boolean_operand"));
+        assert_eq!(bridge.state.session.tools.boolean_operand, Some(cone));
+        assert_eq!(bridge.view_model().boolean_operand_name, "Cone");
+        assert!(bridge.clear_boolean_operand());
+        assert_eq!(bridge.view_model().boolean_operand_name, "");
     }
 
     #[test]
