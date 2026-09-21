@@ -330,6 +330,7 @@ pub struct ShellViewModel {
     pub loop_cut_active: bool,
     pub loop_cut_slide: f32,
     pub loop_cut_cuts: i32,
+    pub tool_activation: String,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -497,6 +498,7 @@ impl ShellViewModel {
             loop_cut_active: false,
             loop_cut_slide: 0.0,
             loop_cut_cuts: 1,
+            tool_activation: "drag".to_string(),
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -1521,6 +1523,30 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         self.state.finish_paint_stroke(true);
         true
+    }
+
+    /// Define o modo de confirmação das ferramentas paramétricas.
+    pub fn set_tool_activation(&mut self, id: &str) -> bool {
+        let Some(mode) = petunia_core::ToolActivation::from_id(id) else {
+            return false;
+        };
+        if self.state.session.tools.tool_activation == mode {
+            return false;
+        }
+        self.state.session.tools.tool_activation = mode;
+        self.state.set_status(match mode {
+            petunia_core::ToolActivation::Drag => "Tools confirm on pointer release (click + drag)",
+            petunia_core::ToolActivation::Instant => {
+                "Tools follow the pointer; click or Enter confirms, Esc cancels"
+            }
+        });
+        self.state.mark_dirty();
+        true
+    }
+
+    /// O modo Instant está ativo?
+    pub fn is_instant_tool_mode(&self) -> bool {
+        self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
     }
 
     /// Redimensiona o dock de contexto pelo divisor vertical.
@@ -2614,6 +2640,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
+        // No modo Instant um clique confirma a sessão paramétrica em vez de
+        // trocar a seleção — é o equivalente ao Enter com o mouse.
+        if self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
+            && self.tool_modal.is_some()
+        {
+            self.commit_tool_modal();
+            return;
+        }
         // A faca consome o clique antes da seleção: com uma sessão de corte
         // aberta, clicar é escolher ponto de aresta, não selecionar.
         if self.state.session.tools.cut_session.is_some()
@@ -3318,6 +3352,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.loop_cut_slide = session.slide;
             vm.loop_cut_cuts = session.cuts as i32;
         }
+        vm.tool_activation = self.state.session.tools.tool_activation.id().to_string();
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
@@ -4023,6 +4058,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_loop_cut_active(vm.loop_cut_active);
     window.set_loop_cut_slide(vm.loop_cut_slide);
     window.set_loop_cut_cuts(vm.loop_cut_cuts);
+    window.set_tool_activation(vm.tool_activation.as_str().into());
     window.set_tool_modal_active(vm.tool_modal_active);
     window.set_tool_modal_title(vm.tool_modal_title.as_str().into());
     window.set_tool_modal_label(vm.tool_modal_label.as_str().into());
@@ -4588,6 +4624,37 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_add_menu_changed(move |open| {
         if let Ok(mut bridge) = add_menu_bridge.lock() {
             bridge.add_menu_open = open;
+        }
+    });
+
+    let tool_hover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_hovered(move |delta| {
+        if let Ok(mut bridge) = tool_hover_bridge.lock() {
+            if bridge.is_instant_tool_mode() && bridge.tool_modal.is_some() {
+                let fine = false;
+                bridge.scrub_tool_modal(delta, fine);
+                let vm = bridge.view_model();
+                let new_frame = bridge.render_viewport();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    if let Some(frame) = new_frame {
+                        window.set_viewport_image(frame);
+                    }
+                }
+            }
+        }
+    });
+
+    let activation_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_activation_set(move |id| {
+        if let Ok(mut bridge) = activation_bridge.lock() {
+            bridge.set_tool_activation(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
         }
     });
 
@@ -8020,6 +8087,63 @@ mod tests {
         assert_eq!(overlay.outline_commands.matches('M').count(), 12);
         assert!(overlay.unselected_outline_commands.is_empty());
         assert!(overlay.unselected_point_commands.is_empty());
+    }
+
+    #[test]
+    fn instant_mode_confirms_a_tool_on_click_instead_of_selecting() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        assert!(bridge.set_tool_activation("instant"));
+        assert_eq!(bridge.view_model().tool_activation, "instant");
+        assert!(!bridge.set_tool_activation("instant"), "sem mudança real");
+        assert!(!bridge.set_tool_activation("bogus"));
+
+        bridge.execute_core_command("model.extrude").unwrap();
+        assert!(bridge.tool_modal.is_some());
+        let value_before = bridge.tool_modal_value;
+        assert!(bridge.scrub_tool_modal(-30.0, false));
+        assert!(bridge.tool_modal_value > value_before);
+
+        bridge.select_viewport(0.6, 0.6, false);
+        assert!(bridge.tool_modal.is_none(), "o clique confirma a sessão");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+    }
+
+    #[test]
+    fn drag_mode_keeps_selecting_on_click_with_a_tool_open() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().tool_activation, "drag");
+
+        bridge.execute_core_command("model.extrude").unwrap();
+        assert!(bridge.tool_modal.is_some());
+        // No modo Drag um clique na viewport seleciona normalmente; a sessão
+        // continua aberta até o arrasto ou o Apply.
+        bridge.select_viewport(0.5, 0.5, false);
+        assert!(bridge.tool_modal.is_some());
+    }
+
+    #[test]
+    fn escape_abandons_an_instant_tool_without_committing() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.set_tool_activation("instant");
+
+        bridge.execute_core_command("model.inset").unwrap();
+        bridge.scrub_tool_modal(-20.0, false);
+        assert!(bridge.handle_escape());
+        assert!(bridge.tool_modal.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
     }
 
     #[test]

@@ -332,6 +332,36 @@ impl ProjectState {
 }
 
 /// 2. FERRAMENTAS E SESSÕES INTERATIVAS: contexto operacional de modelagem.
+/// Como uma ferramenta paramétrica recebe o gesto de confirmação.
+///
+/// - `Drag`: a sessão abre no atalho e o valor vem do arrasto do ponteiro na
+///   viewport; soltar confirma.
+/// - `Instant`: a sessão abre no atalho e segue o movimento do mouse sem
+///   botão pressionado (estilo Blender); clicar ou Enter confirma, Esc cancela.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ToolActivation {
+    #[default]
+    Drag,
+    Instant,
+}
+
+impl ToolActivation {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Drag => "drag",
+            Self::Instant => "instant",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "drag" => Some(Self::Drag),
+            "instant" => Some(Self::Instant),
+            _ => None,
+        }
+    }
+}
+
 pub struct ToolState {
     pub active_tool: String,
     pub gizmo_mode: crate::ModalKind,
@@ -396,6 +426,9 @@ pub struct ToolState {
     pub selected_measurement: Option<uuid::Uuid>,
     pub active_measurement: Option<MeasurementItem>,
     pub active_annotation: Option<AnnotationStroke>,
+
+    /// Modo de confirmação das ferramentas paramétricas.
+    pub tool_activation: ToolActivation,
 }
 
 impl Default for ToolState {
@@ -432,6 +465,7 @@ impl ToolState {
             brush_projection: crate::brush::BrushProjectionMode::Surface,
             brush_lock: crate::brush::BrushLock::None,
             paint_lock_face: None,
+            tool_activation: ToolActivation::Drag,
             fill_scope: crate::brush::FillScope::ConnectedPixels,
             paint_channel: petunia_project::TextureChannel::Albedo,
             paint_pixel_grid: true,

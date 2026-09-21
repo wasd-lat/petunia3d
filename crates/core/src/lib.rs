@@ -87,7 +87,8 @@ pub use state::{
     PivotPoint, ProfileState, ProjectState, RefAxis, ReferenceImage, RenderResources, RenderStats,
     SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT, SHELL_ASSET_LIBRARY_MAX_HEIGHT,
     SHELL_ASSET_LIBRARY_MIN_HEIGHT, SceneFilter, SceneObjectState, Shading, TOOLBAR_DEFAULT_WIDTH,
-    ToolState, TransformOrientation, UiDensity, UiState, WorkspaceUiMemory, workspace_index,
+    ToolActivation, ToolState, TransformOrientation, UiDensity, UiState, WorkspaceUiMemory,
+    workspace_index,
 };
 pub use viewport::{
     LogicalRect, PhysicalViewport, unproject_cursor_or_vertex_snap,
