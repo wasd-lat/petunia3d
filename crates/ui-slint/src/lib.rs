@@ -318,6 +318,8 @@ pub struct ShellViewModel {
     pub uv_editor: UvEditorModel,
     pub paint_layers: Vec<PaintLayerModel>,
     pub paint_layer_count: String,
+    pub paint_effect_kind: String,
+    pub paint_effect_params: Vec<PaintEffectParam>,
     pub paint_canvas_size: String,
     pub paint_canvas_revision: i32,
     pub paint_fill_scope: String,
@@ -481,6 +483,8 @@ impl ShellViewModel {
             uv_editor: UvEditorModel::default(),
             paint_layers: Vec::new(),
             paint_layer_count: String::new(),
+            paint_effect_kind: String::new(),
+            paint_effect_params: Vec::new(),
             paint_canvas_size: String::new(),
             paint_canvas_revision: 0,
             paint_fill_scope: "ConnectedPixels".to_string(),
@@ -705,6 +709,16 @@ pub struct UvEditorModel {
     pub uv_selected_count: usize,
     /// `true` quando a malha tem mais faces do que o editor desenha.
     pub truncated: bool,
+}
+
+/// Parâmetro numérico de um efeito de camada, já com rótulo e faixa.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaintEffectParam {
+    pub key: String,
+    pub label: String,
+    pub value: f32,
+    pub min: f32,
+    pub max: f32,
 }
 
 /// Camada de pintura publicada para o painel de camadas do shell.
@@ -1116,6 +1130,77 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             &self.state.session.camera,
             render_state,
         )
+    }
+
+    /// Cria uma camada de efeito com parâmetros padrão para o tipo pedido.
+    pub fn add_paint_effect_layer(&mut self, kind: &str) -> bool {
+        use petunia_project::paint_layers::{PaintEffect, PaintLayer};
+        let effect = match kind {
+            "Pixelate" => PaintEffect::Pixelate { cell_size: 4 },
+            "Posterize" => PaintEffect::Posterize { levels: 6 },
+            "Invert" => PaintEffect::Invert,
+            "Grain" => PaintEffect::Grain {
+                intensity: 0.15,
+                seed: 1,
+            },
+            "BrightnessContrast" => PaintEffect::BrightnessContrast {
+                brightness: 0.0,
+                contrast: 0.0,
+            },
+            "HueSaturation" => PaintEffect::HueSaturation {
+                hue_shift_deg: 0.0,
+                saturation: 0.0,
+            },
+            _ => return false,
+        };
+        self.mutate_paint_stack("add effect layer", |stack| {
+            stack.add_layer(PaintLayer::new_effect(kind.to_string(), effect));
+            true
+        })
+    }
+
+    /// Ajusta um parâmetro do efeito da camada ativa.
+    pub fn set_paint_effect_param(&mut self, key: &str, value: f32) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        self.mutate_paint_stack("effect parameter", |stack| {
+            let Some(layer) = stack.active_mut() else {
+                return false;
+            };
+            let petunia_project::paint_layers::LayerKind::Effect(effect) = &mut layer.kind else {
+                return false;
+            };
+            use petunia_project::paint_layers::PaintEffect;
+            match (effect, key) {
+                (PaintEffect::Pixelate { cell_size }, "cell_size") => {
+                    *cell_size = (value.round() as u32).clamp(1, 64);
+                }
+                (PaintEffect::Posterize { levels }, "levels") => {
+                    *levels = (value.round() as u8).clamp(2, 32);
+                }
+                (PaintEffect::Grain { intensity, .. }, "intensity") => {
+                    *intensity = value.clamp(0.0, 1.0);
+                }
+                (PaintEffect::Grain { seed, .. }, "seed") => {
+                    *seed = value.max(0.0).round() as u32;
+                }
+                (PaintEffect::BrightnessContrast { brightness, .. }, "brightness") => {
+                    *brightness = value.clamp(-1.0, 1.0);
+                }
+                (PaintEffect::BrightnessContrast { contrast, .. }, "contrast") => {
+                    *contrast = value.clamp(-1.0, 1.0);
+                }
+                (PaintEffect::HueSaturation { hue_shift_deg, .. }, "hue_shift_deg") => {
+                    *hue_shift_deg = value.clamp(-180.0, 180.0);
+                }
+                (PaintEffect::HueSaturation { saturation, .. }, "saturation") => {
+                    *saturation = value.clamp(-1.0, 1.0);
+                }
+                _ => return false,
+            }
+            true
+        })
     }
 
     /// Dimensões do canvas composto do ativo, quando existe.
@@ -2967,6 +3052,31 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
         }
+        if let Some(effect) = self
+            .state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active())
+            .and_then(|layer| match &layer.kind {
+                petunia_project::paint_layers::LayerKind::Effect(effect) => Some(*effect),
+                _ => None,
+            })
+        {
+            use petunia_project::paint_layers::PaintEffect;
+            vm.paint_effect_kind = match &effect {
+                PaintEffect::Pixelate { .. } => "Pixelate",
+                PaintEffect::Posterize { .. } => "Posterize",
+                PaintEffect::Invert => "Invert",
+                PaintEffect::Grain { .. } => "Grain",
+                PaintEffect::Levels { .. } => "Levels",
+                PaintEffect::BrightnessContrast { .. } => "BrightnessContrast",
+                PaintEffect::HueSaturation { .. } => "HueSaturation",
+            }
+            .to_string();
+            vm.paint_effect_params = effect_params(&effect);
+        }
         if let Some((width, height)) = self.paint_canvas_dimensions() {
             vm.paint_canvas_size = format!("{width} × {height}");
             vm.paint_canvas_revision = self.state.project.assets[self.state.project.active]
@@ -3304,6 +3414,52 @@ pub fn run() -> Result<(), slint::PlatformError> {
     result
 }
 
+/// Parâmetros numéricos expostos de um efeito de camada.
+fn effect_params(effect: &petunia_project::paint_layers::PaintEffect) -> Vec<PaintEffectParam> {
+    use petunia_project::paint_layers::PaintEffect;
+    let param = |key: &str, label: &str, value: f32, min: f32, max: f32| PaintEffectParam {
+        key: key.to_string(),
+        label: label.to_string(),
+        value,
+        min,
+        max,
+    };
+    match effect {
+        PaintEffect::Pixelate { cell_size } => {
+            vec![param(
+                "cell_size",
+                "Cell size",
+                *cell_size as f32,
+                1.0,
+                64.0,
+            )]
+        }
+        PaintEffect::Posterize { levels } => {
+            vec![param("levels", "Levels", *levels as f32, 2.0, 32.0)]
+        }
+        PaintEffect::Invert => Vec::new(),
+        PaintEffect::Grain { intensity, seed } => vec![
+            param("intensity", "Intensity", *intensity, 0.0, 1.0),
+            param("seed", "Seed", *seed as f32, 0.0, 9_999.0),
+        ],
+        PaintEffect::Levels { .. } => Vec::new(),
+        PaintEffect::BrightnessContrast {
+            brightness,
+            contrast,
+        } => vec![
+            param("brightness", "Brightness", *brightness, -1.0, 1.0),
+            param("contrast", "Contrast", *contrast, -1.0, 1.0),
+        ],
+        PaintEffect::HueSaturation {
+            hue_shift_deg,
+            saturation,
+        } => vec![
+            param("hue_shift_deg", "Hue shift", *hue_shift_deg, -180.0, 180.0),
+            param("saturation", "Saturation", *saturation, -1.0, 1.0),
+        ],
+    }
+}
+
 fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_active_workspace(vm.workspace_label().into());
     window.set_saved(vm.saved);
@@ -3445,6 +3601,19 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_uv_selected_count(vm.uv_editor.uv_selected_count as i32);
     window.set_uv_layout_truncated(vm.uv_editor.truncated);
     window.set_paint_layer_count(vm.paint_layer_count.as_str().into());
+    window.set_paint_effect_kind(vm.paint_effect_kind.as_str().into());
+    let effect_params: Vec<PaintEffectParamEntry> = vm
+        .paint_effect_params
+        .iter()
+        .map(|param| PaintEffectParamEntry {
+            key: param.key.as_str().into(),
+            label: param.label.as_str().into(),
+            value: param.value,
+            minimum: param.min,
+            maximum: param.max,
+        })
+        .collect();
+    window.set_paint_effect_params(effect_params.as_slice().into());
     window.set_paint_canvas_size(vm.paint_canvas_size.as_str().into());
     window.set_paint_canvas_revision(vm.paint_canvas_revision);
     window.set_paint_fill_scope(vm.paint_fill_scope.as_str().into());
@@ -4201,6 +4370,44 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 if let Some(frame) = new_frame {
                     window.set_viewport_image(frame);
                 }
+            }
+        }
+    });
+
+    let effect_add_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_effect_layer_added(move |kind| {
+        if let Ok(mut bridge) = effect_add_bridge.lock() {
+            if !bridge.add_paint_effect_layer(kind.as_str()) {
+                bridge
+                    .state
+                    .set_status(format!("Unknown effect layer: {kind}"));
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+                bridge.publish_canvas_image(&window);
+            }
+        }
+    });
+
+    let effect_param_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_effect_param_set(move |key, value| {
+        if let Ok(mut bridge) = effect_param_bridge.lock() {
+            bridge.set_paint_effect_param(key.as_str(), value);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+                bridge.publish_canvas_image(&window);
             }
         }
     });
@@ -6980,6 +7187,90 @@ mod tests {
         assert!(!bridge.uv_rotate_selected(0.0), "rotação nula é recusada");
         assert!(!bridge.uv_scale_selected(f32::NAN));
         assert_eq!(bridge.state.project.undo.depth(), (3, 0));
+    }
+
+    #[test]
+    fn effect_layers_change_the_composited_raster() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        // Pinta a camada base de um tom conhecido antes do efeito.
+        {
+            let active = bridge.state.project.active;
+            let canvas = bridge
+                .state
+                .project
+                .assets
+                .get_mut(active)
+                .and_then(|asset| asset.paint_stack.as_mut())
+                .and_then(|stack| stack.active_mut())
+                .and_then(|layer| layer.canvas_mut())
+                .unwrap();
+            canvas.fill([200, 40, 90, 255]);
+        }
+        petunia_module_paint::PaintModule::composite_active(&mut bridge.state);
+        let before = bridge.state.project.assets[0].texture.clone().unwrap();
+        let sample = before.get(8, 8).unwrap();
+
+        assert!(bridge.add_paint_effect_layer("Invert"));
+        let layers = bridge.view_model().paint_layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[1].kind_label, "Effect");
+        assert_eq!(bridge.view_model().paint_effect_kind, "Invert");
+
+        let after = bridge.state.project.assets[0].texture.clone().unwrap();
+        let inverted = after.get(8, 8).unwrap();
+        assert_ne!(sample, inverted, "Invert precisa alterar o pixel");
+        assert_eq!(inverted[0], 255 - sample[0]);
+        assert_eq!(inverted[1], 255 - sample[1]);
+        assert_eq!(inverted[2], 255 - sample[2]);
+        assert_eq!(inverted[3], sample[3], "o alfa é preservado");
+    }
+
+    #[test]
+    fn effect_parameters_are_exposed_and_applied() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        assert!(bridge.add_paint_effect_layer("Pixelate"));
+        let params = bridge.view_model().paint_effect_params;
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].key, "cell_size");
+        assert_eq!(params[0].value, 4.0);
+        assert!(params[0].min < params[0].max);
+
+        assert!(bridge.set_paint_effect_param("cell_size", 12.0));
+        assert_eq!(bridge.view_model().paint_effect_params[0].value, 12.0);
+
+        // Fora da faixa é fixado no limite, nunca aceito cru.
+        assert!(bridge.set_paint_effect_param("cell_size", 9_999.0));
+        assert_eq!(bridge.view_model().paint_effect_params[0].value, 64.0);
+        assert!(bridge.set_paint_effect_param("cell_size", 0.0));
+        assert_eq!(bridge.view_model().paint_effect_params[0].value, 1.0);
+
+        assert!(!bridge.set_paint_effect_param("cell_size", f32::NAN));
+        assert!(!bridge.set_paint_effect_param("unknown_param", 1.0));
+        assert!(!bridge.add_paint_effect_layer("NotAnEffect"));
+    }
+
+    #[test]
+    fn an_effect_layer_over_a_raster_layer_has_no_editable_canvas() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+        assert!(bridge.add_paint_effect_layer("Posterize"));
+
+        // A camada ativa é a de efeito, então não há canvas para exibir.
+        assert!(
+            bridge.render_paint_canvas().is_none(),
+            "camada de efeito não tem raster próprio"
+        );
+        assert!(bridge.view_model().paint_effect_kind == "Posterize");
+        let params = bridge.view_model().paint_effect_params;
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].key, "levels");
     }
 
     #[test]

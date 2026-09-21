@@ -17,6 +17,14 @@ export struct ThemeEntry {
     active: bool,
 }
 
+export struct PaintEffectParamEntry {
+    key: string,
+    label: string,
+    value: float,
+    minimum: float,
+    maximum: float,
+}
+
 export struct PaintLayerEntry {
     id: string,
     name: string,
@@ -574,6 +582,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> uv-layout-truncated: false;
     in-out property <[PaintLayerEntry]> paint-layers: [];
     in-out property <string> paint-layer-count: "";
+    in-out property <string> paint-effect-kind: "";
+    in-out property <[PaintEffectParamEntry]> paint-effect-params: [];
     in-out property <string> paint-canvas-size: "";
     in-out property <int> paint-canvas-revision: 0;
     in-out property <image> paint-canvas-image;
@@ -634,6 +644,8 @@ export component PetuniaSlintShell inherits Window {
     callback paint-fill-scope-set(string);
     callback paint-projection-set(string);
     callback paint-lock-set(string);
+    callback paint-effect-layer-added(string);
+    callback paint-effect-param-set(string, float);
     callback paint-layer-added;
     callback paint-layer-group-added;
     callback paint-layer-removed(string);
@@ -1948,6 +1960,87 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "PAINT": VerticalLayout {
                             spacing: 10px;
+
+                            InspectorSection {
+                                title: "Effects";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: "Add an effect layer";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for effect in ["Pixelate", "Posterize", "Invert"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: button;
+                                            accessible-label: effect;
+                                            Text { text: effect; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                            TouchArea { clicked => { root.paint-effect-layer-added(effect); } }
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for effect in ["Grain", "BrightnessContrast", "HueSaturation"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: button;
+                                            accessible-label: effect;
+                                            Text { text: effect; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                            TouchArea { clicked => { root.paint-effect-layer-added(effect); } }
+                                        }
+                                    }
+
+                                    if paint-effect-kind != "": Text {
+                                        text: "Active effect: \{root.paint-effect-kind}";
+                                        color: DesignTokens.accent;
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                    }
+                                    if paint-effect-kind != "" && paint-effect-params.length == 0: Text {
+                                        text: "This effect has no parameters.";
+                                        color: DesignTokens.text-muted;
+                                        font-size: 10px;
+                                    }
+
+                                    for param in root.paint-effect-params: HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 24px;
+
+                                        Text {
+                                            text: param.label;
+                                            color: DesignTokens.text-secondary;
+                                            font-size: 10px;
+                                            width: 78px;
+                                            vertical-alignment: center;
+                                        }
+                                        Slider {
+                                            horizontal-stretch: 1;
+                                            minimum: param.minimum;
+                                            maximum: param.maximum;
+                                            value: param.value;
+                                            changed(value) => { root.paint-effect-param-set(param.key, value); }
+                                        }
+                                    }
+                                }
+                            }
 
                             InspectorSection {
                                 title: "Canvas";
