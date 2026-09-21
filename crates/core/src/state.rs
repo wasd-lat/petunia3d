@@ -1612,6 +1612,9 @@ impl AppState {
             crate::modal::ModalKind::Extrude => {
                 format!("Extrude {:.2} m", modal.value)
             }
+            crate::modal::ModalKind::ExtrudeIndividual => {
+                format!("Extrude Individual {:.2} m", modal.value)
+            }
             crate::modal::ModalKind::Inset => {
                 format!("Inset {:.2}", modal.value)
             }

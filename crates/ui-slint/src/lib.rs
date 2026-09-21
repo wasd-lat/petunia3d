@@ -106,18 +106,22 @@ impl Default for GizmoModel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolModalKind {
     Extrude,
+    ExtrudeIndividual,
     Inset,
     Bevel,
     PushPull,
+    ScaleSelection,
 }
 
 impl ToolModalKind {
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
             "model.extrude" => Some(Self::Extrude),
+            "model.extrude_individual" => Some(Self::ExtrudeIndividual),
             "model.inset" => Some(Self::Inset),
             "model.bevel" => Some(Self::Bevel),
             "model.push_pull" => Some(Self::PushPull),
+            "model.scale_selection" => Some(Self::ScaleSelection),
             _ => None,
         }
     }
@@ -125,26 +129,31 @@ impl ToolModalKind {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Extrude => "Extrude",
+            Self::ExtrudeIndividual => "Extrude Individual",
             Self::Inset => "Inset",
             Self::Bevel => "Bevel",
             Self::PushPull => "Push/Pull",
+            Self::ScaleSelection => "Scale",
         }
     }
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Extrude | Self::PushPull => "Distance",
+            Self::Extrude | Self::ExtrudeIndividual | Self::PushPull => "Distance",
             Self::Inset => "Amount",
             Self::Bevel => "Width",
+            Self::ScaleSelection => "Factor",
         }
     }
 
     pub const fn modal_kind(self) -> petunia_core::ModalKind {
         match self {
             Self::Extrude => petunia_core::ModalKind::Extrude,
+            Self::ExtrudeIndividual => petunia_core::ModalKind::ExtrudeIndividual,
             Self::Inset => petunia_core::ModalKind::Inset,
             Self::Bevel => petunia_core::ModalKind::Bevel,
             Self::PushPull => petunia_core::ModalKind::PushPull,
+            Self::ScaleSelection => petunia_core::ModalKind::Scale,
         }
     }
 
@@ -152,7 +161,8 @@ impl ToolModalKind {
         match self {
             Self::Inset => (0.0, 0.95),
             Self::Bevel => (0.0, 100.0),
-            Self::Extrude | Self::PushPull => (-100.0, 100.0),
+            Self::ScaleSelection => (0.01, 100.0),
+            Self::Extrude | Self::ExtrudeIndividual | Self::PushPull => (-100.0, 100.0),
         }
     }
 
@@ -973,6 +983,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 let initial = match kind {
                     ToolModalKind::Inset => 0.2,
                     ToolModalKind::Bevel => 0.05,
+                    ToolModalKind::ScaleSelection => 1.0,
                     _ => 0.0,
                 };
                 self.tool_modal_value = initial;
@@ -1000,6 +1011,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let delta = match kind {
             ToolModalKind::Inset => -delta_y * step * 0.5,
             ToolModalKind::Bevel => -delta_y * world_per_pixel * 0.5,
+            ToolModalKind::ScaleSelection => -delta_y * step * 0.5,
             _ => -delta_y * world_per_pixel * 0.5,
         };
         self.set_tool_modal_value(self.tool_modal_value + delta)
@@ -3497,6 +3509,66 @@ mod tests {
         assert!(bridge.view_model().tool_modal_active);
         assert!(bridge.handle_escape());
         assert!(bridge.tool_modal.is_none());
+    }
+
+    #[test]
+    fn extrude_individual_builds_topology_and_moves_each_face_along_its_own_normal() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let before = bridge.state.project.active_mesh().unwrap().clone();
+
+        bridge
+            .execute_core_command("model.extrude_individual")
+            .unwrap();
+        assert!(bridge.scrub_tool_modal(-60.0, false));
+
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(
+            mesh.verts.len() > before.verts.len(),
+            "extrude individual deve criar vértices"
+        );
+        assert!(
+            mesh.verts.iter().any(|v| {
+                !before.verts.iter().any(|b| {
+                    (v.pos[0] - b.pos[0]).abs() < 1.0e-4
+                        && (v.pos[1] - b.pos[1]).abs() < 1.0e-4
+                        && (v.pos[2] - b.pos[2]).abs() < 1.0e-4
+                })
+            }),
+            "a face extrudada precisa sair da posição original"
+        );
+
+        assert!(bridge.commit_tool_modal());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn scale_selection_modal_rejects_identity_and_commits_a_real_factor() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let before = bridge.state.project.active_mesh().unwrap().verts.clone();
+
+        bridge
+            .execute_core_command("model.scale_selection")
+            .unwrap();
+        assert_eq!(bridge.tool_modal_value, 1.0);
+        assert!(bridge.set_tool_modal_value(2.0));
+        let scaled = bridge.state.project.active_mesh().unwrap().verts.clone();
+        assert!(
+            scaled
+                .iter()
+                .zip(&before)
+                .any(|(a, b)| (a.pos[0] - b.pos[0]).abs() > 1.0e-4),
+            "factor 2.0 deve deslocar vértices"
+        );
+        assert!(bridge.commit_tool_modal());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
     }
 
     #[test]

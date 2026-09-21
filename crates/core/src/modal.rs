@@ -13,6 +13,7 @@ pub enum ModalKind {
     Rotate,
     Scale,
     Extrude,
+    ExtrudeIndividual,
     Inset,
     Bevel,
     PushPull,
@@ -25,6 +26,7 @@ impl ModalKind {
             Self::Rotate => "Rotate",
             Self::Scale => "Scale",
             Self::Extrude => "Extrude",
+            Self::ExtrudeIndividual => "Extrude Individual",
             Self::Inset => "Inset (factor)",
             Self::Bevel => "Bevel",
             Self::PushPull => "Push/Pull",
@@ -163,7 +165,10 @@ impl AppState {
         }
         if matches!(
             kind,
-            ModalKind::Extrude | ModalKind::Inset | ModalKind::PushPull
+            ModalKind::Extrude
+                | ModalKind::ExtrudeIndividual
+                | ModalKind::Inset
+                | ModalKind::PushPull
         ) {
             if source.selected_face_count() == 0 {
                 source.sync_face_selection_from_verts();
@@ -373,6 +378,7 @@ impl AppState {
                     vertex.pos = (vertex.vec() + direction * value).to_array();
                 }
             }
+            ModalKind::ExtrudeIndividual if value != 0.0 => mesh.extrude_individual(value),
             ModalKind::Inset if value != 0.0 => mesh.inset_selected(value),
             ModalKind::Bevel if value != 0.0 => {
                 let (applied, skipped) = mesh.bevel_selected(value);
