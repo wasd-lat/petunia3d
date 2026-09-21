@@ -564,6 +564,11 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-preferences: "";
     in-out property <string> shell-info: "";
     in-out property <string> rename-value: "";
+    in-out property <string> uv-layout-commands: "";
+    in-out property <int> uv-island-count: 0;
+    in-out property <int> uv-face-count: 0;
+    in-out property <int> uv-selected-face: -1;
+    in-out property <bool> uv-layout-truncated: false;
     in-out property <[PaintLayerEntry]> paint-layers: [];
     in-out property <string> paint-layer-count: "";
     in-out property <bool> loop-cut-active: false;
@@ -610,6 +615,8 @@ export component PetuniaSlintShell inherits Window {
     callback tool-modal-cancel;
     callback loop-cut-scrubbed(float);
     callback loop-cut-count-committed(string);
+    callback uv-seam-toggled;
+    callback uv-seams-cleared;
     callback paint-layer-added;
     callback paint-layer-group-added;
     callback paint-layer-removed(string);
@@ -2227,6 +2234,78 @@ export component PetuniaSlintShell inherits Window {
                                             Text { text: root.label-pack-islands; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                                         }
                                         TouchArea { clicked => { root.command-executed("uv.pack_islands"); } }
+                                    }
+                                }
+                            }
+
+                            InspectorSection {
+                                title: "UV Editor";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    // Caixa 0..1 com o layout real das UVs.
+                                    uv-box := Rectangle {
+                                        height: 256px;
+                                        background: DesignTokens.canvas;
+                                        border-width: 1px;
+                                        border-color: DesignTokens.border;
+
+                                        Path {
+                                            fill: transparent;
+                                            stroke: DesignTokens.accent;
+                                            stroke-width: 1px;
+                                            commands: root.uv-layout-commands;
+                                        }
+
+                                        // Contorno do espaço 0..1.
+                                        Rectangle { x: 0; y: 0; width: 100%; height: 1px; background: DesignTokens.border; }
+                                        Rectangle { x: 0; y: parent.height - 1px; width: 100%; height: 1px; background: DesignTokens.border; }
+                                        Rectangle { x: 0; y: 0; width: 1px; height: 100%; background: DesignTokens.border; }
+                                        Rectangle { x: parent.width - 1px; y: 0; width: 1px; height: 100%; background: DesignTokens.border; }
+                                    }
+
+                                    Text {
+                                        text: "\{root.uv-island-count} island(s)  ·  \{root.uv-face-count} face(s)  ·  selected: \{root.uv-selected-face}";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    if root.uv-layout-truncated: Text {
+                                        text: "Layout truncated: only the first 2000 faces are drawn.";
+                                        color: DesignTokens.text-muted;
+                                        font-size: 10px;
+                                        wrap: word-wrap;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Mark/Unmark Seams"; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Toggle seams on the selected face";
+                                            TouchArea { clicked => { root.uv-seam-toggled(); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Clear Seams"; color: DesignTokens.danger; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Clear all seams";
+                                            TouchArea { clicked => { root.uv-seams-cleared(); } }
+                                        }
                                     }
                                 }
                             }

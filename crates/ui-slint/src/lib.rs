@@ -313,6 +313,7 @@ pub struct ShellViewModel {
     pub label_delete: String,
     pub label_duplicate: String,
     pub themes: Vec<ThemeEntryModel>,
+    pub uv_editor: UvEditorModel,
     pub paint_layers: Vec<PaintLayerModel>,
     pub paint_layer_count: String,
     pub loop_cut_active: bool,
@@ -468,6 +469,7 @@ impl ShellViewModel {
             label_delete: String::new(),
             label_duplicate: String::new(),
             themes: Vec::new(),
+            uv_editor: UvEditorModel::default(),
             paint_layers: Vec::new(),
             paint_layer_count: String::new(),
             loop_cut_active: false,
@@ -673,6 +675,18 @@ impl MenuKind {
             ],
         }
     }
+}
+
+/// Editor UV 2D: geometria do layout pronta para o `Path` do Slint.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UvEditorModel {
+    /// Comandos SVG-like do `Path` do Slint (`M x y L x y ...`).
+    pub layout_commands: String,
+    pub island_count: usize,
+    pub face_count: usize,
+    pub selected_face: i32,
+    /// `true` quando a malha tem mais faces do que o editor desenha.
+    pub truncated: bool,
 }
 
 /// Camada de pintura publicada para o painel de camadas do shell.
@@ -1338,6 +1352,108 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 .state
                 .set_status(format!("Failed to discard snapshots: {error}")),
         }
+        true
+    }
+
+    /// Constrói a geometria 2D do editor UV a partir das UVs reais da malha.
+    ///
+    /// O quadrado 0..1 vira uma caixa de 256 px; cada face contribui um contorno
+    /// fechado. Malhas grandes são truncadas e o editor avisa, em vez de
+    /// construir uma string gigante em silêncio.
+    fn build_uv_editor(&self) -> UvEditorModel {
+        const BOX: f32 = 256.0;
+        const MAX_FACES: usize = 2_000;
+        let Some(mesh) = self.state.project.active_mesh() else {
+            return UvEditorModel::default();
+        };
+        let face_count = mesh.faces.len();
+        let mut commands = String::new();
+        for face in mesh.faces.iter().take(MAX_FACES) {
+            if face.uv.len() < 3 {
+                continue;
+            }
+            for (index, uv) in face.uv.iter().enumerate() {
+                if !uv[0].is_finite() || !uv[1].is_finite() {
+                    continue;
+                }
+                let x = uv[0] * BOX;
+                let y = (1.0 - uv[1]) * BOX;
+                if index == 0 {
+                    commands.push_str(&format!("M {x:.2} {y:.2} "));
+                } else {
+                    commands.push_str(&format!("L {x:.2} {y:.2} "));
+                }
+            }
+            commands.push_str("Z ");
+        }
+        let islands = mesh.uv_islands();
+        UvEditorModel {
+            layout_commands: commands,
+            island_count: islands.len(),
+            face_count,
+            selected_face: mesh
+                .faces
+                .iter()
+                .position(|face| face.selected)
+                .map(|index| index as i32)
+                .unwrap_or(-1),
+            truncated: face_count > MAX_FACES,
+        }
+    }
+
+    /// Marca ou desmarca como costura todas as arestas da face UV selecionada.
+    pub fn toggle_selected_uv_seams(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh_mut() else {
+            return false;
+        };
+        let Some(face) = mesh.faces.iter().find(|face| face.selected) else {
+            self.state
+                .set_status("UV: select a face in the viewport first");
+            return false;
+        };
+        let verts = face.verts.clone();
+        if verts.len() < 3 {
+            return false;
+        }
+        self.state.checkpoint("toggle uv seams");
+        let Some(mesh) = self.state.project.active_mesh_mut() else {
+            return false;
+        };
+        for index in 0..verts.len() {
+            let a = verts[index];
+            let b = verts[(index + 1) % verts.len()];
+            mesh.toggle_seam(a, b);
+        }
+        let count = self
+            .state
+            .project
+            .active_mesh()
+            .map(|mesh| mesh.uv_seams.len())
+            .unwrap_or(0);
+        self.state.set_status(format!(
+            "UV seams on the selected face toggled ({count} total)"
+        ));
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Limpa todas as costuras da malha ativa.
+    pub fn clear_all_uv_seams(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh() else {
+            return false;
+        };
+        if mesh.uv_seams.is_empty() {
+            self.state.set_status("UV: there are no seams to clear");
+            return false;
+        }
+        self.state.checkpoint("clear uv seams");
+        if let Some(mesh) = self.state.project.active_mesh_mut() {
+            mesh.uv_seams.clear();
+        }
+        self.state.set_status("UV: all seams cleared");
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
         true
     }
 
@@ -2496,6 +2612,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
         }
+        vm.uv_editor = self.build_uv_editor();
         if let Some(stack) = self
             .state
             .project
@@ -2945,6 +3062,11 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_themes(theme_entries.as_slice().into());
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
+    window.set_uv_layout_commands(vm.uv_editor.layout_commands.as_str().into());
+    window.set_uv_island_count(vm.uv_editor.island_count as i32);
+    window.set_uv_face_count(vm.uv_editor.face_count as i32);
+    window.set_uv_selected_face(vm.uv_editor.selected_face);
+    window.set_uv_layout_truncated(vm.uv_editor.truncated);
     window.set_paint_layer_count(vm.paint_layer_count.as_str().into());
     let layer_entries: Vec<PaintLayerEntry> = vm
         .paint_layers
@@ -3679,6 +3801,38 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 return;
             }
             bridge.menu_item_invoked(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let uv_seam_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_seam_toggled(move || {
+        if let Ok(mut bridge) = uv_seam_bridge.lock() {
+            bridge.toggle_selected_uv_seams();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let uv_clear_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_seams_cleared(move || {
+        if let Ok(mut bridge) = uv_clear_bridge.lock() {
+            bridge.clear_all_uv_seams();
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -5825,6 +5979,100 @@ mod tests {
         let id = bridge.view_model().paint_layers[0].id.clone();
         assert!(!bridge.set_paint_layer_opacity(&id, f32::NAN));
         assert!(bridge.view_model().paint_layers[0].opacity.is_finite());
+    }
+
+    #[test]
+    fn uv_editor_builds_a_real_layout_path_from_mesh_uvs() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let editor = bridge.view_model().uv_editor;
+        assert_eq!(editor.face_count, 6, "o cubo padrão tem 6 faces");
+        assert!(!editor.truncated);
+        assert!(
+            editor.layout_commands.starts_with('M'),
+            "veio: {}",
+            editor.layout_commands
+        );
+        assert_eq!(
+            editor.layout_commands.matches('M').count(),
+            editor.face_count,
+            "uma subcaminho por face"
+        );
+        assert_eq!(
+            editor.layout_commands.matches('Z').count(),
+            editor.face_count
+        );
+        assert!(editor.island_count >= 1);
+        assert_eq!(editor.selected_face, -1, "nada selecionado no início");
+    }
+
+    #[test]
+    fn uv_editor_reports_the_selected_face_and_clears_when_deselected() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.project.active_mesh_mut().unwrap().faces[2].selected = true;
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().uv_editor.selected_face, 2);
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[2].selected = false;
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().uv_editor.selected_face, -1);
+    }
+
+    #[test]
+    fn uv_seam_toggle_requires_a_selected_face_and_commits_one_entry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.toggle_selected_uv_seams());
+        assert_eq!(
+            bridge.state.ui.status,
+            "UV: select a face in the viewport first"
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        assert!(bridge.toggle_selected_uv_seams());
+        let seams = bridge.state.project.active_mesh().unwrap().uv_seams.len();
+        assert_eq!(seams, 4, "uma costura por aresta da face quad");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.toggle_selected_uv_seams());
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .uv_seams
+                .is_empty(),
+            "o segundo toque desmarca"
+        );
+
+        assert!(bridge.state.undo());
+        assert_eq!(
+            bridge.state.project.active_mesh().unwrap().uv_seams.len(),
+            4
+        );
+    }
+
+    #[test]
+    fn clearing_uv_seams_is_idempotent_and_reports_when_empty() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.clear_all_uv_seams());
+        assert_eq!(bridge.state.ui.status, "UV: there are no seams to clear");
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.toggle_selected_uv_seams();
+        assert!(bridge.clear_all_uv_seams());
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .uv_seams
+                .is_empty()
+        );
     }
 
     #[test]
