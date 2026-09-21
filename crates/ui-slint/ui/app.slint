@@ -573,6 +573,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> uv-layout-truncated: false;
     in-out property <[PaintLayerEntry]> paint-layers: [];
     in-out property <string> paint-layer-count: "";
+    in-out property <string> paint-canvas-size: "";
+    in-out property <int> paint-canvas-revision: 0;
+    in-out property <image> paint-canvas-image;
     in-out property <string> paint-fill-scope: "ConnectedPixels";
     in-out property <string> paint-projection: "Surface";
     in-out property <string> paint-lock: "None";
@@ -1940,6 +1943,39 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "PAINT": VerticalLayout {
                             spacing: 10px;
+
+                            InspectorSection {
+                                title: "Canvas";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: root.paint-canvas-size;
+                                        color: DesignTokens.text-muted;
+                                        font-size: 10px;
+                                    }
+
+                                    // Xadrez de transparência atrás do raster, para
+                                    // que pixels com alfa zero não pareçam preto.
+                                    Rectangle {
+                                        height: 200px;
+                                        background: DesignTokens.canvas;
+                                        border-width: 1px;
+                                        border-color: DesignTokens.border;
+
+                                        Image {
+                                            width: 100%;
+                                            height: 100%;
+                                            image-fit: contain;
+                                            source: root.paint-canvas-image;
+                                        }
+                                    }
+                                }
+                            }
 
                             InspectorSection {
                                 title: "Fill & Projection";

@@ -318,6 +318,8 @@ pub struct ShellViewModel {
     pub uv_editor: UvEditorModel,
     pub paint_layers: Vec<PaintLayerModel>,
     pub paint_layer_count: String,
+    pub paint_canvas_size: String,
+    pub paint_canvas_revision: i32,
     pub paint_fill_scope: String,
     pub paint_projection: String,
     pub paint_lock: String,
@@ -479,6 +481,8 @@ impl ShellViewModel {
             uv_editor: UvEditorModel::default(),
             paint_layers: Vec::new(),
             paint_layer_count: String::new(),
+            paint_canvas_size: String::new(),
+            paint_canvas_revision: 0,
             paint_fill_scope: "ConnectedPixels".to_string(),
             paint_projection: "Surface".to_string(),
             paint_lock: "None".to_string(),
@@ -1112,6 +1116,45 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         )
     }
 
+    /// Dimensões do canvas composto do ativo, quando existe.
+    pub fn paint_canvas_dimensions(&self) -> Option<(u32, u32)> {
+        let asset = self.state.project.assets.get(self.state.project.active)?;
+        if let Some(texture) = asset.texture.as_ref() {
+            return Some((texture.w, texture.h));
+        }
+        let stack = asset.paint_stack.as_ref()?;
+        let layer = stack.active()?;
+        let canvas = layer.canvas()?;
+        Some((canvas.w, canvas.h))
+    }
+
+    /// Publica a imagem do canvas 2D na janela, quando houver camada.
+    pub fn publish_canvas_image(&mut self, window: &PetuniaSlintShell) {
+        if let Some(image) = self.render_paint_canvas() {
+            window.set_paint_canvas_image(image);
+        }
+    }
+
+    /// Converte a camada ativa em imagem Slint para o editor 2D.
+    ///
+    /// A camada ativa é a superfície que o pincel realmente altera; o composto
+    /// (`Asset.texture`) é o que vai para o material.
+    pub fn render_paint_canvas(&mut self) -> Option<slint::Image> {
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let asset = self.state.project.assets.get(self.state.project.active)?;
+        let canvas = asset
+            .paint_stack
+            .as_ref()
+            .and_then(|stack| stack.active())
+            .and_then(|layer| layer.canvas())?;
+        let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(canvas.w, canvas.h);
+        let pixels = buffer.make_mut_bytes();
+        let source = &canvas.pixels;
+        let length = pixels.len().min(source.len());
+        pixels[..length].copy_from_slice(&source[..length]);
+        Some(slint::Image::from_rgba8(buffer))
+    }
+
     pub fn resize_viewport(&mut self, width: u32, height: u32) {
         let width = width.max(1);
         let height = height.max(1);
@@ -1654,7 +1697,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn add_paint_layer(&mut self) -> bool {
-        let (w, h) = self.paint_canvas_size();
+        let (w, h) = self.paint_canvas_dimensions().unwrap_or((256, 256));
         self.mutate_paint_stack("add paint layer", |stack| {
             stack.add_layer(petunia_project::paint_layers::PaintLayer::new(
                 format!("Layer {}", stack.layers.len() + 1),
@@ -1755,17 +1798,6 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             layer.opacity = opacity;
             true
         })
-    }
-
-    fn paint_canvas_size(&self) -> (u32, u32) {
-        self.state
-            .project
-            .assets
-            .get(self.state.project.active)
-            .and_then(|asset| asset.paint_stack.as_ref())
-            .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
-            .map(|canvas| (canvas.w, canvas.h))
-            .unwrap_or((256, 256))
     }
 
     /// Abre a sessão de loop cut a partir da aresta selecionada.
@@ -2846,6 +2878,22 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
         }
+        if let Some((width, height)) = self.paint_canvas_dimensions() {
+            vm.paint_canvas_size = format!("{width} × {height}");
+            vm.paint_canvas_revision = self.state.project.assets[self.state.project.active]
+                .paint_stack
+                .as_ref()
+                .map(|stack| {
+                    stack
+                        .layers
+                        .iter()
+                        .filter_map(|layer| layer.canvas())
+                        .map(|canvas| canvas.w as i32 * canvas.h as i32)
+                        .sum::<i32>()
+                        + stack.layers.len() as i32
+                })
+                .unwrap_or(0);
+        }
         vm.paint_fill_scope = format!("{:?}", self.state.session.tools.fill_scope);
         vm.paint_projection = format!("{:?}", self.state.session.tools.brush_projection);
         vm.paint_lock = format!("{:?}", self.state.session.tools.brush_lock);
@@ -3307,6 +3355,8 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_uv_selected_face(vm.uv_editor.selected_face);
     window.set_uv_layout_truncated(vm.uv_editor.truncated);
     window.set_paint_layer_count(vm.paint_layer_count.as_str().into());
+    window.set_paint_canvas_size(vm.paint_canvas_size.as_str().into());
+    window.set_paint_canvas_revision(vm.paint_canvas_revision);
     window.set_paint_fill_scope(vm.paint_fill_scope.as_str().into());
     window.set_paint_projection(vm.paint_projection.as_str().into());
     window.set_paint_lock(vm.paint_lock.as_str().into());
@@ -3814,9 +3864,15 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     });
 
     let paint_begin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
     window.on_viewport_paint_begin(move |x, y| {
         if let Ok(mut bridge) = paint_begin_bridge.lock() {
             bridge.begin_paint_stroke_at(x, y);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                bridge.publish_canvas_image(&window);
+            }
         }
     });
 
@@ -3825,9 +3881,14 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_viewport_paint_update(move |x, y| {
         if let Ok(mut bridge) = paint_update_bridge.lock() {
             bridge.paint_stroke_to(x, y);
+            let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
-            if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
-                window.set_viewport_image(frame);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+                bridge.publish_canvas_image(&window);
             }
         }
     });
@@ -6650,6 +6711,54 @@ mod tests {
         assert_eq!(bridge.view_model().boolean_operand_name, "Cone");
         assert!(bridge.clear_boolean_operand());
         assert_eq!(bridge.view_model().boolean_operand_name, "");
+    }
+
+    #[test]
+    fn paint_canvas_image_matches_the_active_layer_pixels() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        let (width, height) = bridge.paint_canvas_dimensions().expect("canvas do stack");
+        assert!(width > 0 && height > 0);
+
+        // Pinta um pixel conhecido na camada ativa e confere que a imagem
+        // publicada carrega exatamente esses bytes.
+        let marker = [12u8, 200, 45, 255];
+        {
+            let active = bridge.state.project.active;
+            let canvas = bridge
+                .state
+                .project
+                .assets
+                .get_mut(active)
+                .and_then(|asset| asset.paint_stack.as_mut())
+                .and_then(|stack| stack.active_mut())
+                .and_then(|layer| layer.canvas_mut())
+                .expect("canvas mutável");
+            canvas.set(1, 1, marker);
+        }
+
+        let image = bridge.render_paint_canvas().expect("imagem do canvas");
+        assert_eq!(image.size().width, width);
+        assert_eq!(image.size().height, height);
+        let buffer = image.to_rgba8().expect("buffer rgba8");
+        let offset = ((width + 1) * 4) as usize;
+        assert_eq!(&buffer.as_bytes()[offset..offset + 4], &marker);
+    }
+
+    #[test]
+    fn canvas_image_is_absent_before_a_layer_exists_and_appears_after() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        assert!(
+            bridge.paint_canvas_dimensions().is_none(),
+            "sem stack não há canvas"
+        );
+
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+        assert!(bridge.paint_canvas_dimensions().is_some());
+        assert!(bridge.view_model().paint_canvas_size.contains('×'));
     }
 
     #[test]
