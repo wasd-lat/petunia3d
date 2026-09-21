@@ -8,7 +8,7 @@ use glam::{Mat4, Vec3, Vec4};
 use petunia_core::{Camera, SelectionDomain, Workspace};
 use petunia_project::Project;
 
-use crate::PetuniaViewport;
+use crate::{PetuniaViewport, ViewportRenderState};
 
 /// Viewport 3D rasterizado via CPU com Z-buffer e iluminação direcional.
 pub struct Software3dViewport {
@@ -200,7 +200,12 @@ impl PetuniaViewport for Software3dViewport {
         self.selection_domain = domain;
     }
 
-    fn render_frame(&mut self, project: &Project, camera: &Camera) -> Option<slint::Image> {
+    fn render_frame(
+        &mut self,
+        project: &Project,
+        camera: &Camera,
+        state: ViewportRenderState,
+    ) -> Option<slint::Image> {
         let bg_color = [24, 25, 28, 255];
         self.clear(bg_color);
 
@@ -221,39 +226,41 @@ impl PetuniaViewport for Software3dViewport {
             };
 
             // Rasterização de faces
-            for face in &asset.mesh.faces {
-                if face.verts.len() < 3 {
-                    continue;
-                }
+            if state.shading != petunia_render::Shading::Wireframe {
+                for face in &asset.mesh.faces {
+                    if face.verts.len() < 3 {
+                        continue;
+                    }
 
-                // Cálculo de normal da face
-                let p0 = asset.mesh.verts[face.verts[0] as usize].vec();
-                let p1 = asset.mesh.verts[face.verts[1] as usize].vec();
-                let p2 = asset.mesh.verts[face.verts[2] as usize].vec();
-                let normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
+                    // Cálculo de normal da face
+                    let p0 = asset.mesh.verts[face.verts[0] as usize].vec();
+                    let p1 = asset.mesh.verts[face.verts[1] as usize].vec();
+                    let p2 = asset.mesh.verts[face.verts[2] as usize].vec();
+                    let normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
 
-                let diff = normal.dot(light_dir).max(0.0);
-                let light = 0.35 + 0.65 * diff;
+                    let diff = normal.dot(light_dir).max(0.0);
+                    let light = 0.35 + 0.65 * diff;
 
-                let shaded_color = [
-                    (base_color[0] as f32 * light).min(255.0) as u8,
-                    (base_color[1] as f32 * light).min(255.0) as u8,
-                    (base_color[2] as f32 * light).min(255.0) as u8,
-                    255,
-                ];
+                    let shaded_color = [
+                        (base_color[0] as f32 * light).min(255.0) as u8,
+                        (base_color[1] as f32 * light).min(255.0) as u8,
+                        (base_color[2] as f32 * light).min(255.0) as u8,
+                        255,
+                    ];
 
-                // Triangulação em leque
-                for i in 1..(face.verts.len() - 1) {
-                    let v0 = asset.mesh.verts[face.verts[0] as usize].vec();
-                    let v1 = asset.mesh.verts[face.verts[i] as usize].vec();
-                    let v2 = asset.mesh.verts[face.verts[i + 1] as usize].vec();
+                    // Triangulação em leque
+                    for i in 1..(face.verts.len() - 1) {
+                        let v0 = asset.mesh.verts[face.verts[0] as usize].vec();
+                        let v1 = asset.mesh.verts[face.verts[i] as usize].vec();
+                        let v2 = asset.mesh.verts[face.verts[i + 1] as usize].vec();
 
-                    if let (Some(sp0), Some(sp1), Some(sp2)) = (
-                        self.project_point(v0, &vp),
-                        self.project_point(v1, &vp),
-                        self.project_point(v2, &vp),
-                    ) {
-                        self.draw_triangle_3d(sp0, sp1, sp2, shaded_color);
+                        if let (Some(sp0), Some(sp1), Some(sp2)) = (
+                            self.project_point(v0, &vp),
+                            self.project_point(v1, &vp),
+                            self.project_point(v2, &vp),
+                        ) {
+                            self.draw_triangle_3d(sp0, sp1, sp2, shaded_color);
+                        }
                     }
                 }
             }
@@ -265,24 +272,26 @@ impl PetuniaViewport for Software3dViewport {
                 [30, 32, 36, 255]
             };
 
-            for face in &asset.mesh.faces {
-                let flen = face.verts.len();
-                for i in 0..flen {
-                    let idx_a = face.verts[i] as usize;
-                    let idx_b = face.verts[(i + 1) % flen] as usize;
-                    let v0 = asset.mesh.verts[idx_a].vec();
-                    let v1 = asset.mesh.verts[idx_b].vec();
+            if state.shading == petunia_render::Shading::Wireframe || state.show_wireframe_overlay {
+                for face in &asset.mesh.faces {
+                    let flen = face.verts.len();
+                    for i in 0..flen {
+                        let idx_a = face.verts[i] as usize;
+                        let idx_b = face.verts[(i + 1) % flen] as usize;
+                        let v0 = asset.mesh.verts[idx_a].vec();
+                        let v1 = asset.mesh.verts[idx_b].vec();
 
-                    if let (Some(sp0), Some(sp1)) =
-                        (self.project_point(v0, &vp), self.project_point(v1, &vp))
-                    {
-                        self.draw_line_2d(
-                            sp0.0 as i32,
-                            sp0.1 as i32,
-                            sp1.0 as i32,
-                            sp1.1 as i32,
-                            edge_color,
-                        );
+                        if let (Some(sp0), Some(sp1)) =
+                            (self.project_point(v0, &vp), self.project_point(v1, &vp))
+                        {
+                            self.draw_line_2d(
+                                sp0.0 as i32,
+                                sp0.1 as i32,
+                                sp1.0 as i32,
+                                sp1.1 as i32,
+                                edge_color,
+                            );
+                        }
                     }
                 }
             }
@@ -347,7 +356,7 @@ mod tests {
         let project = Project::default();
         let camera = Camera::default();
 
-        let image = viewport.render_frame(&project, &camera);
+        let image = viewport.render_frame(&project, &camera, ViewportRenderState::default());
         assert!(image.is_some());
         let img = image.expect("image");
         assert_eq!(img.size().width, 320);
@@ -363,7 +372,9 @@ mod tests {
 
         let project = Project::default();
         let camera = Camera::default();
-        let image = viewport.render_frame(&project, &camera).expect("frame");
+        let image = viewport
+            .render_frame(&project, &camera, ViewportRenderState::default())
+            .expect("frame");
         assert_eq!(image.size().width, 200);
         assert_eq!(image.size().height, 150);
     }
@@ -378,15 +389,15 @@ mod tests {
         let camera = Camera::default();
 
         viewport.set_selection_domain(SelectionDomain::Vertex);
-        let frame_v = viewport.render_frame(&project, &camera);
+        let frame_v = viewport.render_frame(&project, &camera, ViewportRenderState::default());
         assert!(frame_v.is_some());
 
         viewport.set_selection_domain(SelectionDomain::Edge);
-        let frame_e = viewport.render_frame(&project, &camera);
+        let frame_e = viewport.render_frame(&project, &camera, ViewportRenderState::default());
         assert!(frame_e.is_some());
 
         viewport.set_selection_domain(SelectionDomain::Face);
-        let frame_f = viewport.render_frame(&project, &camera);
+        let frame_f = viewport.render_frame(&project, &camera, ViewportRenderState::default());
         assert!(frame_f.is_some());
     }
 }

@@ -5842,6 +5842,8 @@ dependencies = [
  "lucide-slint",
  "petunia_config",
  "petunia_core",
+ "petunia_module_paint",
+ "petunia_module_uv",
  "petunia_project",
  "petunia_render",
  "petunia_render_wgpu",

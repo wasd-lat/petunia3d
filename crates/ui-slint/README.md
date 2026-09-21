@@ -1,10 +1,30 @@
 # Crate `petunia_ui_slint` (`crates/ui-slint/`)
 
-Frontend gráfico e shell declarativo moderno construído com [Slint](https://slint.dev/):
+**Frontend de produção** do Petunia3D, construído com [Slint](https://slint.dev/) 1.18.
+O binário `petunia3d` executa este shell por padrão; a UI egui (`crates/ui/`) é
+legado de transição acessível via `--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`.
+
+Esta branch de conclusão (`feat/slint-ui-completion`) é isolada da branch de
+remediação arquitetural. Ela concentra a superfície de produto Slint, a rota
+WGPU 30 compartilhada e os fluxos interativos do shell sem alterar a branch
+concorrente.
+
 - **Shell declarativo (`ui/app.slint`)**: Top bar com alternador de domínio de seleção (Object, Point, Edge, Face), Icon Rail para workspaces (`MODEL`, `PAINT`, `UV`), Tool Shelf contextual vertical, Outliner lateral (Scene Drawer), gaveta inferior para Asset Library, e painéis de Context Inspector adaptados ao workspace ativo.
-- **Viewport central interativo**: Suporte a WGPU off-screen render com export para textura do Slint (`viewport_gpu.rs`) e software viewport fallback resiliente (`viewport_soft.rs`) para compatibilidade universal (ex.: Intel Gen 7 Ivy Bridge / drivers Mesa legados).
-- **Bridge de intents reativo (`lib.rs`)**: Comunicação desacoplada entre a UI Slint e os domínios de `petunia_core`, `petunia_commands` e `petunia_project`.
-- **Command Palette & catálogo semântico (`commands.rs`)**: Busca difusa e execução direta de comandos (criação de primitivas, transformações, pintura e UV).
+- **Viewport central interativo**: composição direta da textura WGPU no Slint via WGPU 30, sem readback síncrono GPU→CPU por frame, com software viewport fallback resiliente (`viewport_soft.rs`).
+- **Bridge de intents reativo (`lib.rs`)**: Comunicação desacoplada entre a UI Slint e os domínios de `petunia_core`, `petunia_commands` e `petunia_project`. O tipo `UiIntent` é a única fronteira que traduz ações do shell para operações de domínio.
+- **Command Palette & dispatcher canônico**: busca, disabled reasons, foco, seleção por teclado e execução através do `CommandDispatcher` do core.
 - **Persistência assíncrona (`files.rs`)**: Diálogos nativos assíncronos via RFD para carregar e salvar arquivos de projeto `.petunia`.
 - **Camada de design tokens e temas (`theme.rs`)**: Sincronização em tempo de execução com o `ThemeRegistry` do Petunia (`petunia-dark` e `petunia-high-contrast`).
-- **Gerenciador de Overlays (`overlay.rs`)**: Pilha de overlays LIFO com suporte a dismiss por tecla Escape e click-away.
+- **Gerenciador de Overlays (`overlay.rs`)**: Pilha LIFO identificada por superfície, pin de Parts, Escape/click-away determinísticos e restauração contextual.
+
+O fluxo Cut/Knife ainda depende de conectar coordenadas de viewport à sessão de
+corte existente. Essa pendência permanece explícita em vez de apresentar um
+botão visual como operação concluída.
+
+## Validação
+
+```bash
+cargo test -p petunia_ui_slint --lib          # 53 testes unitários
+cargo clippy -p petunia_ui_slint --all-targets -- -D warnings
+cargo fmt -p petunia_ui_slint -- --check
+```

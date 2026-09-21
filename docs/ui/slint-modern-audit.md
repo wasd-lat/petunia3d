@@ -1,67 +1,90 @@
-# Auditoria inicial — interface Slint experimental
+# Auditoria — interface Slint de produção
 
 ## Escopo
 
-Branch: `experiment/slint-modern-ui`  
-Base: `58afca78999ac1874d8b99526e47611c802c6047`  
+Branch: `fix/slint-clean-ui-remediation`
+Base: `9fcee47af69e1a4c620a955b0139a4693bc39cae`
 Data da auditoria: 2026-09-20
 
-A branch mantém a UI egui e o app existentes intactos. O primeiro slice adiciona uma crate paralela, `petunia_ui_slint`, com shell declarativo e bridge de intents.
+O binário `petunia3d` executa o shell Slint (`crates/ui-slint/`) por padrão.
+A UI egui (`crates/ui/`) é legado de transição acessível via `--legacy-egui` /
+`PETUNIA_LEGACY_EGUI=1`.
 
 ## Implementation-vs-Spec Gap Matrix
 
-| Requisito da experiência | Estado | Evidência / próximo passo |
+A matriz abaixo reflete o estado **comprovado por testes e código** da crate
+`petunia_ui_slint` (55 testes unitários verdes). Itens marcados como
+`COMPLIANT` têm teste unitário ou evidência direta no código; itens
+`PARTIALLY_COMPLIANT`, `MISSING` ou `STUB` são gaps conhecidos.
+
+### Conformidade comprovada (testes verdes)
+
+| Requisito | Estado | Evidência |
 |---|---|---|
-| Branch experimental separada | `COMPLIANT` | `experiment/slint-modern-ui`; `main` e `backup/main-before-slint` continuam no commit-base |
-| Slint pinado na linha 1.18 | `COMPLIANT` | `slint`/`slint-build` em `~1.18`, `compat-1-18` explícito |
-| UI Slint isolada da egui | `COMPLIANT` | nova crate `crates/ui-slint`; nenhum arquivo produtivo egui alterado |
-| Design tokens semânticos | `COMPLIANT` | `DesignTokens` dinâmico em `ui/app.slint` sincronizado com `ThemeRegistry` do Petunia3D (`petunia-dark` e `petunia-high-contrast`) via módulo `theme.rs` e seletor no modal Preferences |
-| Lucide encapsulado | `PARTIALLY_COMPLIANT` | `IconSet`/`IconDisplay` são consumidos dentro de `RailButton`/`TopAction`; catálogo semântico completo ainda falta |
-| slintcn como fonte copy-source | `DOCUMENTED` | `slintcn` é CLI/installer, não runtime; componentes serão copiados e adaptados, não dependidos em produção |
-| Icon rail | `COMPLIANT` | rail com Scene, Tools (Model), Paint e UV com ícones Lucide |
-| Viewport-first shell | `COMPLIANT` | viewport ocupa a região central; exibe renderização real 3D via GPU ou fallback informativo |
-| Context inspector | `COMPLIANT` | painéis de contexto adaptados por workspace: `MODEL` (Transform com inputs numéricos vetoriais interativos Position, Rotation, Scale; Object com contagem real de vértices/faces; Material do ativo e botão Delete Active Object); `PAINT` (paleta interativa com 8 swatches, preview de cor ativa, controles de Brush Size e Brush Opacity, e lista de camadas de textura); `UV` (operações Unwrap Mesh, Pack Islands e estatísticas de densidade UV) |
-| Contextual Tool Shelf | `COMPLIANT` | barra vertical de ferramentas (44px) entre a rail de navegação e a viewport; exibe botões com estados ativos e atalhos semânticos para cada workspace (`MODEL`: Select, Move, Add Cube, Add Sphere, Cut/Knife, Frame Selection; `PAINT`: Brush, Eraser, Picker, Fill Bucket; `UV`: UV Select, Unwrap, Pack Islands) |
-| Selection Domain Switcher | `COMPLIANT` | alternador no topo do shell entre Object, Point (Vertex per vocabulário canônico AGENTS.md §3), Edge e Face; sincroniza com `AppState` e `PetuniaViewport` |
-| Undo & Redo | `COMPLIANT` | botões de ação e atalhos integrados ao `ProjectContext::undo` do core; reflete `can_undo`/`can_redo` reativamente no shell |
-| Scene Outliner / Drawer | `COMPLIANT` | Drawer lateral conectado a `state.project.assets` com exibição de malhas, triângulos, seleção interativa e toggles de visibilidade e bloqueio |
-| Command Registry | `COMPLIANT` | catálogo puro conectado à Command Palette modal no Slint com busca contextual e execução de comandos (incluindo criação de primitivas Cube/Sphere/Cylinder/Plane, seleção, ferramentas de pintura e UV) |
-| Overlay/ESC policy | `COMPLIANT` | `OverlayStack` integrado no bridge; gerencia overlays (Palette, Scene Drawer, Settings) em ordem LIFO com tecla ESC e click-away |
-| Numeric field | `COMPLIANT` | componentes `NumericField` e `Vector3Field` no Slint integrados com `NumericFieldState` (scrubbing, fine-step com Shift, clamping e testes unitários) |
-| FileDialogService | `COMPLIANT` | `FileDialogService` assíncrono com `rfd::AsyncFileDialog` integrado aos callbacks de Salvar e Abrir projeto; persiste e carrega via `petunia_project::format` sincronizando `saved` e status |
-| Interação do Viewport | `COMPLIANT` | `TouchArea` da viewport Slint captura órbita (MMB / Alt+LMB), pan (Shift+MMB) e zoom (scroll wheel) despachando `ViewportGesture` para a câmera do `AppState` com re-renderização imediata |
-| `PetuniaViewport` | `COMPLIANT` | trait unificada implementada por `PlaceholderViewport` e `WgpuViewport` |
-| WGPU compartilhado Slint/viewport | `COMPLIANT` | `WgpuViewport` em `viewport_gpu.rs` acopla `petunia_render_wgpu` à textura off-screen e exporta para `slint::Image` via `unstable-wgpu-30` com fallback gracioso |
-| viewport-lib | `OBSOLETE` como dependência padrão | `0.22.0` pinado somente na feature opcional por ser GPL-3.0-only; uso exige revisão de distribuição |
-| Multi-renderer fallback / Ivy Bridge | `COMPLIANT` | Suporte a `renderer-femtovg` (OpenGL via EGL/Glutin) e `renderer-software` adicionados ao Slint; detecção de Intel Gen 7 (Ivy Bridge / Bay Trail) evita o driver Vulkan incompleto do Mesa e ativa `PlaceholderViewport` seguro; leitura de pixels WGPU exporta para `slint::SharedPixelBuffer` universal compatível com todos os backends |
-| Viewer/LSP | `MISSING` localmente | binários não estão instalados; workflow está documentado, instalação manual permanece pendente |
-| Screenshot/golden | `MISSING` | criar após shell visual estabilizar |
-| Asset Library Drawer | `COMPLIANT` | Gaveta inferior expansível (conforme AGENTS.md §3: *"shell Parts-esquerda / Context-direita / Asset Library-abaixo"*); cards de assets com contagem de tris/verts, ações de seleção, duplicação e botão "Save Active as Asset" |
-| Viewport HUD & Projeção | `COMPLIANT` | HUD integrado sobre o viewport com alternador de Projeção (Persp / Ortho), toggle de Wireframe e botão de Reset Camera; despacha comandos para `petunia_core` |
-| Atalhos de Teclado Globais | `COMPLIANT` | FocusScope raiz com atalhos de produtividade: `Ctrl+Z` (Undo), `Ctrl+Shift+Z`/`Ctrl+Y` (Redo), `Ctrl+S` (Save), `Ctrl+O` (Open), `Ctrl+K`/`Ctrl+P` (Command Palette), `Ctrl+L` (Asset Library), `Shift+D`/`Ctrl+D` (Duplicate), `1`/`2`/`3`/`4` (Seleção Object/Point/Edge/Face), `Delete`/`Backspace` (Delete), `Tab` (Scene Outliner), e ferramentas `Q`, `W`, `B`, `E`, `U` |
-| AccessKit | `COMPLIANT` | feature `accessibility` ativa, papéis e rótulos semânticos completos em `RailButton`, `TopAction`, `ToolButton`, `ColorSwatch`, `NumericField` (`spinbox`), `InspectorSection` (`button`) e `search-input` (`text-input`) |
+| Branch/promoção a produção | `COMPLIANT` | `src/main.rs` executa `petunia_ui_slint::run()` por padrão; egui sob flag `--legacy-egui` |
+| Slint pinado na linha 1.18 | `COMPLIANT` | `Cargo.toml`: `slint ~1.18`, `compat-1-18` explícito |
+| UI Slint isolada da egui | `COMPLIANT` | crate `crates/ui-slint/` não depende de `egui`; nenhum arquivo produtivo egui alterado |
+| Design tokens semânticos | `COMPLIANT` | `theme.rs` sincroniza `DesignTokens` com `ThemeRegistry` (`petunia-dark`, `petunia-high-contrast`); teste `theme_change_intent_updates_active_theme` |
+| Icon rail | `COMPLIANT` | rail com Scene, Tools (Model), Paint e UV com ícones Lucide em `ui/app.slint` |
+| Viewport-first shell | `PARTIALLY_COMPLIANT` | viewport ocupa a região central, mas chrome permanente e sizing rígido ainda reduzem a área útil |
+| Selection Domain Switcher | `COMPLIANT` | alternador Object/Point/Edge/Face; teste `selection_domain_intent_updates_state_and_view_model` |
+| Undo & Redo | `COMPLIANT` | `ProjectContext::undo`/`redo`; teste `undo_redo_intents_integrate_with_project_undo_stack` |
+| Scene Outliner / Drawer | `COMPLIANT` | Drawer lateral conectado a `state.project.assets`; testes `scene_item_selection_updates_active_asset_and_inspector`, `scene_item_visibility_and_lock_toggles` |
+| Command Palette | `PARTIALLY_COMPLIANT` | busca e execução usam `petunia_core::CommandDispatcher`, labels apresentáveis e atalhos do keymap; navegação por setas/foco explícito ainda falta |
+| Overlay/ESC policy LIFO | `COMPLIANT` | `OverlayStack` em `overlay.rs`; testes `overlay_stack_handles_escape_in_lifo_order`, `modal_identity_preserves_lifo_when_multiple_modals_are_open`, `closing_one_drawer_does_not_close_or_leave_a_ghost_for_another` |
+| Numeric field | `PARTIALLY_COMPLIANT` | scrubbing transacional, fine-step e clamp funcionam; click-to-edit textual ainda não está ligado no componente Slint |
+| FileDialogService | `COMPLIANT` | `files.rs` com `rfd::AsyncFileDialog`; teste `bridge_saves_and_loads_project_file` |
+| Interação do Viewport (gestures) | `COMPLIANT` | órbita, pan, zoom via `ViewportGesture`; teste `bridge_applies_viewport_gestures_to_camera` |
+| Viewport resize | `COMPLIANT` | teste `viewport_resize_updates_backend_and_camera_aspect` |
+| PetuniaViewport (trait) | `COMPLIANT` | `WgpuViewport` e `Software3dViewport` implementam a trait |
+| Integração GPU Slint/viewport | `BROKEN` | o device não é compartilhado com o renderer Slint; cada frame faz staging allocation, GPU→CPU readback e espera síncrona antes de criar `slint::Image` |
+| Multi-renderer fallback / Ivy Bridge | `COMPLIANT` | `renderer-femtovg` (OpenGL) e `renderer-software` no Slint; detecção de Intel Gen 7 ativa `Software3dViewport` |
+| Asset Library Drawer | `COMPLIANT` | Gaveta inferior expansível; testes `toggle_asset_library_and_overlays`, `save_active_as_asset_intent_creates_project_asset` |
+| AccessKit | `COMPLIANT` | feature `accessibility` ativa; papéis e rótulos semânticos em `RailButton`, `ToolButton`, `NumericField`, etc. |
+| Transform modal transacional | `COMPLIANT` | scrubbing, commit, cancel; testes `transform_scrub_*`, `escape_cancels_transform_without_closing_the_underlying_overlay`, `selecting_another_asset_resets_transform_operation_values` |
+| Delete direto | `COMPLIANT` | testes `primitive_creation_and_deletion_updates_scene`, `delete_is_dirty_and_undo_restores_the_asset` |
+| Visibility/Lock diretos | `COMPLIANT` | teste `scene_item_visibility_and_lock_toggles` |
+| Context inspector por workspace | `PARTIALLY_COMPLIANT` | painéis de contexto adaptados por workspace (MODEL/PAINT/UV) presentes no `.slint`; refinamento de densidade e responsividade em progresso |
+| Viewport HUD & Projeção | `PARTIALLY_COMPLIANT` | HUD com alternador Persp/Ortho, toggle Wireframe, Reset Camera; teste `camera_projection_and_reset` |
+| Atalhos de teclado globais | `FUNCTIONAL_BUT_DIFFERENT` | FocusScope contém atalhos físicos hardcoded e ignora os perfis configuráveis de `Keybinds`; Tab também conflita com navegação de foco |
+
+### Gaps conhecidos (sem evidência de implementação no Slint)
+
+| Requisito | Estado | Observação |
+|---|---|---|
+| Registry centralizado de ícones (`IconRegistry`) | `MISSING` | O legado egui tem `crates/ui/src/icon_registry.rs`; o Slint usa Lucide diretamente via `lucide-slint` sem registry unificado |
+| Registry centralizado de comandos (`CommandDispatcher` do core) | `COMPLIANT` | a palette consulta `state.commands.query(...)` e executa `state.dispatch_command(...)`; teste `core_palette_command_executes_through_canonical_dispatcher` |
+| Keymap profiles (8 perfis canônicos) | `MISSING` | `petunia_config::keybinds` tem os perfis (Blender, Maya, etc.); sem bridge no shell Slint |
+| i18n TOML (`pt-BR.toml`, `en.toml`) | `MISSING` | Arquivos existem em `assets/locales/` para o legado egui; não portados para o Slint |
+| Fast path GPU sem readback | `BROKEN` | `viewport_gpu.rs` bloqueia em `PollType::wait_indefinitely()` e copia pixels para CPU por frame |
+| Layout flex/grid complexo (Properties, Outliner) | `PARTIALLY_COMPLIANT` | Shell usa layout declarativo nativo Slint; painéis densos precisam de refinamento de responsividade |
+| Screenshot/golden visual regression | `MISSING` | Criar após shell visual estabilizar |
+| Viewer/LSP Slint | `MISSING` localmente | Binários não instalados; workflow documentado |
+| `viewport-lib` (GPL) | `OBSOLETE` como dependência padrão | `0.22.0` pinado somente na feature opcional `viewport-lib-backend` por ser GPL-3.0-only |
+| Theme Extension API (`.petunia-theme`) | `STUB` | Contrato definido no capítulo 36; implementação ausente no Slint |
+| Plugin Panels Lua | `STUB` | Contrato definido no capítulo 36; implementação ausente |
 
 ## Inventário atual relevante
 
-- Domínio: `crates/core`, `crates/project`, `crates/commands`, `crates/config`.
-- Host atual: `crates/app/src/lib.rs`, com winit + wgpu + egui.
-- Render atual: `crates/render-wgpu` e `crates/render-gl`.
-- Contrato geométrico de viewport: `crates/core/src/viewport.rs`.
-- Estado de editor: `AppState` separa `ProjectState`, `EditorSession`, `UiState` e `RenderResources`.
-- Comandos atuais: `AppState::dispatch` e `CommandDispatcher`; a crate Slint não duplica algoritmos.
+- **Domínio**: `crates/core`, `crates/project`, `crates/commands`, `crates/config`.
+- **Frontend produção**: `crates/ui-slint/src/lib.rs` (bridge `UiIntent`), `ui/app.slint` (shell declarativo).
+- **Frontend legado**: `crates/ui/` (egui), `crates/app/` (host egui).
+- **Render**: `crates/render-wgpu` e `crates/render-gl` (toolkit-neutros via `PetuniaRenderer`).
+- **Contrato geométrico de viewport**: `crates/core/src/viewport.rs`.
+- **Estado de editor**: `AppState` separa `ProjectState`, `EditorSession`, `UiState` e `RenderResources`.
+- **Comandos**: `AppState::dispatch` e `CommandDispatcher`; a crate Slint não duplica algoritmos.
 
-## Dependências pesquisadas
+## Dependências
 
 | Dependência | Decisão | Observação |
 |---|---|---|
-| `slint` | usar | `~1.18`, `unstable-wgpu-30`, `renderer-femtovg`, `renderer-software`, AccessKit e backend winit |
-| `slintcn` | não runtime | CLI MIT para copiar componentes; proveniência deve ficar registrada quando um componente for incorporado |
-| `lucide-slint` | usar | `=1.47.0`, paths Slint pré-convertidos; API atual usa `IconSet` + `IconDisplay` |
-| Tabler | adiar | nenhum subset necessário no bootstrap; não baixar assets ainda |
+| `slint` | usar (produção) | `~1.18`, `unstable-wgpu-30`, `renderer-femtovg`, `renderer-software`, AccessKit, backend winit |
+| `lucide-slint` | usar | `=1.47.0`, paths Slint pré-convertidos; API `IconSet` + `IconDisplay` |
 | `rfd` | usar na boundary | `=0.17.2`, `AsyncFileDialog`, filtros centralizados |
 | `viewport-lib` | opcional | `=0.22.0`, feature `wgpu30`, GPL-3.0-only; não compila no default |
-| `wgpu` | existente | workspace já usa `30.0.1`; Slint 1.18 expõe suporte WGPU 30 instável |
-| `glam` | existente | domínio atual usa `0.27`; `viewport-lib` exige `0.30.10`, outra razão para manter o adapter isolado |
+| `wgpu` | existente | workspace usa `30.0.1`; Slint 1.18 expõe suporte WGPU 30 instável |
+| `glam` | existente | domínio usa `0.27`; `viewport-lib` exige `0.30.10`, razão para manter adapter isolado |
+| `egui` | legado | workspace ainda pinado em `0.36.2`; crate `crates/ui/` não recebe novas features |
 
 ## Validação executada
 
@@ -69,17 +92,44 @@ A branch mantém a UI egui e o app existentes intactos. O primeiro slice adicion
 cargo fmt -p petunia_ui_slint -- --check             PASS
 cargo check -p petunia_ui_slint --all-targets        PASS
 cargo check -p petunia_ui_slint --example shell      PASS
-cargo test -p petunia_ui_slint --lib                 PASS (40 testes unitários: 25 shell/bridge/undo/primitives/paint/selection/persistence/camera/scene/theme/asset-library/duplicate/new-commands, 4 commands, 1 files, 5 numeric, 3 overlay, 2 theme)
+cargo test -p petunia_ui_slint --lib                 PASS (55 testes unitários)
 cargo clippy -p petunia_ui_slint --all-targets -- -D warnings PASS
-cargo run -p xtask -- ui-guard --strict              PASS
 ```
 
-Todos os módulos (`commands`, `files`, `numeric`, `overlay`, `theme`), a integração WGPU (`viewport_gpu`), o shell declarativo em Slint e a bridge com Scene Outliner hierárquico, Asset Library drawer inferior, persistência de arquivo, atalhos globais de teclado, HUD de navegação com projeção e wireframe, controles de câmera, pilha de overlays, inputs numéricos, Tool Shelf contextual, seletor de domínio de seleção, duplicação e salvamento de ativos, Undo/Redo e painéis de Inspector estão testados e com zero avisos de linter.
+### Cobertura dos 55 testes unitários
 
-### Próximos passos identificados
+- Shell/bridge: workspace routing, temporary surfaces, viewport gestures, viewport resize, camera projection/reset
+- Undo/Redo: integração com `ProjectContext::undo`/`redo`
+- Primitivas: criação, deleção, duplicação, save-as-asset
+- Paint: parâmetros de ferramenta (cor, tamanho, opacidade)
+- Seleção: domain switch, select all/clear/invert, scene item selection
+- Transform: scrubbing, clamping, commit, cancel, asset switch reset
+- Scene: visibility, lock toggles
+- Overlays: ESC LIFO, click-away, modal identity, drawer isolation
+- Commands: search filter, routing, new commands via CommandId
+- Files: save/load project
+- Theme: registry, apply, change intent
+- Viewport: WGPU init/skip, software resize/render/init
 
-1. **Catálogo de Ícones Semânticos**: Expandir mapeamento de Lucide para cobrir ferramentas adicionais de modelagem.
-2. **Screenshots & Golden Tests**: Criar rotinas automatizadas de render snapshot para testes de regressão visual do shell Slint.
+## Completion Track
 
+The completion branch adds the direct WGPU 30 configuration path, keymap-driven
+shortcut routing, viewport picking for Object/Point selection, numeric text
+commit, command-palette focus and keyboard selection, disabled command reasons,
+paint fill/UV dispatch, responsive inspector collapse, a pinned Parts drawer,
+semantic viewport tokens, and the modular `tokens.slint`/`input.rs` boundaries.
 
+Cut/Knife preview and Paint stroke projection still require the viewport event
+adapter to feed domain coordinates into their existing sessions. They remain
+explicitly partial rather than being presented as complete tools.
 
+## Próximos passos
+
+1. **Registry centralizado de ícones**: portar uma abstração semântica de `IconId` para o Slint.
+2. **Keymap bridge**: conectar os 8 perfis canônicos de `petunia_config::keybinds` ao shell Slint.
+3. **i18n**: portar `pt-BR.toml`/`en.toml` e o sistema de `TextId` para o Slint.
+4. **GPU readback**: implementar rotina de snapshot para golden tests.
+5. **Theme Extension API**: implementar `.petunia-theme` conforme capítulo 36.
+6. **Plugin Panels**: implementar registry e isolation conforme capítulo 36.
+7. **Layout refinement**: densidade e responsividade de Properties/Outliner.
+8. **Screenshot/golden**: criar rotinas automatizadas de regressão visual.

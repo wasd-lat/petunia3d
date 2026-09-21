@@ -1852,6 +1852,8 @@ impl AppState {
                 "Command '{id}' not found in dispatcher"
             ))
         })?;
+        cmd.can_execute(self)
+            .map_err(|reason| crate::command::CommandError::Execution(reason.to_string()))?;
         crate::command::CommandDispatcher::dispatch(self, cmd.as_ref())
     }
 

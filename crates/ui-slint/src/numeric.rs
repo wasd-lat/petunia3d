@@ -50,6 +50,13 @@ impl NumericFieldState {
         self.value
     }
 
+    pub fn set_value(&mut self, value: f32) -> f32 {
+        self.value = self.clamp(value);
+        self.original_value = self.value;
+        self.editing = false;
+        self.value
+    }
+
     pub fn is_editing(&self) -> bool {
         self.editing
     }
@@ -146,6 +153,16 @@ mod tests {
         let mut field = NumericFieldState::new(1.0, None, None).with_steps(0.1, 0.01);
         assert_eq!(field.scrub(2.0, false), 1.2);
         assert_eq!(field.scrub(2.0, true), 1.22);
+    }
+
+    #[test]
+    fn setting_a_value_preserves_constraints_and_resets_editing() {
+        let mut field = NumericFieldState::new(1.0, Some(0.5), Some(2.0));
+        field.begin_edit();
+
+        assert_eq!(field.set_value(4.0), 2.0);
+        assert!(!field.is_editing());
+        assert_eq!(field.cancel(), 2.0);
     }
 
     #[test]

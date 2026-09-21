@@ -6,6 +6,7 @@
 - Canonical Specification & SSOT: [`docs/bible/`](docs/bible/index.md) (155 P3D specs, 17 capítulos constitucionais, 15 seções, 3 adendos e 36 capítulos de fundação unificados)
 - Canonical UI Golden Reference: [`docs/image-references/Blender.svg`](file:///home/raillen/Documentos/Projetos/simple3d-modeling/docs/image-references/Blender.svg) (component catalog in [`docs/image-references/extracted/`](file:///home/raillen/Documentos/Projetos/simple3d-modeling/docs/image-references/extracted/))
 - Current implementation status: **Waves 0 a 10 100% Concluídas e Verificadas** (480+ testes automatizados, zero warnings no Clippy, arch-check e docs-check verdes, Sistema de Rigging e Animação funcional).
+- **Frontend de produção**: `petunia_ui_slint` (Slint 1.18) — shell declarativo, 55 testes unitários, bridge de intents, viewport WGPU/software fallback. UI egui (`crates/ui/`) arquivada como legado de transição (`--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`).
 - Context methodology: **Lean Progressive Context (LPC)**
 - Last updated: `2026-09-14`
 
@@ -221,22 +222,32 @@ Após a estabilização da iniciativa Paint, retomar a **Wave 11
 (Extensibility, Plugins & Automation)** cobrindo P3D-110, P3D-111, P3D-112,
 P3D-141, P3D-142 e P3D-154.
 
-## Política de modelos por função (OpenCode Go — obrigatório)
+### Frontend Slint — gaps conhecidos (2026-09-20)
 
-Ver `AGENTS.md` §6 (normativo) e agentes fixados em `.opencode/agent/`.
-Resumo operacional para o plano Paint + Wave 11:
+O shell Slint (`crates/ui-slint/`) é o frontend de produção com 55 testes
+unitários verdes. Gaps conhecidos em relação ao caderno (capítulos 23/36):
 
-| Fase / frente | Função | Modelo | Agente |
-|---|---|---|---|
-| F1–F3 Paint core (brush engine, effects, graph headless) | engenharia | `opencode-go/deepseek-v4-pro` | `math-core` |
-| F4 Paint UI (anel honesto, HUD, painel, shelf, i18n) | UI/UX | `opencode-go/grok-4.6` | `ui-ux` |
-| Review de screenshots/aparência | visual | `opencode-go/minimax-m3` | `vision` |
-| Testes, migrações, gates locais | mecânica | `opencode-go/deepseek-v4-flash` | `worker` |
-| Auditoria de diffs e DoD | revisão | `opencode-go/gpt-5.6-luna` | `reviewer` |
-| Emenda canônica, changelog, doc delta | docs | `opencode-go/qwen3.7-plus` | `docs` |
+- **Transform modal**: sendo corrigido transacionalmente (scrubbing, commit,
+  cancel — testes `transform_scrub_*` e `escape_cancels_transform` já verdes).
+- **Delete/visibility/lock diretos**: corrigidos (`scene_item_visibility_and_lock_toggles`,
+  `primitive_creation_and_deletion_updates_scene`, `delete_is_dirty_and_undo_restores_the_asset`).
+- **Overlay identity LIFO**: corrigido (`overlay_stack_handles_escape_in_lifo_order`,
+  `modal_identity_preserves_lifo_when_multiple_modals_are_open`,
+  `closing_one_drawer_does_not_close_or_leave_a_ghost_for_another`).
+- **Viewport resize**: corrigido (`viewport_resize_updates_backend_and_camera_aspect`).
+- **Registry centralizado de ícones**: ausente no Slint; a Command Palette já
+  consulta e executa o `CommandDispatcher` canônico do core.
+- **Keymap profiles**: ausente — os 8 perfis canônicos do capítulo 36 ainda
+  vivem somente em `petunia_config::keybinds` sem bridge no shell Slint.
+- **i18n TOML**: ausente — `pt-BR.toml`/`en.toml` existem no legado egui mas
+  não foram portados para o Slint.
+- **Fast path GPU**: bloqueado — `viewport_gpu.rs` ainda faz staging allocation,
+  GPU→CPU readback e espera síncrona por frame antes de criar `slint::Image`.
+- **Layout flex/grid complexo**: em progresso — o shell usa layout declarativo
+  nativo Slint, mas painéis como Properties/Outliner ainda precisam de
+  refinamento de responsividade e densidade.
 
-MODEL GATE: modelo divergente da função → parar, avisar, só continuar após
-a troca confirmada. `preferred_models` em `prumo.json` espelha esta tabela.
+Esses gaps estão registrados na [auditoria Slint](docs/ui/slint-modern-audit.md).
 
 ## Recovery order
 
@@ -245,4 +256,3 @@ a troca confirmada. `preferred_models` em `prumo.json` espelha esta tabela.
 3. `docs/PRUMO.md` and the premium interaction plan.
 4. Historical goals in `.ai/goals/` (their DONE state does not close premium work).
 5. Only relevant canonical docs, symbols and tests.
-

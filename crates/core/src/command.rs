@@ -195,23 +195,29 @@ impl CommandDispatcher {
             .get(id)
             .ok_or_else(|| CommandError::Execution(format!("Comando '{id}' não registrado")))?
             .clone();
+        cmd.can_execute(state)
+            .map_err(|reason| CommandError::Execution(reason.to_string()))?;
         Self::dispatch(state, cmd.as_ref())
     }
 
     pub fn dispatch(state: &mut AppState, cmd: &dyn Command) -> Result<(), CommandError> {
-        if cmd.is_destructive() {
-            state.checkpoint(cmd.label());
-        }
-        let res = cmd.execute(state);
-        if res.is_ok() {
-            if cmd.is_destructive() {
-                state.mark_document_dirty();
+        let original = cmd.is_destructive().then(|| state.project.project.clone());
+        if let Err(error) = cmd.execute(state) {
+            if let Some(original) = original {
+                state.project.project = original;
+                state.sync_selection();
             }
-            state.sync_selection();
-            state.emit_mesh_changed();
-            state.mark_dirty();
+            return Err(error);
         }
-        res
+
+        if let Some(original) = original {
+            state.project.undo.checkpoint(cmd.label(), &original);
+            state.mark_document_dirty();
+        }
+        state.sync_selection();
+        state.emit_mesh_changed();
+        state.mark_dirty();
+        Ok(())
     }
 
     /// Consulta a lista de comandos filtrados por busca fuzzy/substring para a Command Palette (P3D-081).
@@ -283,6 +289,16 @@ impl CommandDispatcher {
             )
             .with_docs(DocsTopic::GettingStarted),
             SaveProjectCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "file.open",
+                "Open Project",
+                "Open a Petunia3D project from disk",
+                CommandCategory::File,
+            )
+            .with_docs(DocsTopic::GettingStarted),
+            OpenProjectCmd,
         );
         d.register_with_meta(
             CommandMetadata::new(
@@ -1982,6 +1998,25 @@ impl Command for SaveProjectCmd {
     }
 }
 
+/// Comando de boundary para solicitar a abertura de um projeto.
+#[derive(Debug, Clone, Default)]
+pub struct OpenProjectCmd;
+
+impl Command for OpenProjectCmd {
+    fn label(&self) -> &'static str {
+        "open project"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state.set_status("Open Project requested");
+        Ok(())
+    }
+}
+
 /// Comando para salvar o projeto em novo arquivo.
 #[derive(Debug, Clone, Default)]
 pub struct SaveProjectAsCmd;
@@ -1989,6 +2024,10 @@ pub struct SaveProjectAsCmd;
 impl Command for SaveProjectAsCmd {
     fn label(&self) -> &'static str {
         "save project as"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
     }
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {

@@ -8,6 +8,12 @@ Documentação da **UI Baseline Final V1**, congelada no capítulo 36 do Livro V
 > toolkit, grafo do shell, docking irrestrito, acesso cru de plugins a UI/GPU e
 > invariantes de acessibilidade exigem decisão explícita/ADR.
 
+**Frontend de produção (2026-09-20):** `petunia_ui_slint` (Slint 1.18) em
+`crates/ui-slint/`. O binário `petunia3d` executa o shell Slint por padrão; a
+UI egui (`crates/ui/`) é legado de transição acessível via `--legacy-egui` /
+`PETUNIA_LEGACY_EGUI=1`. Os contratos de UX dos capítulos 23 e 36 são
+toolkit-neutros — a migração para Slint os preserva.
+
 ## 1. Modelo mental do usuário
 
 ```
@@ -190,6 +196,20 @@ Workspace não implementado **não aparece** como pill desabilitada.
 
 ## 10. Viewport adapter
 
+O viewport adapter é toolkit-neutro. `PetuniaRenderer` (`crates/render/`) não
+conhece Slint nem egui; o adapter é a única fronteira que conhece ambos.
+
+**Slint (produção):**
+
+```
+Slint TouchArea
+→ viewport_gpu.rs (WGPU off-screen → slint::Image)
+→ PetuniaRenderer
+→ wgpu
+```
+
+**egui (legado):**
+
 ```
 egui layout
 → allocate viewport Rect/input/clip
@@ -199,8 +219,7 @@ egui layout
 → wgpu
 ```
 
-`PetuniaRenderer` permanece sem dependência de egui; o adapter é a única fronteira
-que conhece ambos. Repaint é event-driven em idle e contínuo somente quando
+Repaint é event-driven em idle e contínuo somente quando
 interação/motion/job visual exigir. A V1 tem **um** viewport 3D principal por
 workspace; multi-viewport/quad-view é evolução posterior.
 
