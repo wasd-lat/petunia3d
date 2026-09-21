@@ -11,6 +11,12 @@ export struct CommandItem {
     disabled-reason: string,
 }
 
+export struct MenuEntry {
+    id: string,
+    label: string,
+    shortcut: string,
+}
+
 export struct SceneItem {
     id: string,
     name: string,
@@ -83,6 +89,36 @@ component SplitterHorizontal inherits Rectangle {
     }
 }
 
+/// Botão da barra de menus do topo.
+component MenuButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> open;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-expanded: root.open;
+    height: 26px;
+    width: max(46px, menu-label.preferred-width + 20px);
+    border-radius: 4px;
+    background: root.open
+        ? DesignTokens.accent
+        : (touch-area.has-hover ? DesignTokens.surface-hover : transparent);
+
+    menu-label := Text {
+        text: root.label;
+        color: root.open ? DesignTokens.canvas : DesignTokens.text-secondary;
+        font-size: 11px;
+        font-weight: root.open ? 700 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch-area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
 /// Item do menu de contexto: rótulo, atalho opcional e variante de perigo.
 component ContextMenuItem inherits Rectangle {
     in property <string> label;
@@ -119,6 +155,33 @@ component ContextMenuItem inherits Rectangle {
 
     touch-area := TouchArea {
         clicked => { root.clicked(); }
+    }
+}
+
+/// Dropdown de um menu da barra superior.
+component MenuDropdown inherits Rectangle {
+    in property <[MenuEntry]> entries;
+    callback invoked(string);
+
+    width: 216px;
+    height: menu-items.preferred-height;
+    background: DesignTokens.surface-raised;
+    border-width: 1px;
+    border-color: DesignTokens.border;
+    border-radius: 6px;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000080;
+    drop-shadow-offset-y: 4px;
+
+    menu-items := VerticalLayout {
+        padding: 4px;
+        spacing: 1px;
+
+        for entry in root.entries: ContextMenuItem {
+            label: entry.label;
+            shortcut: entry.shortcut;
+            clicked => { root.invoked(entry.id); }
+        }
     }
 }
 
@@ -448,6 +511,16 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> context-menu-visible: true;
     in-out property <bool> context-menu-locked: false;
     in-out property <bool> rename-active: false;
+    in-out property <string> menu-open: "";
+    property <length> menu-anchor-x: 0px;
+    in-out property <string> menu-file-label: "";
+    in-out property <string> menu-edit-label: "";
+    in-out property <string> menu-view-label: "";
+    in-out property <string> menu-window-label: "";
+    in-out property <[MenuEntry]> menu-file-items: [];
+    in-out property <[MenuEntry]> menu-edit-items: [];
+    in-out property <[MenuEntry]> menu-view-items: [];
+    in-out property <[MenuEntry]> menu-window-items: [];
     in-out property <string> rename-value: "";
     in-out property <bool> tool-modal-active: false;
     in-out property <string> tool-modal-title: "";
@@ -495,6 +568,8 @@ export component PetuniaSlintShell inherits Window {
     callback rename-cancelled;
     callback scene-context-requested(string, float, float);
     callback context-menu-action(string);
+    callback menu-toggled(string);
+    callback menu-item-invoked(string);
     callback open-project-requested;
     callback scene-select(string);
     callback scene-toggle-visibility(string);
@@ -554,7 +629,40 @@ export component PetuniaSlintShell inherits Window {
                         color: DesignTokens.text-primary;
                         font-size: 14px;
                         font-weight: 700;
-                        width: 84px;
+                        width: 62px;
+                    }
+
+                    MenuButton {
+                        label: root.menu-file-label;
+                        open: root.menu-open == "file";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("file");
+                        }
+                    }
+                    MenuButton {
+                        label: root.menu-edit-label;
+                        open: root.menu-open == "edit";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("edit");
+                        }
+                    }
+                    MenuButton {
+                        label: root.menu-view-label;
+                        open: root.menu-open == "view";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("view");
+                        }
+                    }
+                    MenuButton {
+                        label: root.menu-window-label;
+                        open: root.menu-open == "window";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("window");
+                        }
                     }
 
                     Rectangle {
@@ -1985,6 +2093,29 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
                 }
+            }
+        }
+
+        // Overlay: dropdown de um menu da barra superior.
+        if root.menu-open != "": Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+
+            TouchArea {
+                clicked => { root.click-away-requested(); }
+            }
+
+            MenuDropdown {
+                x: min(max(8px, root.menu-anchor-x), max(8px, parent.width - self.width - 8px));
+                y: 44px;
+                entries: root.menu-open == "file"
+                    ? root.menu-file-items
+                    : (root.menu-open == "edit"
+                        ? root.menu-edit-items
+                        : (root.menu-open == "view" ? root.menu-view-items : root.menu-window-items));
+                invoked(id) => { root.menu-item-invoked(id); }
             }
         }
 

@@ -279,6 +279,15 @@ pub struct ShellViewModel {
     pub context_menu_title: String,
     pub context_menu_visible: bool,
     pub context_menu_locked: bool,
+    pub menu_open: String,
+    pub menu_file_label: String,
+    pub menu_edit_label: String,
+    pub menu_view_label: String,
+    pub menu_window_label: String,
+    pub menu_file_items: Vec<MenuEntryModel>,
+    pub menu_edit_items: Vec<MenuEntryModel>,
+    pub menu_view_items: Vec<MenuEntryModel>,
+    pub menu_window_items: Vec<MenuEntryModel>,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -395,6 +404,15 @@ impl ShellViewModel {
             context_menu_title: String::new(),
             context_menu_visible: true,
             context_menu_locked: false,
+            menu_open: String::new(),
+            menu_file_label: String::new(),
+            menu_edit_label: String::new(),
+            menu_view_label: String::new(),
+            menu_window_label: String::new(),
+            menu_file_items: Vec::new(),
+            menu_edit_items: Vec::new(),
+            menu_view_items: Vec::new(),
+            menu_window_items: Vec::new(),
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -514,6 +532,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub rename_draft: Option<String>,
     /// Menu de contexto do Outliner: posição em px lógicos e ativo alvo.
     pub context_menu: Option<ContextMenuState>,
+    /// Menu da barra superior aberto, se houver.
+    pub menu_open: Option<MenuKind>,
 }
 
 /// Menu de contexto do Outliner aberto sobre uma linha do painel Parts.
@@ -522,6 +542,79 @@ pub struct ContextMenuState {
     pub x: f32,
     pub y: f32,
     pub asset: uuid::Uuid,
+}
+
+/// Menus da barra superior do shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuKind {
+    File,
+    Edit,
+    View,
+    Window,
+}
+
+impl MenuKind {
+    pub const ALL: [MenuKind; 4] = [Self::File, Self::Edit, Self::View, Self::Window];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Edit => "edit",
+            Self::View => "view",
+            Self::Window => "window",
+        }
+    }
+
+    pub const fn title(self) -> petunia_config::TextId {
+        use petunia_config::text_id as T;
+        match self {
+            Self::File => T::MENU_FILE,
+            Self::Edit => T::MENU_EDIT,
+            Self::View => T::MENU_VIEW,
+            Self::Window => T::MENU_WINDOW,
+        }
+    }
+
+    /// Itens publicados pelo menu, na ordem de exibição.
+    ///
+    /// Cada id é um comando canônico real ou uma ação de shell que já existe no
+    /// roteador — nenhum item decorativo.
+    pub const fn items(self) -> &'static [(&'static str, petunia_config::TextId, &'static str)] {
+        use petunia_config::text_id as T;
+        match self {
+            Self::File => &[
+                ("file.new", T::FILE_NEW, "Ctrl+N"),
+                ("file.open", T::FILE_OPEN_PROJECT, "Ctrl+O"),
+                ("file.save", T::FILE_SAVE, "Ctrl+S"),
+                ("file.save_as", T::FILE_SAVE_AS, "Ctrl+Shift+S"),
+                ("file.import_obj", T::FILE_IMPORT_OBJ, ""),
+            ],
+            Self::Edit => &[
+                ("edit.undo", T::EDIT_UNDO, "Ctrl+Z"),
+                ("edit.redo", T::EDIT_REDO, "Ctrl+Shift+Z"),
+                ("edit.duplicate", T::UI_DUPLICATE, "Shift+D"),
+            ],
+            Self::View => &[
+                ("view.frame_selection", T::VIEW_FRAME, "F"),
+                ("view.frame_all", T::VIEW_FRAME_ALL, "Home"),
+                ("view.toggle_projection", T::VIEW_TOGGLE_PROJECTION, "O"),
+                ("view.toggle_wireframe", T::VIEW_TOGGLE_WIREFRAME, "Z"),
+                ("view.reset_camera", T::VIEW_RESET_CAMERA, "Shift+Home"),
+            ],
+            Self::Window => &[
+                ("window.command_palette", T::MENU_COMMAND_PALETTE, "Ctrl+P"),
+                ("window.settings", T::MENU_PREFERENCES, ""),
+            ],
+        }
+    }
+}
+
+/// Item de menu já traduzido para o shell.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuEntryModel {
+    pub id: String,
+    pub label: String,
+    pub shortcut: String,
 }
 
 impl<V: PetuniaViewport> SlintUiBridge<V> {
@@ -542,6 +635,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             tool_modal_value: 0.0,
             rename_draft: None,
             context_menu: None,
+            menu_open: None,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -1036,6 +1130,66 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.ui.set_shell_asset_library_height(height)
     }
 
+    /// Abre, troca ou fecha um menu da barra superior.
+    pub fn toggle_menu(&mut self, id: &str) -> bool {
+        let next = MenuKind::ALL.into_iter().find(|kind| kind.id() == id);
+        self.menu_open = match (self.menu_open, next) {
+            (Some(current), Some(next)) if current == next => None,
+            (_, next) => next,
+        };
+        match self.menu_open {
+            Some(_) => self.overlays.push(OverlayEntry {
+                id: OverlayId::MenuBar,
+                kind: OverlayKind::Popover,
+                pinned: false,
+                dismiss_on_escape: true,
+                dismiss_on_click_away: true,
+            }),
+            None => {
+                self.overlays.remove(OverlayId::MenuBar);
+            }
+        }
+        self.state.mark_dirty();
+        self.menu_open.is_some()
+    }
+
+    pub fn close_menu(&mut self) -> bool {
+        self.overlays.remove(OverlayId::MenuBar);
+        self.menu_open.take().is_some()
+    }
+
+    /// Executa um item de menu pelo id canônico que ele publica.
+    pub fn menu_item_invoked(&mut self, id: &str) -> bool {
+        self.close_menu();
+        match id {
+            // Itens de arquivo que abrem diálogo são despachados pelo mesmo
+            // caminho assíncrono do `command-file-action`; aqui só o que resolve
+            // de imediato.
+            "file.new" => self.execute_core_command("file.new").is_ok(),
+            "edit.undo" => {
+                self.apply(UiIntent::Undo);
+                true
+            }
+            "edit.redo" => {
+                self.apply(UiIntent::Redo);
+                true
+            }
+            "edit.duplicate" => {
+                self.apply(UiIntent::DuplicateActiveAsset);
+                true
+            }
+            "window.command_palette" => {
+                self.apply(UiIntent::OpenCommandSearch);
+                true
+            }
+            "window.settings" => {
+                self.apply(UiIntent::OpenSettings);
+                true
+            }
+            other => self.execute_core_command(other).is_ok(),
+        }
+    }
+
     /// Abre o menu de contexto do Outliner sobre a linha de `id`.
     ///
     /// O alvo é selecionado antes de abrir: as ações do menu operam sobre ele e
@@ -1391,6 +1545,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.close_menu() {
+            return true;
+        }
         if self.close_context_menu() {
             return true;
         }
@@ -1746,6 +1903,39 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 vm.context_menu_locked = asset.locked;
             }
         }
+        if let Some(kind) = self.menu_open {
+            vm.menu_open = kind.id().to_string();
+        }
+        let translated = |id: petunia_config::TextId| self.state.t_id(id);
+        for kind in MenuKind::ALL {
+            let entries: Vec<MenuEntryModel> = kind
+                .items()
+                .iter()
+                .map(|(id, label, shortcut)| MenuEntryModel {
+                    id: (*id).to_string(),
+                    label: translated(*label),
+                    shortcut: (*shortcut).to_string(),
+                })
+                .collect();
+            match kind {
+                MenuKind::File => {
+                    vm.menu_file_label = translated(kind.title());
+                    vm.menu_file_items = entries;
+                }
+                MenuKind::Edit => {
+                    vm.menu_edit_label = translated(kind.title());
+                    vm.menu_edit_items = entries;
+                }
+                MenuKind::View => {
+                    vm.menu_view_label = translated(kind.title());
+                    vm.menu_view_items = entries;
+                }
+                MenuKind::Window => {
+                    vm.menu_window_label = translated(kind.title());
+                    vm.menu_window_items = entries;
+                }
+            }
+        }
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
@@ -1792,6 +1982,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             OverlayId::SceneDrawer => self.scene_drawer_visible = false,
             OverlayId::AssetLibrary => self.asset_library_visible = false,
             OverlayId::OutlinerContextMenu => self.context_menu = None,
+            OverlayId::MenuBar => self.menu_open = None,
         }
     }
 }
@@ -2044,6 +2235,25 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_context_menu_title(vm.context_menu_title.as_str().into());
     window.set_context_menu_visible(vm.context_menu_visible);
     window.set_context_menu_locked(vm.context_menu_locked);
+    window.set_menu_open(vm.menu_open.as_str().into());
+    window.set_menu_file_label(vm.menu_file_label.as_str().into());
+    window.set_menu_edit_label(vm.menu_edit_label.as_str().into());
+    window.set_menu_view_label(vm.menu_view_label.as_str().into());
+    window.set_menu_window_label(vm.menu_window_label.as_str().into());
+    let to_entries = |items: &[MenuEntryModel]| -> Vec<MenuEntry> {
+        items
+            .iter()
+            .map(|item| MenuEntry {
+                id: item.id.as_str().into(),
+                label: item.label.as_str().into(),
+                shortcut: item.shortcut.as_str().into(),
+            })
+            .collect()
+    };
+    window.set_menu_file_items(to_entries(&vm.menu_file_items).as_slice().into());
+    window.set_menu_edit_items(to_entries(&vm.menu_edit_items).as_slice().into());
+    window.set_menu_view_items(to_entries(&vm.menu_view_items).as_slice().into());
+    window.set_menu_window_items(to_entries(&vm.menu_window_items).as_slice().into());
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
     window.set_tool_modal_active(vm.tool_modal_active);
@@ -2718,6 +2928,49 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_context_menu_action(move |action| {
         if let Ok(mut bridge) = context_action_bridge.lock() {
             bridge.context_menu_action(action.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let menu_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_menu_toggled(move |id| {
+        if let Ok(mut bridge) = menu_bridge.lock() {
+            bridge.toggle_menu(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let menu_item_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_menu_item_invoked(move |id| {
+        let id = id.to_string();
+        // Diálogos de arquivo continuam no caminho assíncrono já testado.
+        let opens_dialog = matches!(
+            id.as_str(),
+            "file.open" | "file.save" | "file.save_as" | "file.import_obj"
+        );
+        if let Ok(mut bridge) = menu_item_bridge.lock() {
+            bridge.close_menu();
+            if opens_dialog {
+                let vm = bridge.view_model();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    window.invoke_command_file_action(id.as_str().into());
+                }
+                return;
+            }
+            bridge.menu_item_invoked(id.as_str());
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -4173,6 +4426,84 @@ mod tests {
         assert!(!bridge.open_context_menu(&uuid::Uuid::new_v4().to_string(), 0.0, 0.0));
         assert!(!bridge.open_context_menu("not-a-uuid", 0.0, 0.0));
         assert!(!bridge.view_model().context_menu_open);
+    }
+
+    #[test]
+    fn menu_bar_labels_come_from_the_i18n_catalog() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let vm = bridge.view_model();
+        assert_eq!(vm.menu_file_label, "File");
+        assert_eq!(vm.menu_edit_label, "Edit");
+        assert_eq!(vm.menu_view_label, "View");
+        assert_eq!(vm.menu_window_label, "Window");
+
+        bridge.state.ui.i18n = petunia_config::I18n::load("pt-BR");
+        let vm = bridge.view_model();
+        assert_eq!(vm.menu_file_label, "Arquivo");
+        assert_eq!(vm.menu_edit_label, "Editar");
+        assert_eq!(vm.menu_view_label, "Exibir");
+        assert_eq!(vm.menu_window_label, "Janela");
+    }
+
+    #[test]
+    fn every_menu_item_publishes_a_real_translated_label_and_command_id() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let vm = bridge.view_model();
+        let menus = [
+            ("file", &vm.menu_file_items),
+            ("edit", &vm.menu_edit_items),
+            ("view", &vm.menu_view_items),
+            ("window", &vm.menu_window_items),
+        ];
+        for (menu, items) in menus {
+            assert!(!items.is_empty(), "menu {menu} sem itens");
+            for item in items {
+                assert!(!item.label.is_empty(), "{} tem rótulo vazio", item.id);
+                assert!(
+                    !item.label.contains('.'),
+                    "{} publicou a chave de i18n em vez do texto: {}",
+                    item.id,
+                    item.label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn menu_toggles_open_and_close_and_escape_closes_it_first() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.toggle_menu("file"));
+        assert_eq!(bridge.view_model().menu_open, "file");
+
+        assert!(bridge.toggle_menu("view"));
+        assert_eq!(bridge.view_model().menu_open, "view", "troca de menu");
+
+        assert!(!bridge.toggle_menu("view"), "clicar de novo fecha");
+        assert_eq!(bridge.view_model().menu_open, "");
+
+        bridge.toggle_menu("edit");
+        bridge.begin_rename();
+        assert!(bridge.handle_escape(), "o menu é o topo da pilha");
+        assert_eq!(bridge.view_model().menu_open, "");
+        assert!(bridge.view_model().rename_active);
+    }
+
+    #[test]
+    fn menu_items_dispatch_to_the_domain() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let before = bridge.state.project.assets.len();
+
+        assert!(bridge.menu_item_invoked("edit.duplicate"));
+        assert_eq!(bridge.state.project.assets.len(), before + 1);
+        assert_eq!(bridge.view_model().menu_open, "");
+
+        assert!(bridge.menu_item_invoked("view.toggle_wireframe"));
+        assert_eq!(bridge.state.shading, petunia_core::Shading::Wireframe);
+        assert!(bridge.menu_item_invoked("view.toggle_wireframe"));
+        assert_ne!(bridge.state.shading, petunia_core::Shading::Wireframe);
+
+        assert!(bridge.menu_item_invoked("view.reset_camera"));
+        assert!(!bridge.menu_item_invoked("view.not_a_real_command"));
     }
 
     #[test]
