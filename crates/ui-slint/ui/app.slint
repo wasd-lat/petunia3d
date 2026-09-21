@@ -556,12 +556,18 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> selection-overlay-accent: false;
     in-out property <length> gizmo-origin-x: 0px;
     in-out property <length> gizmo-origin-y: 0px;
-    in-out property <length> gizmo-x-end-x: 0px;
-    in-out property <length> gizmo-x-end-y: 0px;
-    in-out property <length> gizmo-y-end-x: 0px;
-    in-out property <length> gizmo-y-end-y: 0px;
-    in-out property <length> gizmo-z-end-x: 0px;
-    in-out property <length> gizmo-z-end-y: 0px;
+    in-out property <string> gizmo-x-commands: "";
+    in-out property <string> gizmo-y-commands: "";
+    in-out property <string> gizmo-z-commands: "";
+    in-out property <string> gizmo-x-arrow-commands: "";
+    in-out property <string> gizmo-y-arrow-commands: "";
+    in-out property <string> gizmo-z-arrow-commands: "";
+    in-out property <string> view-gizmo-x-commands: "";
+    in-out property <string> view-gizmo-y-commands: "";
+    in-out property <string> view-gizmo-z-commands: "";
+    in-out property <length> view-gizmo-origin-x: 0px;
+    in-out property <length> view-gizmo-origin-y: 0px;
+    callback view-axis-clicked(string);
     in-out property <bool> add-menu-open: false;
     in-out property <bool> context-menu-open: false;
     in-out property <length> context-menu-x: 0px;
@@ -1343,7 +1349,9 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
 
-                    // Gizmo 3D projetado: três hastes do pivô da seleção.
+                    // Gizmo de transformação: hastes curtas de tamanho fixo em
+                    // tela, com setas, só com Move/Rotate/Scale. Nunca linhas
+                    // infinitas: o padrão é controle de tamanho aparente constante.
                     if gizmo-visible && active-workspace == "MODEL": Rectangle {
                         x: 0;
                         y: 0;
@@ -1352,32 +1360,122 @@ export component PetuniaSlintShell inherits Window {
                         background: transparent;
 
                         Path {
-                            commands: "M \{gizmo-origin-x / 1px} \{gizmo-origin-y / 1px} L \{gizmo-x-end-x / 1px} \{gizmo-x-end-y / 1px}";
+                            commands: root.gizmo-x-commands;
                             stroke: DesignTokens.axis-x;
-                            stroke-width: 3px;
+                            stroke-width: 2.5px;
                             fill: transparent;
                         }
                         Path {
-                            commands: "M \{gizmo-origin-x / 1px} \{gizmo-origin-y / 1px} L \{gizmo-y-end-x / 1px} \{gizmo-y-end-y / 1px}";
+                            commands: root.gizmo-y-commands;
                             stroke: DesignTokens.axis-y;
-                            stroke-width: 3px;
+                            stroke-width: 2.5px;
                             fill: transparent;
                         }
                         Path {
-                            commands: "M \{gizmo-origin-x / 1px} \{gizmo-origin-y / 1px} L \{gizmo-z-end-x / 1px} \{gizmo-z-end-y / 1px}";
+                            commands: root.gizmo-z-commands;
                             stroke: DesignTokens.axis-z;
-                            stroke-width: 3px;
+                            stroke-width: 2.5px;
                             fill: transparent;
+                        }
+                        Path {
+                            commands: root.gizmo-x-arrow-commands;
+                            stroke: transparent;
+                            fill: DesignTokens.axis-x;
+                        }
+                        Path {
+                            commands: root.gizmo-y-arrow-commands;
+                            stroke: transparent;
+                            fill: DesignTokens.axis-y;
+                        }
+                        Path {
+                            commands: root.gizmo-z-arrow-commands;
+                            stroke: transparent;
+                            fill: DesignTokens.axis-z;
                         }
                         Rectangle {
-                            x: gizmo-origin-x - 5px;
-                            y: gizmo-origin-y - 5px;
-                            width: 10px;
-                            height: 10px;
-                            border-radius: 5px;
+                            x: gizmo-origin-x - 4px;
+                            y: gizmo-origin-y - 4px;
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
                             background: DesignTokens.text-primary;
                             border-width: 1px;
                             border-color: DesignTokens.canvas;
+                        }
+                    }
+
+                    // Tripé de navegação no canto inferior esquerdo: mostra a
+                    // orientação da câmera como Blender, C4D e Maya. Clicar num
+                    // eixo alinha a visão a ele.
+                    Rectangle {
+                        x: view-gizmo-origin-x - 30px;
+                        y: view-gizmo-origin-y - 30px;
+                        width: 108px;
+                        height: 60px;
+                        background: transparent;
+
+                        Path {
+                            commands: root.view-gizmo-x-commands;
+                            stroke: DesignTokens.axis-x;
+                            stroke-width: 2px;
+                            fill: transparent;
+                        }
+                        Path {
+                            commands: root.view-gizmo-y-commands;
+                            stroke: DesignTokens.axis-y;
+                            stroke-width: 2px;
+                            fill: transparent;
+                        }
+                        Path {
+                            commands: root.view-gizmo-z-commands;
+                            stroke: DesignTokens.axis-z;
+                            stroke-width: 2px;
+                            fill: transparent;
+                        }
+                        Text {
+                            x: 66px;
+                            y: 12px;
+                            text: "X";
+                            color: DesignTokens.axis-x;
+                            font-size: 10px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            x: 20px;
+                            y: 0px;
+                            text: "Y";
+                            color: DesignTokens.axis-y;
+                            font-size: 10px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            x: 44px;
+                            y: 30px;
+                            text: "Z";
+                            color: DesignTokens.axis-z;
+                            font-size: 10px;
+                            font-weight: 700;
+                        }
+                        TouchArea {
+                            x: 48px;
+                            y: 24px;
+                            width: 60px;
+                            height: 36px;
+                            clicked => { root.view-axis-clicked("x"); }
+                        }
+                        TouchArea {
+                            x: 24px;
+                            y: 0px;
+                            width: 60px;
+                            height: 36px;
+                            clicked => { root.view-axis-clicked("y"); }
+                        }
+                        TouchArea {
+                            x: 36px;
+                            y: 12px;
+                            width: 60px;
+                            height: 36px;
+                            clicked => { root.view-axis-clicked("z"); }
                         }
                     }
 

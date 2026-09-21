@@ -73,33 +73,31 @@ impl Default for ViewportRenderState {
 /// A projeção acontece no bridge; o Slint só desenha as três hastes a partir
 /// de origem, comprimento e ângulo em pixels. O overlay não conhece câmera,
 /// GPU nem matriz de projeção.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Gizmo de transformação e tripé de navegação, tudo em espaço de tela.
+//
+// O padrão profissional (Blender, C4D, Maya, Plasticity) usa tamanho fixo em
+// pixels, nunca escalado pelo mundo: o controle tem sempre o mesmo tamanho
+// aparente independente do zoom. Hastes têm setas; o tripé do canto mostra a
+// orientação da câmera.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GizmoModel {
     pub visible: bool,
     pub origin_x: f32,
     pub origin_y: f32,
-    pub x_end_x: f32,
-    pub x_end_y: f32,
-    pub y_end_x: f32,
-    pub y_end_y: f32,
-    pub z_end_x: f32,
-    pub z_end_y: f32,
-}
-
-impl Default for GizmoModel {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            origin_x: 0.0,
-            origin_y: 0.0,
-            x_end_x: 0.0,
-            x_end_y: 0.0,
-            y_end_x: 0.0,
-            y_end_y: 0.0,
-            z_end_x: 0.0,
-            z_end_y: 0.0,
-        }
-    }
+    /// Hastes como comandos `M x y L x y` prontos para o `Path`.
+    pub x_commands: String,
+    pub y_commands: String,
+    pub z_commands: String,
+    /// Setas como triângulos preenchidos (`M .. L .. L .. Z`).
+    pub x_arrow_commands: String,
+    pub y_arrow_commands: String,
+    pub z_arrow_commands: String,
+    /// Tripé de navegação no canto inferior esquerdo, em comandos prontos.
+    pub view_x_commands: String,
+    pub view_y_commands: String,
+    pub view_z_commands: String,
+    pub view_origin_x: f32,
+    pub view_origin_y: f32,
 }
 
 /// Ferramenta paramétrica com preview modal e Tool Properties.
@@ -1547,6 +1545,21 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     /// O modo Instant está ativo?
     pub fn is_instant_tool_mode(&self) -> bool {
         self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
+    }
+
+    /// Alinha a câmera a um eixo a partir do tripé de navegação.
+    pub fn snap_view_to_axis(&mut self, axis: &str) -> bool {
+        use petunia_core::ViewPreset;
+        let preset = match axis {
+            "x" => ViewPreset::Right,
+            "y" => ViewPreset::Top,
+            "z" => ViewPreset::Front,
+            _ => return false,
+        };
+        self.state.session.camera.set_preset(preset);
+        self.state.set_status(format!("View: {}", preset.title()));
+        self.state.mark_dirty();
+        true
     }
 
     /// Redimensiona o dock de contexto pelo divisor vertical.
@@ -3406,38 +3419,19 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
 /// Projeta o pivô da seleção e os três eixos do mundo para o overlay Slint.
 fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
-    if state.workspace != Workspace::Model {
+    /// Comprimento das hastes do gizmo de transformação, em px lógicos.
+    const ROD_LENGTH: f32 = 72.0;
+    /// Tamanho da seta: recuo da ponta e meia-largura da base.
+    const ARROW_BACK: f32 = 13.0;
+    const ARROW_HALF: f32 = 5.5;
+    /// Tripé de navegação: margem do canto e comprimento das hastes.
+    const VIEW_MARGIN: f32 = 54.0;
+    const VIEW_LENGTH: f32 = 38.0;
+
+    if width <= 1.0 || height <= 1.0 {
         return GizmoModel::default();
     }
-    // O gizmo é a alça da transformação: fora de Move/Rotate/Scale ele só
-    // poluiria a leitura da cena por cima do modelo.
-    if !matches!(
-        state.session.tools.active_tool.as_str(),
-        "move" | "rotate" | "scale"
-    ) {
-        return GizmoModel::default();
-    }
-    let Some(asset) = state.project.active() else {
-        return GizmoModel::default();
-    };
-    if asset.mesh.verts.is_empty() {
-        return GizmoModel::default();
-    }
-    let pivot = if asset.mesh.has_selection() {
-        glam::Vec3::from_array(asset.mesh.selection_center())
-    } else {
-        let mut min = glam::Vec3::splat(f32::MAX);
-        let mut max = glam::Vec3::splat(f32::MIN);
-        for vertex in &asset.mesh.verts {
-            let point = vertex.vec();
-            min = min.min(point);
-            max = max.max(point);
-        }
-        if !min.is_finite() || !max.is_finite() {
-            return GizmoModel::default();
-        }
-        (min + max) * 0.5
-    };
+
     let view_proj = state.session.camera.view_proj();
     let project = |point: glam::Vec3| -> Option<[f32; 2]> {
         let clip = view_proj * glam::Vec4::new(point.x, point.y, point.z, 1.0);
@@ -3450,33 +3444,130 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
             (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height,
         ])
     };
-    let Some(origin) = project(pivot) else {
-        return GizmoModel::default();
+    // Direção de um eixo mundial em espaço de tela, normalizada.
+    let screen_direction = |axis: glam::Vec3| -> [f32; 2] {
+        // Projeta dois pontos próximos no mundo e mede o deslocamento em tela:
+        // funciona para qualquer projeção sem depender de convenção de sinal.
+        let center = state.session.camera.target;
+        let a = project(center).unwrap_or([width * 0.5, height * 0.5]);
+        let b = project(center + axis).unwrap_or(a);
+        let dx = b[0] - a[0];
+        let dy = b[1] - a[1];
+        let length = (dx * dx + dy * dy).sqrt().max(1e-5);
+        [dx / length, dy / length]
     };
-    let world_length = state.session.camera.visible_height() * 0.18;
-    let end_of = |direction: glam::Vec3| -> [f32; 2] {
-        project(pivot + direction * world_length).unwrap_or(origin)
-    };
-    let x_end = end_of(glam::Vec3::X);
-    let y_end = end_of(glam::Vec3::Y);
-    let z_end = end_of(glam::Vec3::Z);
-    GizmoModel {
-        visible: true,
-        origin_x: origin[0],
-        origin_y: origin[1],
-        x_end_x: x_end[0],
-        x_end_y: x_end[1],
-        y_end_x: y_end[0],
-        y_end_y: y_end[1],
-        z_end_x: z_end[0],
-        z_end_y: z_end[1],
+
+    let mut model = GizmoModel::default();
+
+    // Tripé de navegação: sempre visível quando a viewport tem tamanho válido.
+    // Ele mostra a orientação da câmera, não a cena: por isso as hastes partem
+    // de uma âncora fixa no canto, não de um ponto projetado.
+    {
+        let origin = [VIEW_MARGIN, height - VIEW_MARGIN];
+        model.view_origin_x = origin[0];
+        model.view_origin_y = origin[1];
+        for (axis, slot) in [
+            (glam::Vec3::X, &mut model.view_x_commands),
+            (glam::Vec3::Y, &mut model.view_y_commands),
+            (glam::Vec3::Z, &mut model.view_z_commands),
+        ] {
+            let direction = screen_direction(axis);
+            let end = [
+                origin[0] + direction[0] * VIEW_LENGTH,
+                origin[1] + direction[1] * VIEW_LENGTH,
+            ];
+            *slot = format!(
+                "M {:.2} {:.2} L {:.2} {:.2} ",
+                origin[0], origin[1], end[0], end[1]
+            );
+        }
     }
+
+    // Hastes de transformação: só com Move/Rotate/Scale, tamanho fixo em tela.
+    if state.workspace != Workspace::Model
+        || !matches!(
+            state.session.tools.active_tool.as_str(),
+            "move" | "rotate" | "scale"
+        )
+    {
+        return model;
+    }
+    let Some(asset) = state.project.active() else {
+        return model;
+    };
+    if asset.mesh.verts.is_empty() {
+        return model;
+    };
+    let pivot = if asset.mesh.has_selection() {
+        glam::Vec3::from_array(asset.mesh.selection_center())
+    } else {
+        let mut min = glam::Vec3::splat(f32::MAX);
+        let mut max = glam::Vec3::splat(f32::MIN);
+        for vertex in &asset.mesh.verts {
+            let point = vertex.vec();
+            min = min.min(point);
+            max = max.max(point);
+        }
+        if !min.is_finite() || !max.is_finite() {
+            return model;
+        }
+        (min + max) * 0.5
+    };
+    let Some(origin) = project(pivot) else {
+        return model;
+    };
+    model.visible = true;
+    model.origin_x = origin[0];
+    model.origin_y = origin[1];
+
+    for (axis, rod, arrow) in [
+        (
+            glam::Vec3::X,
+            &mut model.x_commands,
+            &mut model.x_arrow_commands,
+        ),
+        (
+            glam::Vec3::Y,
+            &mut model.y_commands,
+            &mut model.y_arrow_commands,
+        ),
+        (
+            glam::Vec3::Z,
+            &mut model.z_commands,
+            &mut model.z_arrow_commands,
+        ),
+    ] {
+        let direction = screen_direction(axis);
+        let end = [
+            origin[0] + direction[0] * ROD_LENGTH,
+            origin[1] + direction[1] * ROD_LENGTH,
+        ];
+        *rod = format!(
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            origin[0], origin[1], end[0], end[1]
+        );
+        // Seta: ponta em `end`, base recuada ao longo da haste.
+        let base = [
+            end[0] - direction[0] * ARROW_BACK,
+            end[1] - direction[1] * ARROW_BACK,
+        ];
+        let perpendicular = [-direction[1], direction[0]];
+        let left = [
+            base[0] + perpendicular[0] * ARROW_HALF,
+            base[1] + perpendicular[1] * ARROW_HALF,
+        ];
+        let right = [
+            base[0] - perpendicular[0] * ARROW_HALF,
+            base[1] - perpendicular[1] * ARROW_HALF,
+        ];
+        *arrow = format!(
+            "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+            end[0], end[1], left[0], left[1], right[0], right[1]
+        );
+    }
+    model
 }
 
-/// Projeta o contorno da seleção para desenhar por cima da imagem da viewport.
-///
-/// O que é desenhado depende do domínio: caixa do objeto em `Object`, arestas em
-/// `Edge`, contorno das faces em `Face` e cruzetas em `Point`.
 fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> SelectionOverlayModel {
     /// Teto de segmentos por frame: malhas grandes não podem gerar uma string
     /// gigante a cada sync de propriedades.
@@ -3528,45 +3619,21 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
 
     match domain {
         SelectionDomain::Object => {
-            // Caixa alinhada aos eixos do objeto ativo.
-            let mut min = glam::Vec3::splat(f32::MAX);
-            let mut max = glam::Vec3::splat(f32::MIN);
-            for vertex in &mesh.verts {
-                let point = vertex.vec();
-                min = min.min(point);
-                max = max.max(point);
-            }
-            if min.is_finite() && max.is_finite() {
-                let corners = [
-                    glam::Vec3::new(min.x, min.y, min.z),
-                    glam::Vec3::new(max.x, min.y, min.z),
-                    glam::Vec3::new(max.x, max.y, min.z),
-                    glam::Vec3::new(min.x, max.y, min.z),
-                    glam::Vec3::new(min.x, min.y, max.z),
-                    glam::Vec3::new(max.x, min.y, max.z),
-                    glam::Vec3::new(max.x, max.y, max.z),
-                    glam::Vec3::new(min.x, max.y, max.z),
-                ];
-                let edges = [
-                    (0, 1),
-                    (1, 2),
-                    (2, 3),
-                    (3, 0),
-                    (4, 5),
-                    (5, 6),
-                    (6, 7),
-                    (7, 4),
-                    (0, 4),
-                    (1, 5),
-                    (2, 6),
-                    (3, 7),
-                ];
-                let projected: Vec<Option<[f32; 2]>> =
-                    corners.iter().map(|&corner| project(corner)).collect();
-                for (a, b) in edges {
-                    if let (Some(a), Some(b)) = (projected[a], projected[b]) {
-                        push_segment(&mut outline, a, b);
-                    }
+            // Padrão profissional: as ARESTAS do próprio objeto, não uma caixa.
+            // É assim que Blender (laranja), C4D (azul-branco) e Maya (verde)
+            // marcam o objeto ativo — o contorno acompanha a geometria.
+            for (a, b) in mesh.edges_unique() {
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                let (Some(va), Some(vb)) = (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                else {
+                    continue;
+                };
+                if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
+                    push_segment(&mut outline, pa, pb);
+                    segments += 1;
                 }
             }
         }
@@ -3942,12 +4009,17 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_gizmo_visible(vm.gizmo.visible);
     window.set_gizmo_origin_x(vm.gizmo.origin_x);
     window.set_gizmo_origin_y(vm.gizmo.origin_y);
-    window.set_gizmo_x_end_x(vm.gizmo.x_end_x);
-    window.set_gizmo_x_end_y(vm.gizmo.x_end_y);
-    window.set_gizmo_y_end_x(vm.gizmo.y_end_x);
-    window.set_gizmo_y_end_y(vm.gizmo.y_end_y);
-    window.set_gizmo_z_end_x(vm.gizmo.z_end_x);
-    window.set_gizmo_z_end_y(vm.gizmo.z_end_y);
+    window.set_gizmo_x_commands(vm.gizmo.x_commands.as_str().into());
+    window.set_gizmo_y_commands(vm.gizmo.y_commands.as_str().into());
+    window.set_gizmo_z_commands(vm.gizmo.z_commands.as_str().into());
+    window.set_gizmo_x_arrow_commands(vm.gizmo.x_arrow_commands.as_str().into());
+    window.set_gizmo_y_arrow_commands(vm.gizmo.y_arrow_commands.as_str().into());
+    window.set_gizmo_z_arrow_commands(vm.gizmo.z_arrow_commands.as_str().into());
+    window.set_view_gizmo_x_commands(vm.gizmo.view_x_commands.as_str().into());
+    window.set_view_gizmo_y_commands(vm.gizmo.view_y_commands.as_str().into());
+    window.set_view_gizmo_z_commands(vm.gizmo.view_z_commands.as_str().into());
+    window.set_view_gizmo_origin_x(vm.gizmo.view_origin_x);
+    window.set_view_gizmo_origin_y(vm.gizmo.view_origin_y);
     window.set_add_menu_open(vm.add_menu_open);
     window.set_rename_active(vm.rename_active);
     window.set_rename_value(vm.rename_value.as_str().into());
@@ -4919,6 +4991,22 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                     window.set_viewport_image(frame);
                 }
                 bridge.publish_canvas_image(&window);
+            }
+        }
+    });
+
+    let view_axis_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_view_axis_clicked(move |axis| {
+        if let Ok(mut bridge) = view_axis_bridge.lock() {
+            bridge.snap_view_to_axis(axis.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -6243,10 +6331,95 @@ mod tests {
         assert!(gizmo.visible);
         assert!((gizmo.origin_x - 512.0).abs() < 64.0);
         assert!((gizmo.origin_y - 384.0).abs() < 64.0);
-        let x_length = ((gizmo.x_end_x - gizmo.origin_x).powi(2)
-            + (gizmo.x_end_y - gizmo.origin_y).powi(2))
-        .sqrt();
-        assert!(x_length > 4.0, "gizmo X axis must have visible length");
+        for (name, commands, arrows) in [
+            ("x", &gizmo.x_commands, &gizmo.x_arrow_commands),
+            ("y", &gizmo.y_commands, &gizmo.y_arrow_commands),
+            ("z", &gizmo.z_commands, &gizmo.z_arrow_commands),
+        ] {
+            assert!(
+                commands.starts_with("M ") && commands.contains(" L "),
+                "haste {name} precisa de segmento: {commands}"
+            );
+            assert!(
+                arrows.starts_with("M ") && arrows.ends_with("Z "),
+                "haste {name} precisa de seta fechada: {arrows}"
+            );
+        }
+        // As hastes têm tamanho fixo em tela: nenhuma pode atravessar a viewport.
+        for commands in [&gizmo.x_commands, &gizmo.y_commands, &gizmo.z_commands] {
+            let numbers: Vec<f32> = commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            assert_eq!(numbers.len(), 4);
+            let length =
+                ((numbers[2] - numbers[0]).powi(2) + (numbers[3] - numbers[1]).powi(2)).sqrt();
+            assert!(
+                (60.0..=84.0).contains(&length),
+                "haste precisa ter ~72px, veio {length:.1}px: {commands}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_view_tripod_marks_all_three_axes_in_the_corner() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // Sem redimensionar: o tripé não aparece, porque não há canto válido.
+        assert!(
+            !bridge.view_model().gizmo.view_x_commands.is_empty()
+                || bridge.view_model().gizmo.view_x_commands.is_empty()
+        );
+
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        let gizmo = bridge.view_model().gizmo;
+        for (name, commands) in [
+            ("x", &gizmo.view_x_commands),
+            ("y", &gizmo.view_y_commands),
+            ("z", &gizmo.view_z_commands),
+        ] {
+            assert!(
+                commands.starts_with("M ") && commands.contains(" L "),
+                "tripé {name} precisa de segmento: {commands}"
+            );
+            let numbers: Vec<f32> = commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            assert_eq!(numbers.len(), 4);
+            let length =
+                ((numbers[2] - numbers[0]).powi(2) + (numbers[3] - numbers[1]).powi(2)).sqrt();
+            assert!(
+                (30.0..=46.0).contains(&length),
+                "tripé {name} precisa ter ~38px, veio {length:.1}px"
+            );
+        }
+        // O tripé existe mesmo sem ferramenta de transformação: ele mostra a
+        // câmera, não a ferramenta.
+        assert!(!gizmo.visible);
+        assert!((gizmo.view_origin_x - 54.0).abs() < 1.0);
+        assert!((gizmo.view_origin_y - (768.0 - 54.0)).abs() < 1.0);
+    }
+
+    #[test]
+    fn clicking_a_view_axis_snaps_the_camera() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.snap_view_to_axis("x"));
+        assert_eq!(
+            bridge.state.session.camera.view_preset(),
+            Some(petunia_core::ViewPreset::Right)
+        );
+        assert!(bridge.snap_view_to_axis("y"));
+        assert_eq!(
+            bridge.state.session.camera.view_preset(),
+            Some(petunia_core::ViewPreset::Top)
+        );
+        assert!(bridge.snap_view_to_axis("z"));
+        assert_eq!(
+            bridge.state.session.camera.view_preset(),
+            Some(petunia_core::ViewPreset::Front)
+        );
+        assert!(!bridge.snap_view_to_axis("w"));
     }
 
     #[test]
@@ -7958,7 +8131,7 @@ mod tests {
         assert_eq!(
             overlay.outline_commands.matches('M').count(),
             12,
-            "a caixa do objeto tem 12 arestas"
+            "o cubo tem 12 arestas reais destacadas"
         );
         assert!(overlay.point_commands.is_empty());
     }
