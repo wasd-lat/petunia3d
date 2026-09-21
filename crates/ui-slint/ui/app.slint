@@ -114,6 +114,34 @@ component SplitterHorizontal inherits Rectangle {
     }
 }
 
+/// Botão compacto da barra da viewport (visão e domínio de seleção).
+component ViewportBarButton inherits Rectangle {
+    in property <Icon> icon;
+    in property <string> label;
+    in property <bool> active;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checked: root.active;
+    width: max(26px, bar-icon.width + 12px);
+    height: 26px;
+    border-radius: 5px;
+    background: root.active
+        ? DesignTokens.accent
+        : (bar-touch.has-hover ? DesignTokens.surface-hover : transparent);
+
+    bar-icon := IconDisplay {
+        icon: root.icon;
+        size: 14px;
+        stroke: root.active ? DesignTokens.canvas : DesignTokens.text-secondary;
+    }
+
+    bar-touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
 /// Botão da barra de menus do topo.
 component MenuButton inherits Rectangle {
     in property <string> label;
@@ -832,59 +860,6 @@ export component PetuniaSlintShell inherits Window {
 
                     Rectangle { horizontal-stretch: 1; }
 
-                    if active-workspace == "MODEL": HorizontalLayout {
-                        spacing: 3px;
-                        alignment: center;
-
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "OBJECT" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.Box;
-                                size: 15px;
-                                stroke: selection-domain == "OBJECT" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("OBJECT"); } }
-                        }
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "POINT" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.CircleDot;
-                                size: 15px;
-                                stroke: selection-domain == "POINT" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("POINT"); } }
-                        }
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "EDGE" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.Minus;
-                                size: 15px;
-                                stroke: selection-domain == "EDGE" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("EDGE"); } }
-                        }
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "FACE" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.Square;
-                                size: 15px;
-                                stroke: selection-domain == "FACE" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("FACE"); } }
-                        }
-                    }
 
                     if active-workspace == "MODEL": Rectangle { horizontal-stretch: 1; }
 
@@ -1249,66 +1224,75 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
 
-                    Rectangle {
-                        x: 14px;
+                    // Barra da viewport (P3D-076): visão à esquerda, domínio de
+                    // seleção no centro. Largura adaptativa, teto de 60% da
+                    // viewport para nunca cobrir o modelo.
+                    viewport-bar := Rectangle {
+                        x: (parent.width - self.width) / 2;
                         y: 14px;
-                        height: 28px;
-                        border-radius: 5px;
+                        width: min(viewport-bar-row.preferred-width + 20px, parent.width * 0.6);
+                        height: 34px;
+                        border-radius: 8px;
                         background: DesignTokens.surface-raised;
                         border-width: 1px;
                         border-color: DesignTokens.border;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            spacing: 6px;
+
+                        viewport-bar-row := HorizontalLayout {
+                            x: 10px;
+                            y: 4px;
+                            width: min(self.preferred-width, parent.width - 20px);
+                            height: self.preferred-height;
+                            spacing: 4px;
                             alignment: center;
 
+                            // --- Visão (esquerda) ---
                             Text {
-                                text: active-workspace == "UV" ? "UV Dual View" : (active-workspace == "PAINT" ? "Texture Paint" : (is-orthographic ? "Orthographic" : "Perspective"));
+                                text: is-orthographic ? "Ortho" : "Persp";
                                 color: DesignTokens.text-primary;
                                 font-size: 11px;
                                 font-weight: 600;
                                 vertical-alignment: center;
                             }
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
 
-                            Rectangle { width: 1px; height: 16px; background: DesignTokens.border; }
-
-                            Rectangle {
-                                width: 22px;
-                                height: 22px;
-                                border-radius: 3px;
-                                background: is-orthographic ? DesignTokens.accent : transparent;
-                                IconDisplay {
-                                    icon: IconSet.Camera;
-                                    size: 13px;
-                                    stroke: is-orthographic ? DesignTokens.canvas : DesignTokens.text-secondary;
-                                }
-                                TouchArea { clicked => { root.toggle-projection-requested(); } }
+                            ViewportBarButton {
+                                icon: IconSet.Camera;
+                                label: "Projection";
+                                active: is-orthographic;
+                                clicked => { root.toggle-projection-requested(); }
+                            }
+                            ViewportBarButton {
+                                icon: IconSet.Box;
+                                label: "Wireframe";
+                                active: is-wireframe;
+                                clicked => { root.toggle-wireframe-requested(); }
+                            }
+                            ViewportBarButton {
+                                icon: IconSet.Maximize2;
+                                label: "Frame";
+                                active: false;
+                                clicked => { root.command-executed("view.frame_selection"); }
+                            }
+                            ViewportBarButton {
+                                icon: IconSet.RotateCcw;
+                                label: "Reset view";
+                                active: false;
+                                clicked => { root.reset-camera-requested(); }
                             }
 
-                            Rectangle {
-                                width: 22px;
-                                height: 22px;
-                                border-radius: 3px;
-                                background: is-wireframe ? DesignTokens.accent : transparent;
-                                IconDisplay {
-                                    icon: IconSet.Box;
-                                    size: 13px;
-                                    stroke: is-wireframe ? DesignTokens.canvas : DesignTokens.text-secondary;
-                                }
-                                TouchArea { clicked => { root.toggle-wireframe-requested(); } }
-                            }
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
 
-                            Rectangle {
-                                width: 22px;
-                                height: 22px;
-                                border-radius: 3px;
-                                IconDisplay {
-                                    icon: IconSet.RotateCcw;
-                                    size: 13px;
-                                    stroke: DesignTokens.text-secondary;
-                                }
-                                TouchArea { clicked => { root.reset-camera-requested(); } }
+                            // --- Domínio de seleção (centro) ---
+                            for domain in [
+                                { id: "OBJECT", icon: IconSet.Box, label: "Object" },
+                                { id: "POINT", icon: IconSet.CircleDot, label: "Point" },
+                                { id: "EDGE", icon: IconSet.SquareDashed, label: "Edge" },
+                                { id: "FACE", icon: IconSet.Square, label: "Face" },
+                            ]: ViewportBarButton {
+                                icon: domain.icon;
+                                label: domain.label;
+                                active: selection-domain == domain.id;
+                                clicked => { root.selection-domain-changed(domain.id); }
                             }
                         }
                     }
@@ -1415,12 +1399,12 @@ export component PetuniaSlintShell inherits Window {
                                 clicked => { root.active-tool-changed("scale"); }
                             }
 
-                            if active-workspace == "MODEL" && selection-domain == "OBJECT": Rectangle {
+                            if active-workspace == "MODEL": Rectangle {
                                 width: 1px;
                                 height: 22px;
                                 background: DesignTokens.border;
                             }
-                            if active-workspace == "MODEL" && selection-domain == "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Plus;
                                 semantic-label: "Add Primitive";
                                 active: root.add-menu-open;
@@ -1429,31 +1413,50 @@ export component PetuniaSlintShell inherits Window {
                                     root.add-menu-changed(root.add-menu-open);
                                 }
                             }
-                            if active-workspace == "MODEL" && selection-domain == "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Copy;
                                 semantic-label: "Duplicate";
                                 clicked => { root.duplicate-requested(); }
                             }
-
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": Rectangle {
-                                width: 1px;
-                                height: 22px;
-                                background: DesignTokens.border;
-                            }
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Move3d;
                                 semantic-label: "Extrude";
                                 clicked => { root.command-executed("model.extrude"); }
                             }
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.SquareDashed;
                                 semantic-label: "Inset";
                                 clicked => { root.command-executed("model.inset"); }
                             }
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.CircleDot;
+                                semantic-label: "Bevel";
+                                clicked => { root.command-executed("model.bevel"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Scissors;
+                                semantic-label: "Knife";
+                                clicked => { root.command-executed("model.knife"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Grid2x2;
+                                semantic-label: "Loop Cut";
+                                clicked => { root.command-executed("model.loop_cut"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Square;
+                                semantic-label: "Subdivide";
+                                clicked => { root.command-executed("model.subdivide"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Merge;
                                 semantic-label: "Merge Center";
                                 clicked => { root.command-executed("model.merge"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Slice;
+                                semantic-label: "Slice";
+                                clicked => { root.command-executed("model.slice"); }
                             }
 
                             if active-workspace == "PAINT": ToolButton {
@@ -1712,159 +1715,6 @@ export component PetuniaSlintShell inherits Window {
                                         border-color: DesignTokens.border;
                                         Text { text: "Clear operand"; color: DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                                         TouchArea { clicked => { root.boolean-operand-cleared(); } }
-                                    }
-                                }
-                            }
-
-                            if loop-cut-active: InspectorSection {
-                                title: "Loop Cut";
-                                open: true;
-                                toggled => { self.open = !self.open; }
-
-                                VerticalLayout {
-                                    spacing: 6px;
-                                    padding-top: 4px;
-
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        height: 28px;
-
-                                        Text {
-                                            text: "Slide";
-                                            color: DesignTokens.text-secondary;
-                                            font-size: 11px;
-                                            width: 72px;
-                                            vertical-alignment: center;
-                                        }
-                                        NumericField {
-                                            label: "";
-                                            value: root.loop-cut-slide;
-                                            horizontal-stretch: 1;
-                                            scrubbed(delta, _fine) => { root.loop-cut-scrubbed(delta); }
-                                            text-committed(text) => { root.loop-cut-count-committed(text); }
-                                        }
-                                    }
-
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        height: 28px;
-
-                                        Text {
-                                            text: "Cuts";
-                                            color: DesignTokens.text-secondary;
-                                            font-size: 11px;
-                                            width: 72px;
-                                            vertical-alignment: center;
-                                        }
-                                        Rectangle {
-                                            horizontal-stretch: 1;
-                                            border-radius: 4px;
-                                            background: DesignTokens.surface-raised;
-                                            border-width: 1px;
-                                            border-color: DesignTokens.border;
-                                            Text {
-                                                text: "\{root.loop-cut-cuts}";
-                                                color: DesignTokens.text-primary;
-                                                font-size: 11px;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                        Rectangle {
-                                            width: 28px;
-                                            height: 28px;
-                                            border-radius: 4px;
-                                            background: DesignTokens.surface-raised;
-                                            border-width: 1px;
-                                            border-color: DesignTokens.border;
-                                            Text { text: "-"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-                                            TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts - 1}"); } }
-                                        }
-                                        Rectangle {
-                                            width: 28px;
-                                            height: 28px;
-                                            border-radius: 4px;
-                                            background: DesignTokens.surface-raised;
-                                            border-width: 1px;
-                                            border-color: DesignTokens.border;
-                                            Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-                                            TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts + 1}"); } }
-                                        }
-                                    }
-
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        height: 28px;
-
-                                        Rectangle {
-                                            horizontal-stretch: 1;
-                                            border-radius: 4px;
-                                            background: DesignTokens.surface-raised;
-                                            border-width: 1px;
-                                            border-color: DesignTokens.border;
-                                            Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                                            TouchArea { clicked => { root.loop-cut-cancel(); } }
-                                        }
-                                        Rectangle {
-                                            horizontal-stretch: 1;
-                                            border-radius: 4px;
-                                            background: DesignTokens.accent;
-                                            Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                            TouchArea { clicked => { root.loop-cut-apply(); } }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if tool-modal-active: InspectorSection {
-                                title: tool-modal-title;
-                                open: true;
-                                toggled => { self.open = !self.open; }
-
-                                VerticalLayout {
-                                    spacing: 6px;
-                                    padding-top: 4px;
-
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        height: 28px;
-
-                                        Text {
-                                            text: root.tool-modal-label;
-                                            color: DesignTokens.text-secondary;
-                                            font-size: 11px;
-                                            width: 72px;
-                                            vertical-alignment: center;
-                                        }
-                                        NumericField {
-                                            label: "";
-                                            value: root.tool-modal-value;
-                                            horizontal-stretch: 1;
-                                            scrubbed(delta, fine) => { root.tool-modal-scrubbed(delta, fine); }
-                                            text-committed(text) => { root.tool-modal-text-committed(text); }
-                                        }
-                                    }
-
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        height: 28px;
-
-                                        Rectangle {
-                                            horizontal-stretch: 1;
-                                            border-radius: 4px;
-                                            background: DesignTokens.surface-raised;
-                                            border-width: 1px;
-                                            border-color: DesignTokens.border;
-                                            Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                                            TouchArea { clicked => { root.tool-modal-cancel(); } }
-                                        }
-                                        Rectangle {
-                                            horizontal-stretch: 1;
-                                            border-radius: 4px;
-                                            background: DesignTokens.accent;
-                                            Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                            TouchArea { clicked => { root.tool-modal-apply(); } }
-                                        }
                                     }
                                 }
                             }
@@ -3020,6 +2870,169 @@ export component PetuniaSlintShell inherits Window {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Painel flutuante de Tool Properties (P3D-083): as configurações da
+        // ferramenta ativa ficam fora do Object Inspector, ancoradas na viewport.
+        if tool-modal-active || loop-cut-active: Rectangle {
+            x: parent.width - self.width - 16px;
+            y: parent.height - self.height - 16px;
+            width: 236px;
+            height: tool-properties-layout.preferred-height + 34px;
+            border-radius: 8px;
+            background: DesignTokens.surface-raised;
+            border-width: 1px;
+            border-color: DesignTokens.border;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000080;
+            drop-shadow-offset-y: 4px;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+
+                Text {
+                    text: tool-modal-active ? tool-modal-title : "Loop Cut";
+                    color: DesignTokens.text-primary;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+
+                tool-properties-layout := VerticalLayout {
+                    spacing: 6px;
+
+                if tool-modal-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Text {
+                        text: root.tool-modal-label;
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        width: 72px;
+                        vertical-alignment: center;
+                    }
+                    NumericField {
+                        label: "";
+                        value: root.tool-modal-value;
+                        horizontal-stretch: 1;
+                        scrubbed(delta, fine) => { root.tool-modal-scrubbed(delta, fine); }
+                        text-committed(text) => { root.tool-modal-text-committed(text); }
+                    }
+                }
+
+                if tool-modal-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.tool-modal-cancel(); } }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.accent;
+                        Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.tool-modal-apply(); } }
+                    }
+                }
+
+                if loop-cut-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Text {
+                        text: "Slide";
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        width: 72px;
+                        vertical-alignment: center;
+                    }
+                    NumericField {
+                        label: "";
+                        value: root.loop-cut-slide;
+                        horizontal-stretch: 1;
+                        scrubbed(delta, _fine) => { root.loop-cut-scrubbed(delta); }
+                        text-committed(text) => { root.loop-cut-count-committed(text); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Text {
+                        text: "Cuts";
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        width: 72px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text {
+                            text: "\{root.loop-cut-cuts}";
+                            color: DesignTokens.text-primary;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: "-"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts - 1}"); } }
+                    }
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts + 1}"); } }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-cancel(); } }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.accent;
+                        Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-apply(); } }
+                    }
+                }
                 }
             }
         }
