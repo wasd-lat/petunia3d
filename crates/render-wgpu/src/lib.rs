@@ -28,6 +28,14 @@ struct LineVertex {
     color: [f32; 3],
 }
 
+/// Vértice da camada de seleção: posição + cor com alpha.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SelectionVertex {
+    pos: [f32; 3],
+    color: [f32; 4],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
@@ -105,6 +113,14 @@ pub struct Renderer {
     asset_tex: Vec<AssetTexGpu>,
     line_vb: Option<wgpu::Buffer>,
     line_count: u32,
+    selection_tri_pipeline: wgpu::RenderPipeline,
+    selection_line_pipeline: wgpu::RenderPipeline,
+    /// Preenchimento translúcido das faces selecionadas (depth test, sem write).
+    selection_tri_vb: Option<wgpu::Buffer>,
+    selection_tri_count: u32,
+    /// Contorno e marcadores da seleção (depth test).
+    selection_line_vb: Option<wgpu::Buffer>,
+    selection_line_count: u32,
     grid_vb: wgpu::Buffer,
     grid_count: u32,
     ref_vb: Option<wgpu::Buffer>,
@@ -113,9 +129,39 @@ pub struct Renderer {
     pub show_overlays: bool,
     pub show_grid: bool,
     last_fingerprint: Option<SceneFingerprint>,
+    last_domain: Option<petunia_core::SelectionDomain>,
     mesh_rebuilds: u64,
     skipped_frames: u64,
 }
+
+/// Seleção: cor chapada, sem iluminação, com alpha. A seleção precisa ser
+/// legível sobre qualquer shading e nunca depender da luz da cena.
+const SELECTION_WGSL: &str = r#"
+struct Camera { view_proj: mat4x4<f32> };
+@group(0) @binding(0) var<uniform> cam: Camera;
+
+struct In {
+    @location(0) pos: vec3<f32>,
+    @location(1) color: vec4<f32>,
+};
+struct Out {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_main(in: In) -> Out {
+    var out: Out;
+    out.clip = cam.view_proj * vec4<f32>(in.pos, 1.0);
+    out.color = in.color;
+    return out;
+}
+
+@fragment
+fn fs_main(in: Out) -> @location(0) vec4<f32> {
+    return in.color;
+}
+"#;
 
 const MESH_WGSL: &str = r#"
 struct Camera { view_proj: mat4x4<f32> };
@@ -549,6 +595,95 @@ impl Renderer {
             cache: None,
         });
 
+        // Camada de seleção: um pipeline para o preenchimento translúcido das
+        // faces e outro para contorno/marcadores. Ambos com depth test e sem
+        // depth write, para não ocluir a geometria nem se sobrepor a si mesmos.
+        let selection_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("simple3d-selection-shader"),
+            source: wgpu::ShaderSource::Wgsl(SELECTION_WGSL.into()),
+        });
+        let selection_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("simple3d-selection-layout"),
+            bind_group_layouts: &[Some(&cam_layout)],
+            immediate_size: 0,
+        });
+        let selection_attrs = [Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SelectionVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+        })];
+        let selection_tri_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("simple3d-selection-tri-pipe"),
+                layout: Some(&selection_layout),
+                vertex: wgpu::VertexState {
+                    module: &selection_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &selection_attrs,
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &selection_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24Plus,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        let selection_line_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("simple3d-selection-line-pipe"),
+                layout: Some(&selection_layout),
+                vertex: wgpu::VertexState {
+                    module: &selection_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &selection_attrs,
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &selection_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24Plus,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+
         // refs: layout do grupo 1 (params + textura + sampler)
         let ref_tex_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("simple3d-ref-tex-layout"),
@@ -813,6 +948,12 @@ impl Renderer {
             asset_tex: Vec::new(),
             line_vb: None,
             line_count: 0,
+            selection_tri_pipeline,
+            selection_line_pipeline,
+            selection_tri_vb: None,
+            selection_tri_count: 0,
+            selection_line_vb: None,
+            selection_line_count: 0,
             grid_vb,
             grid_count,
             ref_vb: None,
@@ -821,6 +962,7 @@ impl Renderer {
             show_overlays: true,
             show_grid: true,
             last_fingerprint: None,
+            last_domain: None,
             mesh_rebuilds: 0,
             skipped_frames: 0,
         }
@@ -885,9 +1027,15 @@ impl Renderer {
         xray: bool,
         show_triangulation: bool,
         textured: bool,
+        edit_domain: petunia_core::SelectionDomain,
     ) {
         puffin::profile_function!();
         self.xray = xray;
+        // Trocar de domínio muda a camada de seleção, não só a malha.
+        if self.last_domain != Some(edit_domain) {
+            self.last_domain = Some(edit_domain);
+            self.last_fingerprint = None;
+        }
         queue.write_buffer(
             &self.cam_buffer,
             0,
@@ -1045,6 +1193,100 @@ impl Renderer {
                 }
             }
         }
+        // Camada de seleção: geometria própria, com depth test no render. Só o
+        // ativo contribui, e só o domínio atual — um vértice selecionado não
+        // pode virar face pintada, que era a contaminação antiga.
+        let mut sel_tri: Vec<SelectionVertex> = Vec::new();
+        let mut sel_line: Vec<SelectionVertex> = Vec::new();
+        if let Some(asset) = scene.assets.get(scene.active) {
+            let mesh = asset.evaluated_mesh();
+            let domain = edit_domain;
+            // Seleção: laranja quente com alpha, como Blender/C4D. Legível
+            // sobre qualquer shading porque o shader não aplica luz.
+            let face_color = [1.0f32, 0.55, 0.15, 0.32];
+            let edge_color = [1.0f32, 0.62, 0.20, 1.0];
+            let point_color = [1.0f32, 0.78, 0.35, 1.0];
+            let marker = 0.035f32 * scene.assets.len().max(1) as f32;
+
+            if domain == petunia_core::SelectionDomain::Face {
+                for face in mesh.faces.iter().filter(|face| face.selected) {
+                    if face.verts.len() < 3 {
+                        continue;
+                    }
+                    let p0 = mesh.verts[face.verts[0] as usize].vec();
+                    for i in 1..face.verts.len() - 1 {
+                        let p1 = mesh.verts[face.verts[i] as usize].vec();
+                        let p2 = mesh.verts[face.verts[i + 1] as usize].vec();
+                        for point in [p0, p1, p2] {
+                            sel_tri.push(SelectionVertex {
+                                pos: point.to_array(),
+                                color: face_color,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Edge {
+                for &(a, b) in &mesh.selected_edges {
+                    let (Some(va), Some(vb)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    else {
+                        continue;
+                    };
+                    sel_line.push(SelectionVertex {
+                        pos: va.pos,
+                        color: edge_color,
+                    });
+                    sel_line.push(SelectionVertex {
+                        pos: vb.pos,
+                        color: edge_color,
+                    });
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Vertex {
+                for vertex in mesh.verts.iter().filter(|vertex| vertex.selected) {
+                    // Cruz 3D: três segmentos curtos, legíveis de qualquer ângulo.
+                    for axis in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z] {
+                        let point = vertex.vec();
+                        sel_line.push(SelectionVertex {
+                            pos: (point - axis * marker).to_array(),
+                            color: point_color,
+                        });
+                        sel_line.push(SelectionVertex {
+                            pos: (point + axis * marker).to_array(),
+                            color: point_color,
+                        });
+                    }
+                }
+            }
+        }
+        self.selection_tri_count = sel_tri.len() as u32;
+        self.selection_tri_vb = if sel_tri.is_empty() {
+            None
+        } else {
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("simple3d-selection-tri"),
+                    contents: bytemuck::cast_slice(&sel_tri),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            )
+        };
+        self.selection_line_count = sel_line.len() as u32;
+        self.selection_line_vb = if sel_line.is_empty() {
+            None
+        } else {
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("simple3d-selection-line"),
+                    contents: bytemuck::cast_slice(&sel_line),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            )
+        };
+
         self.mesh_count = mv.len() as u32;
         self.mesh_ranges = mesh_ranges;
         self.sync_asset_textures(device, queue, scene, textured);
@@ -1414,6 +1656,20 @@ impl Renderer {
                 }
             }
         }
+        // Seleção: preenchimento translúcido e contorno/marcadores, ambos com
+        // depth test. Fica depois da geometria e antes das arestas para que o
+        // wireframe permaneça legível por cima da seleção.
+        if let Some(vb) = &self.selection_tri_vb {
+            pass.set_pipeline(&self.selection_tri_pipeline);
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.draw(0..self.selection_tri_count, 0..1);
+        }
+        if let Some(vb) = &self.selection_line_vb {
+            pass.set_pipeline(&self.selection_line_pipeline);
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.draw(0..self.selection_line_count, 0..1);
+        }
+
         // arestas
         if let Some(vb) = &self.line_vb {
             if self.xray {

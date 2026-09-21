@@ -54,6 +54,8 @@ pub struct ViewportRenderState {
     pub show_triangulation: bool,
     pub textured: bool,
     pub show_wireframe_overlay: bool,
+    /// Domínio de seleção: a camada de seleção precisa saber o que desenhar.
+    pub selection_domain: petunia_core::SelectionDomain,
 }
 
 impl Default for ViewportRenderState {
@@ -64,6 +66,7 @@ impl Default for ViewportRenderState {
             show_triangulation: false,
             textured: false,
             show_wireframe_overlay: false,
+            selection_domain: petunia_core::SelectionDomain::Object,
         }
     }
 }
@@ -1150,6 +1153,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             show_triangulation: self.state.session.show_triangulation,
             textured: self.state.session.textured,
             show_wireframe_overlay: self.state.session.show_wireframe_overlay,
+            selection_domain: self.state.selection_domain(),
         };
         self.viewport.render_frame(
             &self.state.project,
@@ -3603,7 +3607,7 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
     };
 
     let mut outline = String::new();
-    let mut points = String::new();
+    let points = String::new();
     let mut unselected_outline = String::new();
     let mut unselected_points = String::new();
     let mut segments = 0usize;
@@ -3619,10 +3623,24 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
 
     match domain {
         SelectionDomain::Object => {
-            // Padrão profissional: as ARESTAS do próprio objeto, não uma caixa.
-            // É assim que Blender (laranja), C4D (azul-branco) e Maya (verde)
-            // marcam o objeto ativo — o contorno acompanha a geometria.
-            for (a, b) in mesh.edges_unique() {
+            // Contorno de objeto: silhueta projetada, desenhada sem depth porque
+            // é um realce de tela — Blender e C4D fazem o mesmo. Só as arestas
+            // cuja face frontal existe entram, evitando o efeito de "raio-X".
+            let mut front_facing = std::collections::HashSet::new();
+            let view_dir = state.session.camera.forward();
+            for (fi, face) in mesh.faces.iter().enumerate() {
+                if face.verts.len() < 3 {
+                    continue;
+                }
+                if mesh.face_normal(fi).dot(view_dir) >= 0.0 {
+                    for index in 0..face.verts.len() {
+                        let a = face.verts[index];
+                        let b = face.verts[(index + 1) % face.verts.len()];
+                        front_facing.insert(if a < b { (a, b) } else { (b, a) });
+                    }
+                }
+            }
+            for (a, b) in front_facing {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
                     break;
@@ -3638,7 +3656,7 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
             }
         }
         SelectionDomain::Vertex => {
-            for vertex in &mesh.verts {
+            for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
                     break;
@@ -3646,11 +3664,7 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
                 let Some(sp) = project(vertex.vec()) else {
                     continue;
                 };
-                let target = if vertex.selected {
-                    &mut points
-                } else {
-                    &mut unselected_points
-                };
+                let target = &mut unselected_points;
                 target.push_str(&format!(
                     "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
                     sp[0],
@@ -3671,25 +3685,26 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
                     truncated = true;
                     break;
                 }
+                let selected =
+                    mesh.selected_edges.contains(&(a, b)) || mesh.selected_edges.contains(&(b, a));
+                if selected {
+                    // O GPU desenha a aresta selecionada com depth test.
+                    continue;
+                }
                 let (Some(va), Some(vb)) = (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
                 else {
                     continue;
                 };
-                let selected =
-                    mesh.selected_edges.contains(&(a, b)) || mesh.selected_edges.contains(&(b, a));
                 if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
-                    let target = if selected {
-                        &mut outline
-                    } else {
-                        &mut unselected_outline
-                    };
-                    push_segment(target, pa, pb);
+                    push_segment(&mut unselected_outline, pa, pb);
                     segments += 1;
                 }
             }
         }
         SelectionDomain::Face => {
-            for face in mesh.faces.iter().filter(|face| face.selected) {
+            // O GPU preenche e contorna a face selecionada com depth test; o
+            // overlay 2D não duplica.
+            for face in mesh.faces.iter().filter(|_| false) {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
                     break;
@@ -3816,6 +3831,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         show_triangulation: state.session.show_triangulation,
         textured: state.session.textured,
         show_wireframe_overlay: state.session.show_wireframe_overlay,
+        selection_domain: state.selection_domain(),
     };
     if let Some(frame) = viewport.render_frame(&state.project, &state.session.camera, render_state)
     {
@@ -8128,12 +8144,15 @@ mod tests {
         let overlay = bridge.view_model().selection_overlay;
         assert!(overlay.visible, "o cubo ativo precisa de contorno visível");
         assert!(!overlay.accent, "domínio Object usa a cor de seleção");
-        assert_eq!(
-            overlay.outline_commands.matches('M').count(),
-            12,
-            "o cubo tem 12 arestas reais destacadas"
+        // Contorno de objeto = silhueta frontal, não a caixa nem as 12 arestas:
+        // de um canto vê-se 3 faces, portanto 9 arestas de contorno.
+        let edges = overlay.outline_commands.matches('M').count();
+        assert!(
+            (6..=12).contains(&edges),
+            "silhueta frontal precisa ter entre 6 e 12 arestas, veio {edges}"
         );
         assert!(overlay.point_commands.is_empty());
+        assert!(overlay.unselected_outline_commands.is_empty());
     }
 
     #[test]
@@ -8157,8 +8176,13 @@ mod tests {
         bridge.state.sync_selection();
         let overlay = bridge.view_model().selection_overlay;
         assert!(overlay.visible && overlay.accent);
-        assert_eq!(overlay.point_commands.matches('M').count(), 1);
+        assert!(overlay.point_commands.is_empty());
         assert!(overlay.outline_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            7,
+            "o vértice selecionado sai do overlay 2D e vai para o renderer"
+        );
 
         // Edge: uma linha por aresta selecionada.
         bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
@@ -8171,17 +8195,21 @@ mod tests {
             .insert((0, 1));
         bridge.state.sync_selection();
         let overlay = bridge.view_model().selection_overlay;
-        assert_eq!(overlay.outline_commands.matches('M').count(), 1);
+        assert!(overlay.outline_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_outline_commands.matches('M').count(),
+            11,
+            "as 11 arestas não selecionadas continuam como alvos"
+        );
 
         // Face: contorno fechado da face.
         bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
         bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
         bridge.state.sync_selection();
         let overlay = bridge.view_model().selection_overlay;
-        assert_eq!(
-            overlay.outline_commands.matches('M').count(),
-            4,
-            "uma face quad tem 4 arestas"
+        assert!(
+            overlay.outline_commands.is_empty(),
+            "a face selecionada é desenhada pelo renderer, não pelo overlay 2D"
         );
     }
 
@@ -8229,7 +8257,7 @@ mod tests {
         bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
         bridge.state.sync_selection();
         let overlay = bridge.view_model().selection_overlay;
-        assert_eq!(overlay.point_commands.matches('M').count(), 1);
+        assert!(overlay.point_commands.is_empty());
         assert_eq!(
             overlay.unselected_point_commands.matches('M').count(),
             7,
@@ -8247,17 +8275,17 @@ mod tests {
             .insert((0, 1));
         bridge.state.sync_selection();
         let overlay = bridge.view_model().selection_overlay;
-        assert_eq!(overlay.outline_commands.matches('M').count(), 1);
+        assert!(overlay.outline_commands.is_empty());
         assert_eq!(
             overlay.unselected_outline_commands.matches('M').count(),
             11,
             "as outras 11 arestas precisam aparecer como alvos"
         );
 
-        // Object: só a caixa do ativo, sem camada de não selecionados.
+        // Object: silhueta frontal, sem camada de não selecionados.
         bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Object));
         let overlay = bridge.view_model().selection_overlay;
-        assert_eq!(overlay.outline_commands.matches('M').count(), 12);
+        assert!(!overlay.outline_commands.is_empty());
         assert!(overlay.unselected_outline_commands.is_empty());
         assert!(overlay.unselected_point_commands.is_empty());
     }
@@ -8317,6 +8345,41 @@ mod tests {
         assert!(bridge.handle_escape());
         assert!(bridge.tool_modal.is_none());
         assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn geometry_never_carries_selection_colour() {
+        // A regressão original: selecionar uma aresta marcava os vértices das
+        // pontas como selecionados e a triangulação pintava TODAS as faces que
+        // tocavam esses vértices de laranja, mesmo em modo Edge.
+        let mut mesh = petunia_core::Mesh::cube(2.0);
+        let before: Vec<[f32; 3]> = mesh
+            .to_triangles_smooth(false)
+            .into_iter()
+            .map(|(_, _, color, _)| color)
+            .collect();
+
+        mesh.faces[0].selected = true;
+        mesh.verts[0].selected = true;
+        mesh.selected_edges.insert((0, 1));
+
+        let after: Vec<[f32; 3]> = mesh
+            .to_triangles_smooth(false)
+            .into_iter()
+            .map(|(_, _, color, _)| color)
+            .collect();
+        assert_eq!(
+            before, after,
+            "selecionar não pode alterar a cor da geometria"
+        );
+
+        // A cor de seleção não aparece em nenhum vértice da triangulação.
+        for (_, _, color, _) in mesh.to_triangles_smooth(false) {
+            assert!(
+                !(color[0] > 0.95 && (color[1] - 0.55).abs() < 0.05),
+                "triangulação ainda pinta seleção: {color:?}"
+            );
+        }
     }
 
     #[test]

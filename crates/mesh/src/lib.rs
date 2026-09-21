@@ -234,17 +234,17 @@ pub mod obj;
 pub mod ops;
 pub mod primitives;
 pub mod profile_geo;
-pub mod triangulate;
 pub mod topology;
+pub mod triangulate;
 pub mod uv;
 pub mod uv_tools;
 pub mod uv_xatlas;
 
-pub use topology::{DirtyDomains, ElementRemap, TopologyResult};
-pub use uv_tools::{UvDiagnostics, UvIsland};
 pub use half_edge::{
     EdgeId, FaceId, HalfEdge, HalfEdgeId, HalfEdgeMesh, TopologyDefect, TopologyReport, VertexId,
 };
+pub use topology::{DirtyDomains, ElementRemap, TopologyResult};
+pub use uv_tools::{UvDiagnostics, UvIsland};
 
 impl Mesh {
     // ---------------- saída p/ render/export ----------------
@@ -303,10 +303,10 @@ impl Mesh {
 
                 for (k, &vi) in tri_indices.iter().enumerate() {
                     let v = &self.verts[vi];
-                    let mut col = v.color;
-                    if v.selected || f.selected {
-                        col = [1.0, 0.55, 0.15];
-                    }
+                    // A cor da geometria é do material, nunca da seleção: pintar
+                    // aqui fazia uma aresta selecionada tingir todas as faces que
+                    // tocam seus vértices. Seleção é uma camada de render à parte.
+                    let col = v.color;
                     let n = if smooth && vi < vert_normals.len() {
                         vert_normals[vi]
                     } else {

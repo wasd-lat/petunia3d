@@ -147,6 +147,7 @@ impl WgpuViewport {
             state.xray,
             state.show_triangulation,
             state.textured,
+            state.selection_domain,
         );
 
         let mut encoder = self
@@ -254,6 +255,7 @@ mod tests {
                         show_triangulation: false,
                         textured: false,
                         show_wireframe_overlay: false,
+                        selection_domain: petunia_core::SelectionDomain::Object,
                     },
                 );
                 assert!(img.is_ok());
