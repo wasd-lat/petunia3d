@@ -645,6 +645,26 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "model.push_pull",
+                "Push/Pull",
+                "Push or pull selected faces along the surface normal",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            PushPullToolCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "model.knife",
+                "Knife",
+                "Cut the active mesh along edge points picked in the viewport",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Knife),
+            KnifeToolCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.bevel",
                 "Bevel Edges",
                 "Bevel selected mesh edges",
@@ -2341,6 +2361,75 @@ impl Command for ExtrudeSelectedCmd {
     }
 }
 
+/// Ativa a sessão modal de Push/Pull. O deslocamento vem do arrasto na
+/// viewport ou da entrada numérica do inspector.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PushPullToolCmd;
+
+impl Command for PushPullToolCmd {
+    fn label(&self) -> &'static str {
+        "push/pull"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.edit_mode() != EditMode::Edit {
+            Err("Requires Edit mode")
+        } else if state.project.active_mesh().is_none() {
+            Err("No active mesh")
+        } else if state
+            .project
+            .active_mesh()
+            .is_some_and(|m| m.faces.iter().any(|f| f.selected))
+        {
+            Ok(())
+        } else {
+            Err("Select faces first")
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state
+            .begin_modal(crate::ModalKind::PushPull)
+            .map_err(|error| CommandError::Execution(error.to_string()))
+    }
+}
+
+/// Abre uma sessão de corte (Knife) sobre a malha ativa.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KnifeToolCmd;
+
+impl Command for KnifeToolCmd {
+    fn label(&self) -> &'static str {
+        "knife"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.project.active_mesh().is_none() {
+            Err("No active mesh")
+        } else {
+            Ok(())
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let Some(mesh) = state.project.active_mesh().cloned() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        state.session.tools.cut_session = Some(crate::CutSession::new(mesh));
+        state.session.tools.active_tool = "cut".to_string();
+        state.set_status("Knife: pick two edge points, Enter confirms");
+        Ok(())
+    }
+}
+
 /// Comando para aplicação de inset nas faces selecionadas.
 #[derive(Debug, Clone)]
 pub struct InsetFacesCmd {
@@ -2804,7 +2893,10 @@ impl Command for LoopCutCmd {
         if let Some(dst) = state.project.active_mesh_mut() {
             *dst = next;
         }
-        state.set_status(format!("Loop cut ({cuts}{})", if self.even { " even" } else { "" }));
+        state.set_status(format!(
+            "Loop cut ({cuts}{})",
+            if self.even { " even" } else { "" }
+        ));
         Ok(())
     }
 }

@@ -74,6 +74,35 @@ impl FileDialogService {
             .await
             .map(|file| file.path().to_path_buf())
     }
+
+    /// Importa um modelo 3D do disco (OBJ, glTF ou GLB).
+    pub async fn import_model(&self) -> Option<PathBuf> {
+        rfd::AsyncFileDialog::new()
+            .add_filter("3D model", &["obj", "gltf", "glb"])
+            .pick_file()
+            .await
+            .map(|file| file.path().to_path_buf())
+    }
+
+    /// Escolhe o destino de exportação OBJ.
+    pub async fn export_obj(&self) -> Option<PathBuf> {
+        rfd::AsyncFileDialog::new()
+            .add_filter("Wavefront OBJ", &["obj"])
+            .set_file_name("model.obj")
+            .save_file()
+            .await
+            .map(|file| file.path().to_path_buf())
+    }
+
+    /// Escolhe o destino de exportação GLB.
+    pub async fn export_glb(&self) -> Option<PathBuf> {
+        rfd::AsyncFileDialog::new()
+            .add_filter("glTF Binary", &["glb"])
+            .set_file_name("scene.glb")
+            .save_file()
+            .await
+            .map(|file| file.path().to_path_buf())
+    }
 }
 
 #[cfg(test)]

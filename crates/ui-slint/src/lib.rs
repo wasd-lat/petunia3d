@@ -138,6 +138,9 @@ pub enum UiIntent {
     ViewportGesture(ViewportGesture),
     SaveProjectTo(PathBuf),
     OpenProjectFrom(PathBuf),
+    ImportModelFrom(PathBuf),
+    ExportActiveObjTo(PathBuf),
+    ExportSceneGlbTo(PathBuf),
     SelectSceneAsset(String),
     ToggleSceneAssetVisibility(String),
     ToggleSceneAssetLock(String),
@@ -192,6 +195,7 @@ pub struct ShellViewModel {
     pub is_wireframe: bool,
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
+    pub add_menu_open: bool,
 }
 
 impl ShellViewModel {
@@ -276,6 +280,7 @@ impl ShellViewModel {
             is_wireframe: state.session.show_wireframe_overlay,
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
+            add_menu_open: false,
         }
     }
 
@@ -377,6 +382,10 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub scale: [NumericFieldState; 3],
     pub drag: Option<ViewportDrag>,
     pub viewport_size: [f32; 2],
+    /// Última posição de tela do traço de pintura ativo.
+    pub paint_last: Option<[f32; 2]>,
+    /// Menu de primitivas aberto (apresentação).
+    pub add_menu_open: bool,
 }
 
 impl<V: PetuniaViewport> SlintUiBridge<V> {
@@ -391,6 +400,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             settings_visible: false,
             drag: None,
             viewport_size: [1024.0, 768.0],
+            paint_last: None,
+            add_menu_open: false,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -497,6 +508,36 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     self.state.set_status(format!("failed to open: {err}"));
                 }
             },
+            UiIntent::ImportModelFrom(path) => {
+                match petunia_core::ProjectService::import_file_pipeline(
+                    &mut self.state,
+                    &path,
+                    &petunia_project::pipeline::ImportOptions::default(),
+                ) {
+                    Ok(names) => self
+                        .state
+                        .set_status(format!("imported {} asset(s)", names.len())),
+                    Err(error) => self.state.set_status(format!("import failed: {error}")),
+                }
+            }
+            UiIntent::ExportActiveObjTo(path) => {
+                let index = self.state.project.active;
+                match petunia_core::ProjectService::export_obj(&self.state, index, &path) {
+                    Ok(()) => self
+                        .state
+                        .set_status(format!("exported {}", path.display())),
+                    Err(error) => self.state.set_status(format!("export failed: {error}")),
+                }
+            }
+            UiIntent::ExportSceneGlbTo(path) => {
+                let indices = self.state.project.export_selected_indices();
+                match petunia_core::ProjectService::export_glb(&self.state, &indices, &path) {
+                    Ok(()) => self
+                        .state
+                        .set_status(format!("exported {}", path.display())),
+                    Err(error) => self.state.set_status(format!("export failed: {error}")),
+                }
+            }
             UiIntent::Undo => {
                 if self.state.undo() {
                     self.state.set_status("Desfazer executado.");
@@ -519,10 +560,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     .set_status(format!("Primitiva adicionada: {:?}", kind));
             }
             UiIntent::DeleteActiveAsset => {
-                if let Err(error) = self
-                    .state
-                    .dispatch(&petunia_core::DeleteAssetCmd { asset_index: None })
-                {
+                // `edit.delete` é contextual: em Object remove o asset ativo; em
+                // Point/Edge/Face remove os sub-elementos selecionados.
+                if let Err(error) = self.state.dispatch_command("edit.delete") {
                     self.state.set_status(error.to_string());
                 }
             }
@@ -792,6 +832,88 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.cancel_transform()
     }
 
+    /// Inicia um traço de pintura contínuo com transação única de undo.
+    pub fn begin_paint_stroke_at(&mut self, x: f32, y: f32) -> bool {
+        if self.state.workspace != Workspace::Paint {
+            return false;
+        }
+        if self.state.project.active_mesh().is_none() {
+            self.state.set_status("No active mesh to paint");
+            return false;
+        }
+        self.state.begin_paint_stroke();
+        self.paint_dab_at(x, y);
+        self.paint_last = Some([x, y]);
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Estende o traço interpolando em espaço de tela e pintando cada dab.
+    pub fn paint_stroke_to(&mut self, x: f32, y: f32) -> bool {
+        let Some(last) = self.paint_last else {
+            return false;
+        };
+        let delta_x = x - last[0];
+        let delta_y = y - last[1];
+        let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
+        // ~3 px lógicos entre dabs deixam o traço contínuo sem buracos.
+        let steps = (distance / 3.0).ceil().max(1.0) as usize;
+        for step in 1..=steps {
+            let t = step as f32 / steps as f32;
+            self.paint_dab_at(last[0] + delta_x * t, last[1] + delta_y * t);
+        }
+        self.paint_last = Some([x, y]);
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Confirma o traço como uma única entrada de undo.
+    pub fn end_paint_stroke_at(&mut self) -> bool {
+        if self.paint_last.take().is_none() {
+            return false;
+        }
+        self.state.finish_paint_stroke(false);
+        true
+    }
+
+    pub fn cancel_paint_stroke(&mut self) -> bool {
+        if self.paint_last.take().is_none() {
+            return false;
+        }
+        self.state.finish_paint_stroke(true);
+        true
+    }
+
+    fn paint_dab_at(&mut self, x: f32, y: f32) {
+        let width = self.viewport_size[0].max(1.0);
+        let height = self.viewport_size[1].max(1.0);
+        let ndc_x = (x / width).clamp(0.0, 1.0) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (y / height).clamp(0.0, 1.0) * 2.0;
+        let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
+        let Some((face, hit)) = pick_face_hit(&self.state, origin, direction) else {
+            return;
+        };
+        let tool = self.state.session.tools.active_tool.clone();
+        let brush = match tool.as_str() {
+            "eraser" => petunia_core::BrushType::Eraser,
+            "fill" => petunia_core::BrushType::Fill,
+            "picker" => return,
+            _ => petunia_core::BrushType::Soft,
+        };
+        let radius = (self.state.session.tools.paint_radius * 8.0).max(1.0) as u32;
+        let strength = self.state.session.tools.paint_strength;
+        let isolate = self.state.session.tools.paint_isolate_selection;
+        petunia_module_paint::PaintModule::paint_mesh_3d(
+            &mut self.state,
+            face,
+            hit,
+            brush,
+            radius,
+            strength,
+            isolate,
+        );
+    }
+
     pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
         let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
         let ndc_y = 1.0 - normalized_y.clamp(0.0, 1.0) * 2.0;
@@ -912,6 +1034,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.cancel_paint_stroke() {
+            return true;
+        }
         if self.drag.take().is_some() {
             self.cancel_transform();
             return true;
@@ -1061,10 +1186,56 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 let _ = self.execute_core_command("model.bevel");
             }
             "model.delete" => self.apply(UiIntent::DeleteActiveAsset),
+            "model.transform" => self.apply(UiIntent::SetActiveTool("move".into())),
+            "model.push_pull" => {
+                let _ = self.execute_core_command("model.push_pull");
+            }
+            "model.knife" => {
+                let _ = self.execute_core_command("model.knife");
+            }
+            "model.extrude_individual" => {
+                let _ = self.execute_core_command("model.extrude_individual");
+            }
+            "model.subdivide" => {
+                let _ = self.execute_core_command("model.subdivide");
+            }
+            "model.merge" => {
+                let _ = self.execute_core_command("model.merge");
+            }
+            "model.loop_cut" => {
+                let _ = self.execute_core_command("model.loop_cut");
+            }
+            "model.primitives" => {
+                self.add_menu_open = true;
+            }
             "paint.paint" => self.apply(UiIntent::SetActiveTool("brush".into())),
+            "paint.size_decrease" => self.adjust_brush_size(-1.0),
+            "paint.size_increase" => self.adjust_brush_size(1.0),
+            "paint.hardness_decrease" => self.adjust_brush_hardness(-0.1),
+            "paint.hardness_increase" => self.adjust_brush_hardness(0.1),
+            "global.cycle_mode" => {
+                let _ = self.execute_core_command("select.cycle_domain");
+            }
+            "global.save_project" => self.apply(UiIntent::SaveProject),
+            "global.help" => {
+                let _ = self.execute_core_command("help.documentation");
+            }
             _ => return false,
         }
         true
+    }
+
+    fn adjust_brush_size(&mut self, steps: f32) {
+        let next = (self.state.session.tools.paint_radius + steps).clamp(0.01, 100.0);
+        self.apply(UiIntent::SetBrushSize(next));
+        self.state.set_status(format!("Brush size: {next:.2}"));
+    }
+
+    fn adjust_brush_hardness(&mut self, delta: f32) {
+        let next = (self.state.session.tools.brush_hardness + delta).clamp(0.0, 1.0);
+        self.state.session.tools.brush_hardness = next;
+        self.state.mark_dirty();
+        self.state.set_status(format!("Brush hardness: {next:.2}"));
     }
 
     pub fn scrub_transform(
@@ -1179,6 +1350,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.is_wireframe = self.state.session.show_wireframe_overlay;
         vm.asset_library_visible = self.asset_library_visible;
         vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.add_menu_open = self.add_menu_open;
         vm
     }
 
@@ -1456,6 +1628,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_gizmo_y_end_y(vm.gizmo.y_end_y);
     window.set_gizmo_z_end_x(vm.gizmo.z_end_x);
     window.set_gizmo_z_end_y(vm.gizmo.z_end_y);
+    window.set_add_menu_open(vm.add_menu_open);
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -1568,22 +1741,28 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             let path = match id.as_str() {
                 "file.open" => service.open_project().await,
                 "file.save" | "file.save_as" => service.save_project().await,
+                "file.import_obj" => service.import_model().await,
+                "file.export_obj" => service.export_obj().await,
+                "file.export_glb" => service.export_glb().await,
                 _ => None,
             };
             let Some(path) = path else {
                 return;
             };
             if let Ok(mut bridge) = bridge.lock() {
-                let intent = if id == "file.open" {
-                    UiIntent::OpenProjectFrom(path)
-                } else {
-                    UiIntent::SaveProjectTo(path)
+                let intent = match id.as_str() {
+                    "file.open" => UiIntent::OpenProjectFrom(path),
+                    "file.import_obj" => UiIntent::ImportModelFrom(path),
+                    "file.export_obj" => UiIntent::ExportActiveObjTo(path),
+                    "file.export_glb" => UiIntent::ExportSceneGlbTo(path),
+                    _ => UiIntent::SaveProjectTo(path),
                 };
+                let needs_render = matches!(id.as_str(), "file.open" | "file.import_obj");
                 bridge.apply(intent);
                 bridge.command_search_visible = false;
                 bridge.overlays.remove(OverlayId::CommandPalette);
                 let vm = bridge.view_model();
-                let new_frame = if id == "file.open" {
+                let new_frame = if needs_render {
                     bridge.render_viewport()
                 } else {
                     None
@@ -1925,6 +2104,48 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                     window.set_viewport_image(frame);
                 }
             }
+        }
+    });
+
+    let paint_begin_bridge = Arc::clone(&bridge);
+    window.on_viewport_paint_begin(move |x, y| {
+        if let Ok(mut bridge) = paint_begin_bridge.lock() {
+            bridge.begin_paint_stroke_at(x, y);
+        }
+    });
+
+    let paint_update_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_paint_update(move |x, y| {
+        if let Ok(mut bridge) = paint_update_bridge.lock() {
+            bridge.paint_stroke_to(x, y);
+            let new_frame = bridge.render_viewport();
+            if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                window.set_viewport_image(frame);
+            }
+        }
+    });
+
+    let paint_end_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_paint_end(move || {
+        if let Ok(mut bridge) = paint_end_bridge.lock() {
+            bridge.end_paint_stroke_at();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let add_menu_bridge = Arc::clone(&bridge);
+    window.on_add_menu_changed(move |open| {
+        if let Ok(mut bridge) = add_menu_bridge.lock() {
+            bridge.add_menu_open = open;
         }
     });
 
@@ -2885,6 +3106,89 @@ mod tests {
         bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
 
         assert!(!bridge.view_model().gizmo.visible);
+    }
+
+    #[test]
+    fn delete_in_component_mode_removes_geometry_not_the_object() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+        let asset_count = bridge.state.project.assets.len();
+        let verts_before = bridge.state.project.active_mesh().unwrap().verts.len();
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.apply(UiIntent::DeleteActiveAsset);
+
+        assert_eq!(bridge.state.project.assets.len(), asset_count);
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(mesh.verts.len() <= verts_before);
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn paint_stroke_is_continuous_and_commits_one_undo_step() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("brush".into()));
+
+        assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
+        assert!(bridge.paint_stroke_to(420.0, 300.0));
+        assert!(bridge.paint_stroke_to(440.0, 310.0));
+        assert!(bridge.end_paint_stroke_at());
+
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.is_document_dirty());
+        assert!(bridge.paint_last.is_none());
+    }
+
+    #[test]
+    fn escape_cancels_paint_stroke_without_history() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("brush".into()));
+
+        assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
+        assert!(bridge.paint_stroke_to(430.0, 300.0));
+        assert!(bridge.handle_escape());
+
+        assert!(bridge.paint_last.is_none());
+        assert!(!bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn keymap_routes_the_model_shortcut_table() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+        assert!(bridge.route_shortcut("E", false, false, false));
+        assert!(bridge.route_shortcut("I", false, false, false));
+        assert!(bridge.route_shortcut("B", true, false, false));
+        assert!(bridge.route_shortcut("W", false, false, false));
+        assert!(bridge.route_shortcut("M", false, false, false));
+        assert!(bridge.route_shortcut("K", false, false, false));
+        assert!(bridge.route_shortcut("Z", true, false, false));
+        assert!(bridge.route_shortcut("1", false, false, false));
+        assert!(!bridge.route_shortcut("Ω", false, false, false));
+    }
+
+    #[test]
+    fn push_pull_and_knife_commands_are_registered_and_contextual() {
+        let mut state = AppState::default();
+        assert!(state.commands.contains("model.push_pull"));
+        assert!(state.commands.contains("model.knife"));
+
+        // Push/Pull exige Edit mode e face selecionada.
+        assert!(state.dispatch_command("model.push_pull").is_err());
+
+        state.set_edit_mode(petunia_core::EditMode::Edit);
+        state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        assert!(state.dispatch_command("model.push_pull").is_ok());
+        assert!(state.session.tools.modal.is_some());
+        state.cancel_modal();
+
+        assert!(state.dispatch_command("model.knife").is_ok());
+        assert!(state.session.tools.cut_session.is_some());
     }
 
     #[test]

@@ -361,6 +361,10 @@ export component PetuniaSlintShell inherits Window {
     callback viewport-transform-begin(string, float, float);
     callback viewport-transform-update(float, float);
     callback viewport-transform-end;
+    callback viewport-paint-begin(float, float);
+    callback viewport-paint-update(float, float);
+    callback viewport-paint-end;
+    callback add-menu-changed(bool);
     callback open-project-requested;
     callback scene-select(string);
     callback scene-toggle-visibility(string);
@@ -739,6 +743,7 @@ export component PetuniaSlintShell inherits Window {
                         property <bool> moved-since-down: false;
                         property <bool> extend-selection: false;
                         property <bool> is-transform: false;
+                        property <bool> is-painting: false;
                         property <string> local-kind: "";
 
                         function transform-tool() -> string {
@@ -775,11 +780,18 @@ export component PetuniaSlintShell inherits Window {
                                 } else if event.button == PointerEventButton.left && event.modifiers.alt {
                                     is-orbit = true;
                                     is-pan = false;
-                                } else if event.button == PointerEventButton.left && !event.modifiers.shift {
-                                    local-kind = self.transform-tool();
-                                    if local-kind != "" {
-                                        is-transform = true;
-                                        root.viewport-transform-begin(local-kind, self.mouse-x / 1px, self.mouse-y / 1px);
+                                } else if event.button == PointerEventButton.left
+                                    && !event.modifiers.shift
+                                    && !event.modifiers.alt {
+                                    if root.active-workspace == "PAINT" {
+                                        is-painting = true;
+                                        root.viewport-paint-begin(self.mouse-x / 1px, self.mouse-y / 1px);
+                                    } else {
+                                        local-kind = self.transform-tool();
+                                        if local-kind != "" {
+                                            is-transform = true;
+                                            root.viewport-transform-begin(local-kind, self.mouse-x / 1px, self.mouse-y / 1px);
+                                        }
                                     }
                                 }
                             } else if event.kind == PointerEventKind.up {
@@ -788,6 +800,10 @@ export component PetuniaSlintShell inherits Window {
                                 if is-transform {
                                     root.viewport-transform-end();
                                     is-transform = false;
+                                }
+                                if is-painting {
+                                    root.viewport-paint-end();
+                                    is-painting = false;
                                 }
                             }
                         }
@@ -806,11 +822,15 @@ export component PetuniaSlintShell inherits Window {
                             } else if is-transform {
                                 moved-since-down = true;
                                 root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                            } else if is-painting {
+                                moved-since-down = true;
+                                root.viewport-paint-update(self.mouse-x / 1px, self.mouse-y / 1px);
                             }
                         }
 
                         clicked => {
-                            if !moved-since-down && !is-transform {
+                            if !moved-since-down && !is-transform && !is-painting
+                                && root.active-workspace != "PAINT" {
                                 root.viewport-select(self.mouse-x / self.width, self.mouse-y / self.height, extend-selection);
                             }
                         }
@@ -996,7 +1016,10 @@ export component PetuniaSlintShell inherits Window {
                                 icon: IconSet.Plus;
                                 semantic-label: "Add Primitive";
                                 active: root.add-menu-open;
-                                clicked => { root.add-menu-open = !root.add-menu-open; }
+                                clicked => {
+                                    root.add-menu-open = !root.add-menu-open;
+                                    root.add-menu-changed(root.add-menu-open);
+                                }
                             }
                             if active-workspace == "MODEL" && selection-domain == "OBJECT": ToolButton {
                                 icon: IconSet.Copy;
@@ -1096,52 +1119,52 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Box;
                                 semantic-label: "Cube";
-                                clicked => { root.add-primitive-requested("cube"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("cube"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.CircleDot;
                                 semantic-label: "Sphere";
-                                clicked => { root.add-primitive-requested("sphere"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("sphere"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Cylinder;
                                 semantic-label: "Cylinder";
-                                clicked => { root.add-primitive-requested("cylinder"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("cylinder"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Square;
                                 semantic-label: "Plane";
-                                clicked => { root.add-primitive-requested("plane"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("plane"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Triangle;
                                 semantic-label: "Cone";
-                                clicked => { root.add-primitive-requested("cone"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("cone"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Pill;
                                 semantic-label: "Capsule";
-                                clicked => { root.add-primitive-requested("capsule"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("capsule"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Torus;
                                 semantic-label: "Torus";
-                                clicked => { root.add-primitive-requested("torus"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("torus"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Circle;
                                 semantic-label: "Circle";
-                                clicked => { root.add-primitive-requested("circle"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("circle"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Diamond;
                                 semantic-label: "Icosphere";
-                                clicked => { root.add-primitive-requested("icosphere"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("icosphere"); root.add-menu-changed(false); }
                             }
                             ToolButton {
                                 icon: IconSet.Pyramid;
                                 semantic-label: "Wedge";
-                                clicked => { root.add-primitive-requested("wedge"); root.add-menu-open = false; }
+                                clicked => { root.add-primitive-requested("wedge"); root.add-menu-changed(false); }
                             }
                         }
                     }
