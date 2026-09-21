@@ -32,26 +32,11 @@ impl BevelTool {
     pub fn apply(state: &mut AppState) {
         let amt = state.bevel_amount;
         let segs = state.bevel_segments.clamp(1, 4);
-        state.checkpoint("bevel");
-        let (ok, skipped) = state
-            .project
-            .active_mesh_mut()
-            .map(|m| {
-                if segs > 1 {
-                    m.bevel_selected_segments(amt, segs)
-                } else {
-                    m.bevel_selected(amt)
-                }
-            })
-            .unwrap_or((0, 0));
-        if skipped > 0 {
-            state.set_status(format!(
-                "bevel: {ok} ok, {skipped} ignoradas (não-manifold)"
-            ));
-        } else {
-            state.set_status(format!("bevel: {ok} arestas"));
+        if let Err(err) = state.dispatch(&petunia_core::BevelCmd {
+            amount: amt,
+            segments: segs,
+        }) {
+            state.set_status(format!("bevel: {err}"));
         }
-        state.sync_selection();
-        state.emit_mesh_changed();
     }
 }

@@ -45,31 +45,20 @@ impl TransformTool {
 
     pub fn apply_scale(state: &mut AppState) {
         let s = state.transform_scale;
-        state.checkpoint("scale");
-        if let Some(m) = state.project.active_mesh_mut() {
-            let c = m.selection_center();
-            m.scale_selected(s, c);
+        if let Err(err) = state.dispatch(&petunia_core::ScaleSelectionCmd { factor: s }) {
+            state.set_status(format!("scale: {err}"));
         }
-        state.transform_scale = 1.0;
-        state.sync_selection();
-        state.emit_mesh_changed();
     }
 
     pub fn apply_duplicate(state: &mut AppState) {
-        state.checkpoint("duplicate");
-        if let Some(m) = state.project.active_mesh_mut() {
-            m.duplicate_selected();
+        if let Err(err) = state.dispatch(&petunia_core::DuplicateSelectionCmd) {
+            state.set_status(format!("duplicate: {err}"));
         }
-        state.sync_selection();
-        state.emit_mesh_changed();
     }
 
     pub fn apply_delete(state: &mut AppState) {
-        state.checkpoint("delete");
-        if let Some(m) = state.project.active_mesh_mut() {
-            m.delete_selected();
+        if let Err(err) = state.dispatch(&petunia_core::DeleteSelectionCmd) {
+            state.set_status(format!("delete: {err}"));
         }
-        state.sync_selection();
-        state.emit_mesh_changed();
     }
 }

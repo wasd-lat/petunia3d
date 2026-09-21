@@ -8,11 +8,11 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use petunia_core::{
-    AddPrimitiveCmd, AppState, ClearSelectionCmd, InvertSelectionCmd, PrimitiveKind,
-    ProjectService, SelectAllCmd,
+    AddPrimitiveCmd, AppState, ClearSelectionCmd, CommandIntent, ExtrudeSelectedCmd,
+    InvertSelectionCmd, PrimitiveKind, ProjectService, ScaleSelectionCmd, SelectAllCmd,
+    SubdivideSelectionCmd,
 };
 use petunia_mesh::Mesh;
-use petunia_module_model::{ExtrudeTool, PrimitivesTool, SubdivideTool, TransformTool};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -111,16 +111,10 @@ fn cmd_new(output_path: &str, primitive: &str) -> Result<()> {
     let mut state = AppState::new("en");
     ProjectService::new_project(&mut state);
 
+    let kind = PrimitiveKind::parse(primitive).map_err(|e| anyhow::anyhow!("{e}"))?;
     if let Some(first) = state.project.active_mut() {
-        first.name = primitive.to_string();
-        first.mesh = match primitive {
-            "Cube" => Mesh::cube(2.0),
-            "Plane" => Mesh::plane(2.0),
-            "Cylinder8" => Mesh::cylinder(8, 1.0, 2.0),
-            "Sphere" => Mesh::sphere_low(10, 7, 1.2),
-            "Capsule" => Mesh::capsule(10, 0.6, 2.4),
-            _ => Mesh::cube(2.0),
-        };
+        first.name = kind.default_name().to_string();
+        first.mesh = kind.generate_mesh();
     }
 
     let p = Path::new(output_path);
@@ -258,14 +252,17 @@ fn cmd_transform(input_path: &str, output_path: &str, options: &[String]) -> Res
                 let dist: f32 = options[i + 1]
                     .parse()
                     .context("Valor numérico inválido para --extrude")?;
-                state.extrude_dist = dist;
-                ExtrudeTool::apply(&mut state);
-                println!("  ↳ Executado: ExtrudeTool::apply({dist})");
+                state.dispatch_intent(&CommandIntent {
+                    command: "model.extrude".into(),
+                    asset_id: None,
+                    args: vec![dist as f64],
+                })?;
+                println!("  ↳ Executado: ExtrudeSelectedCmd({dist})");
                 i += 2;
             }
             "--subdivide" => {
-                SubdivideTool::apply_subdivide(&mut state);
-                println!("  ↳ Executado: SubdivideTool::apply_subdivide");
+                state.dispatch(&SubdivideSelectionCmd)?;
+                println!("  ↳ Executado: SubdivideSelectionCmd");
                 i += 1;
             }
             "--scale" => {
@@ -275,9 +272,8 @@ fn cmd_transform(input_path: &str, output_path: &str, options: &[String]) -> Res
                 let s: f32 = options[i + 1]
                     .parse()
                     .context("Valor numérico inválido para --scale")?;
-                state.transform_scale = s;
-                TransformTool::apply_scale(&mut state);
-                println!("  ↳ Executado: TransformTool::apply_scale({s})");
+                state.dispatch(&ScaleSelectionCmd { factor: s })?;
+                println!("  ↳ Executado: ScaleSelectionCmd({s})");
                 i += 2;
             }
             "--add-primitive" => {
@@ -285,8 +281,9 @@ fn cmd_transform(input_path: &str, output_path: &str, options: &[String]) -> Res
                     bail!("Faltando argumento para --add-primitive <nome>");
                 }
                 let prim = &options[i + 1];
-                PrimitivesTool::add_primitive(&mut state, prim);
-                println!("  ↳ Executado: PrimitivesTool::add_primitive({prim})");
+                let kind = PrimitiveKind::parse(prim).map_err(|e| anyhow::anyhow!("{e}"))?;
+                state.dispatch(&AddPrimitiveCmd::new(kind))?;
+                println!("  ↳ Executado: AddPrimitiveCmd({prim})");
                 i += 2;
             }
             other => {
@@ -338,8 +335,7 @@ fn cmd_bench() -> Result<()> {
 
     // 2. Seleciona e extrude
     state.dispatch(&SelectAllCmd)?;
-    state.extrude_dist = 1.5;
-    ExtrudeTool::apply(&mut state);
+    state.dispatch(&ExtrudeSelectedCmd { dist: 1.5 })?;
     let after_extrude = start.elapsed();
 
     // 3. Undo e Redo

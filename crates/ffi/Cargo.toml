@@ -14,7 +14,6 @@ crate-type = ["cdylib", "rlib"]
 petunia_core = { workspace = true }
 petunia_mesh = { workspace = true }
 petunia_project = { workspace = true }
-petunia_module_model = { workspace = true }
 uuid = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }

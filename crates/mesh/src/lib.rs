@@ -79,6 +79,9 @@ pub struct Mesh {
     pub verts: Vec<Vertex>,
     pub faces: Vec<Face>,
     pub selected_edges: HashSet<(u32, u32)>,
+    /// UV0 seams: undirected edges that split charts (ch. 15).
+    #[serde(default)]
+    pub uv_seams: HashSet<(u32, u32)>,
 }
 
 pub fn edge_key(a: u32, b: u32) -> (u32, u32) {
@@ -232,9 +235,13 @@ pub mod ops;
 pub mod primitives;
 pub mod profile_geo;
 pub mod triangulate;
+pub mod topology;
 pub mod uv;
+pub mod uv_tools;
 pub mod uv_xatlas;
 
+pub use topology::{DirtyDomains, ElementRemap, TopologyResult};
+pub use uv_tools::{UvDiagnostics, UvIsland};
 pub use half_edge::{
     EdgeId, FaceId, HalfEdge, HalfEdgeId, HalfEdgeMesh, TopologyDefect, TopologyReport, VertexId,
 };

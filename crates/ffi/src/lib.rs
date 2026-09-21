@@ -12,10 +12,10 @@ use std::path::Path;
 use std::ptr;
 
 use petunia_core::{
-    AppState, ClearSelectionCmd, DeleteSelectionCmd, DuplicateSelectionCmd, ProjectService,
-    SelectAllCmd,
+    AddPrimitiveCmd, AppState, ClearSelectionCmd, CommandError, DeleteSelectionCmd,
+    DuplicateSelectionCmd, ExtrudeSelectedCmd, PrimitiveKind, ProjectService, RedoCmd,
+    ScaleSelectionCmd, SelectAllCmd, SubdivideSelectionCmd, UndoCmd,
 };
-use petunia_module_model::{ExtrudeTool, PrimitivesTool, SubdivideTool, TransformTool};
 use uuid::Uuid;
 
 // Códigos de erro canônicos da C-ABI
@@ -25,6 +25,17 @@ pub const PETUNIA_ERR_INVALID_UTF8: i32 = -2;
 pub const PETUNIA_ERR_OPERATION_FAILED: i32 = -3;
 pub const PETUNIA_ERR_BUFFER_TOO_SMALL: i32 = -4;
 pub const PETUNIA_ERR_NOT_FOUND: i32 = -5;
+pub const PETUNIA_ERR_UNKNOWN_PRIMITIVE: i32 = -6;
+pub const PETUNIA_ERR_UNKNOWN_COMMAND: i32 = -7;
+
+fn command_error_code(err: &CommandError) -> i32 {
+    match err {
+        CommandError::UnknownPrimitive(_) => PETUNIA_ERR_UNKNOWN_PRIMITIVE,
+        CommandError::UnknownCommand(_) => PETUNIA_ERR_UNKNOWN_COMMAND,
+        CommandError::NoActiveAsset | CommandError::InvalidAssetIndex(_) => PETUNIA_ERR_NOT_FOUND,
+        _ => PETUNIA_ERR_OPERATION_FAILED,
+    }
+}
 
 thread_local! {
     static LAST_ERROR: RefCell<String> = const { RefCell::new(String::new()) };
@@ -264,8 +275,24 @@ pub unsafe extern "C" fn petunia_add_primitive(
     };
 
     let ctx = &mut *ctx;
-    PrimitivesTool::add_primitive(&mut ctx.state, kind_str);
-    PETUNIA_OK
+    let kind = match PrimitiveKind::parse(kind_str) {
+        Ok(k) => k,
+        Err(e) => {
+            set_last_error(e.to_string());
+            return command_error_code(&e);
+        }
+    };
+    match ctx.state.dispatch(&AddPrimitiveCmd {
+        kind,
+        name: Some(kind_str.to_string()),
+        at_cursor: true,
+    }) {
+        Ok(_) => PETUNIA_OK,
+        Err(e) => {
+            set_last_error(format!("Erro ao adicionar primitiva: {e}"));
+            command_error_code(&e)
+        }
+    }
 }
 
 /// Desfaz a última ação executada.
@@ -276,11 +303,12 @@ pub unsafe extern "C" fn petunia_undo(ctx: *mut PetuniaContext) -> i32 {
         return PETUNIA_ERR_NULL_PTR;
     }
     let ctx = &mut *ctx;
-    if ctx.state.undo() {
-        PETUNIA_OK
-    } else {
-        set_last_error("Nenhuma operação disponível para desfazer.");
-        PETUNIA_ERR_OPERATION_FAILED
+    match ctx.state.dispatch(&UndoCmd) {
+        Ok(_) => PETUNIA_OK,
+        Err(e) => {
+            set_last_error(format!("Erro ao desfazer: {e}"));
+            command_error_code(&e)
+        }
     }
 }
 
@@ -292,11 +320,12 @@ pub unsafe extern "C" fn petunia_redo(ctx: *mut PetuniaContext) -> i32 {
         return PETUNIA_ERR_NULL_PTR;
     }
     let ctx = &mut *ctx;
-    if ctx.state.redo() {
-        PETUNIA_OK
-    } else {
-        set_last_error("Nenhuma operação disponível para refazer.");
-        PETUNIA_ERR_OPERATION_FAILED
+    match ctx.state.dispatch(&RedoCmd) {
+        Ok(_) => PETUNIA_OK,
+        Err(e) => {
+            set_last_error(format!("Erro ao refazer: {e}"));
+            command_error_code(&e)
+        }
     }
 }
 
@@ -376,9 +405,13 @@ pub unsafe extern "C" fn petunia_extrude_selection(ctx: *mut PetuniaContext, dis
         return PETUNIA_ERR_NULL_PTR;
     }
     let ctx = &mut *ctx;
-    ctx.state.extrude_dist = distance;
-    ExtrudeTool::apply(&mut ctx.state);
-    PETUNIA_OK
+    match ctx.state.dispatch(&ExtrudeSelectedCmd { dist: distance }) {
+        Ok(_) => PETUNIA_OK,
+        Err(e) => {
+            set_last_error(format!("Erro ao extrudar: {e}"));
+            command_error_code(&e)
+        }
+    }
 }
 
 /// Subdivide os elementos selecionados.
@@ -389,8 +422,13 @@ pub unsafe extern "C" fn petunia_subdivide_selection(ctx: *mut PetuniaContext) -
         return PETUNIA_ERR_NULL_PTR;
     }
     let ctx = &mut *ctx;
-    SubdivideTool::apply_subdivide(&mut ctx.state);
-    PETUNIA_OK
+    match ctx.state.dispatch(&SubdivideSelectionCmd) {
+        Ok(_) => PETUNIA_OK,
+        Err(e) => {
+            set_last_error(format!("Erro ao subdividir: {e}"));
+            command_error_code(&e)
+        }
+    }
 }
 
 /// Aplica escala uniforme aos elementos selecionados.
@@ -401,9 +439,13 @@ pub unsafe extern "C" fn petunia_scale_selection(ctx: *mut PetuniaContext, scale
         return PETUNIA_ERR_NULL_PTR;
     }
     let ctx = &mut *ctx;
-    ctx.state.transform_scale = scale;
-    TransformTool::apply_scale(&mut ctx.state);
-    PETUNIA_OK
+    match ctx.state.dispatch(&ScaleSelectionCmd { factor: scale }) {
+        Ok(_) => PETUNIA_OK,
+        Err(e) => {
+            set_last_error(format!("Erro ao escalar: {e}"));
+            command_error_code(&e)
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------

@@ -141,31 +141,68 @@ impl PaintModule {
 
     /// Recompõe o stack na `texture` do ativo e sincroniza o Albedo.
     /// Chamar após qualquer mutação de camada (sem checkpoint próprio).
+    ///
+    /// Canonical raster is `Asset.paint_stack`. `Asset.texture` is the composed
+    /// cache. `Material.albedo_texture` is a derived alias of that cache.
     pub fn composite_active(state: &mut AppState) {
+        Self::composite_active_tiles(state, &[]);
+    }
+
+    /// Partial composition of dirty tiles when the stack is tileable.
+    /// Empty `dirty_tiles` falls back to a full composite.
+    pub fn composite_active_tiles(state: &mut AppState, dirty_tiles: &[u32]) {
         let active_idx = state.project.active;
-        let composed = state.project.assets.get(active_idx).and_then(|a| {
-            a.paint_stack.as_ref().map(|stack| {
+        let (w, h, tileable, has_stack) = match state.project.assets.get(active_idx) {
+            Some(a) => {
                 let (w, h) = a.texture.as_ref().map(|c| (c.w, c.h)).unwrap_or((256, 256));
-                let mut base = Canvas::new(w, h, [0, 0, 0, 0]);
-                stack.composite(&mut base);
-                base
-            })
-        });
+                let tileable = a.paint_stack.as_ref().is_some_and(|s| s.is_tileable());
+                (w, h, tileable, a.paint_stack.is_some())
+            }
+            None => return,
+        };
+        if !has_stack {
+            return;
+        }
+        let partial = tileable && !dirty_tiles.is_empty();
+        if partial {
+            if let Some(o) = state.project.assets.get_mut(active_idx)
+                && let Some(stack) = o.paint_stack.clone()
+            {
+                let cv = o
+                    .texture
+                    .get_or_insert_with(|| Canvas::new(w, h, [0, 0, 0, 0]));
+                stack.composite_tiles(cv, dirty_tiles);
+            }
+        } else {
+            let composed = state.project.assets.get(active_idx).and_then(|a| {
+                a.paint_stack.as_ref().map(|stack| {
+                    let mut base = Canvas::new(w, h, [0, 0, 0, 0]);
+                    stack.composite(&mut base);
+                    base
+                })
+            });
+            if let Some(cv) = composed
+                && let Some(o) = state.project.assets.get_mut(active_idx)
+            {
+                o.texture = Some(cv);
+            }
+        }
         let mat_id = state
             .project
             .assets
             .get(active_idx)
             .and_then(|a| a.material_id);
-        if let Some(cv) = composed {
-            if let Some(o) = state.project.assets.get_mut(active_idx) {
-                o.texture = Some(cv.clone());
-            }
-            if let Some(mid) = mat_id
-                && let Some(mat) = state.project.project.get_material_mut(mid)
-            {
-                mat.albedo_texture = Some(cv);
-            }
+        if let Some(mid) = mat_id
+            && let Some(tex) = state
+                .project
+                .assets
+                .get(active_idx)
+                .and_then(|a| a.texture.clone())
+            && let Some(mat) = state.project.project.get_material_mut(mid)
+        {
+            mat.albedo_texture = Some(tex);
         }
+        state.project.project.bump_textures();
         state.render.canvas_dirty = true;
         state.mark_dirty();
     }
@@ -567,8 +604,37 @@ impl PaintModule {
             state.paint_color = c;
         }
 
-        // Recompõe stack → texture → Albedo (representação única).
-        Self::composite_active(state);
+        if s.kind != BrushType::Eyedropper {
+            let canvas_w = state
+                .project
+                .assets
+                .get(state.project.active)
+                .and_then(|a| a.texture.as_ref())
+                .map(|c| c.w)
+                .unwrap_or(256);
+            let tiles = Self::dab_dirty_tiles(x, y, radius, canvas_w);
+            Self::composite_active_tiles(state, &tiles);
+        }
+    }
+
+    fn dab_dirty_tiles(x: u32, y: u32, radius: u32, canvas_w: u32) -> Vec<u32> {
+        use petunia_project::paint_layers::TILE_SIZE;
+        let tiles_x = canvas_w.div_ceil(TILE_SIZE).max(1);
+        let x0 = x.saturating_sub(radius);
+        let y0 = y.saturating_sub(radius);
+        let x1 = x.saturating_add(radius);
+        let y1 = y.saturating_add(radius);
+        let tx0 = x0 / TILE_SIZE;
+        let ty0 = y0 / TILE_SIZE;
+        let tx1 = x1 / TILE_SIZE;
+        let ty1 = y1 / TILE_SIZE;
+        let mut tiles = Vec::new();
+        for ty in ty0..=ty1 {
+            for tx in tx0..=tx1 {
+                tiles.push(ty * tiles_x + tx);
+            }
+        }
+        tiles
     }
 
     /// Confirma forma (Line/Rectangle) entre dois pontos do canvas.
@@ -757,6 +823,134 @@ impl PaintModule {
 
         Self::canvas_brush_with_settings(state, px, py, s);
         true
+    }
+
+    fn lock_allows_face(state: &AppState, face_idx: usize) -> bool {
+        use petunia_core::BrushLock;
+        match state.session.tools.brush_lock {
+            BrushLock::None | BrushLock::FirstObject => true,
+            BrushLock::FirstFace => state
+                .session
+                .selection
+                .faces
+                .first()
+                .copied()
+                .is_none_or(|f| f == face_idx),
+            BrushLock::SelectedFaces => {
+                let Some(mesh) = state.project.active_mesh() else {
+                    return false;
+                };
+                mesh.faces.get(face_idx).is_some_and(|f| f.selected)
+                    || state.session.selection.faces.contains(&face_idx)
+            }
+        }
+    }
+
+    /// Screen-space brush: stamp every visible face whose projected UV falls
+    /// inside the dab. Reuses the same canvas brush foundation.
+    pub fn paint_screen_space(
+        state: &mut AppState,
+        hit_pos: Vec3,
+        settings: BrushSettings,
+    ) -> usize {
+        if !Self::lock_allows_face(state, 0) && matches!(state.session.tools.brush_lock, petunia_core::BrushLock::SelectedFaces | petunia_core::BrushLock::FirstFace) {
+            // still iterate faces below with per-face lock
+        }
+        let isolate = state.session.tools.paint_isolate_selection
+            || matches!(
+                state.session.tools.brush_lock,
+                petunia_core::BrushLock::SelectedFaces
+            );
+        let face_count = state
+            .project
+            .active_mesh()
+            .map(|m| m.faces.len())
+            .unwrap_or(0);
+        let mut n = 0;
+        for fi in 0..face_count {
+            if !Self::lock_allows_face(state, fi) {
+                continue;
+            }
+            if Self::paint_mesh_3d_with_settings(state, fi, hit_pos, settings, isolate) {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    pub fn fill_scope(state: &mut AppState, scope: petunia_core::FillScope) {
+        use petunia_core::FillScope;
+        Self::ensure_stack(state);
+        match scope {
+            FillScope::ConnectedPixels | FillScope::Object => Self::canvas_fill(state),
+            FillScope::Face | FillScope::SelectedFaces | FillScope::UvIsland => {
+                let isolate = !matches!(scope, FillScope::Object);
+                let color = [
+                    (state.paint_color[0] * 255.0) as u8,
+                    (state.paint_color[1] * 255.0) as u8,
+                    (state.paint_color[2] * 255.0) as u8,
+                    255,
+                ];
+                let uvs: Vec<[f32; 2]> = state
+                    .project
+                    .active_mesh()
+                    .map(|m| {
+                        m.faces
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, f)| {
+                                !isolate || f.selected || state.session.selection.faces.contains(i)
+                            })
+                            .flat_map(|(_, f)| f.uv.iter().copied())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(o) = state.project.assets.get_mut(state.project.active)
+                    && let Some(stack) = o.paint_stack.as_mut()
+                    && let Some(layer) = stack.active_mut()
+                    && !layer.locked
+                    && let Some(cv) = layer.canvas_mut()
+                {
+                    let (w, h) = (cv.w, cv.h);
+                    for uv in uvs {
+                        let u = uv[0].rem_euclid(1.0);
+                        let v = uv[1].rem_euclid(1.0);
+                        let x = ((u * w as f32) as u32).min(w.saturating_sub(1));
+                        let y = (((1.0 - v) * h as f32) as u32).min(h.saturating_sub(1));
+                        cv.set(x, y, color);
+                    }
+                }
+                Self::composite_active(state);
+            }
+        }
+    }
+
+    pub fn add_decal(
+        state: &mut AppState,
+        image: Canvas,
+        center_uv: [f32; 2],
+        scale_uv: [f32; 2],
+        rotation_rad: f32,
+    ) -> Option<uuid::Uuid> {
+        Self::ensure_stack(state);
+        state.checkpoint("add decal");
+        let id = state.project.assets.get_mut(state.project.active).and_then(|o| {
+            let stack = o.paint_stack.as_mut()?;
+            let decal = DecalLayer::new(image, center_uv, scale_uv, rotation_rad);
+            Some(stack.add_layer(PaintLayer::new_decal("Decal", decal)))
+        });
+        Self::composite_active(state);
+        id
+    }
+
+    pub fn add_layer_group(state: &mut AppState, name: &str) -> Option<uuid::Uuid> {
+        Self::ensure_stack(state);
+        state.checkpoint("add layer group");
+        state
+            .project
+            .assets
+            .get_mut(state.project.active)
+            .and_then(|o| o.paint_stack.as_mut().map(|s| s.add_group(name)))
     }
 }
 

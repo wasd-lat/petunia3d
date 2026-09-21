@@ -102,6 +102,13 @@ pub struct PaintLayer {
     pub opacity: f32,
     pub blend: LayerBlendMode,
     pub kind: LayerKind,
+    #[serde(default)]
+    pub locked: bool,
+    /// Parent group id; `None` = root. Simple tree, not a DAG.
+    #[serde(default)]
+    pub group_id: Option<uuid::Uuid>,
+    #[serde(default)]
+    pub is_group: bool,
 }
 
 impl PaintLayer {
@@ -113,6 +120,9 @@ impl PaintLayer {
             opacity: 1.0,
             blend: LayerBlendMode::Normal,
             kind: LayerKind::Raster(Canvas::new(w, h, fill)),
+            locked: false,
+            group_id: None,
+            is_group: false,
         }
     }
 
@@ -124,6 +134,9 @@ impl PaintLayer {
             opacity: 1.0,
             blend: LayerBlendMode::Normal,
             kind: LayerKind::Raster(canvas),
+            locked: false,
+            group_id: None,
+            is_group: false,
         }
     }
 
@@ -135,6 +148,9 @@ impl PaintLayer {
             opacity: 1.0,
             blend: LayerBlendMode::Normal,
             kind: LayerKind::Decal(decal),
+            locked: false,
+            group_id: None,
+            is_group: false,
         }
     }
 
@@ -146,6 +162,23 @@ impl PaintLayer {
             opacity: 1.0,
             blend: LayerBlendMode::Normal,
             kind: LayerKind::Effect(effect),
+            locked: false,
+            group_id: None,
+            is_group: false,
+        }
+    }
+
+    pub fn new_group(name: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4(),
+            name: name.into(),
+            visible: true,
+            opacity: 1.0,
+            blend: LayerBlendMode::Normal,
+            kind: LayerKind::Raster(Canvas::new(1, 1, [0, 0, 0, 0])),
+            locked: false,
+            group_id: None,
+            is_group: true,
         }
     }
 
@@ -230,6 +263,31 @@ impl PaintLayerStack {
         self.layers.push(layer);
         self.active_layer = self.layers.len() - 1;
         id
+    }
+
+    pub fn add_group(&mut self, name: impl Into<String>) -> uuid::Uuid {
+        self.add_layer(PaintLayer::new_group(name))
+    }
+
+    pub fn set_parent(&mut self, child: uuid::Uuid, parent: Option<uuid::Uuid>) -> bool {
+        if parent == Some(child) {
+            return false;
+        }
+        if let Some(layer) = self.layers.iter_mut().find(|l| l.id == child) {
+            layer.group_id = parent;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_locked(&mut self, id: uuid::Uuid, locked: bool) -> bool {
+        if let Some(layer) = self.layers.iter_mut().find(|l| l.id == id) {
+            layer.locked = locked;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn remove_layer(&mut self, id: uuid::Uuid) -> bool {

@@ -8,12 +8,22 @@ use glam::Vec3;
 use petunia_commands::UndoStack;
 use petunia_config::{I18n, Keybinds};
 use petunia_project::Project;
-use petunia_render::Shading;
 use uuid::Uuid;
 
 use super::camera::Camera;
 use super::events::{AppEvent, EventBus};
 use super::selection::{SelectMode, Selection, SelectionDomain, Workspace};
+
+/// Viewport shading mode. Lives in core so session state does not depend on a
+/// renderer crate (ch. 28: core must not know concrete render backends).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Shading {
+    #[default]
+    Solid,
+    Smooth,
+    Unlit,
+    Wireframe,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefAxis {
@@ -232,8 +242,13 @@ impl ProjectState {
 
     pub fn checkpoint(&mut self, label: &str) {
         let snap = self.project.clone();
-        self.undo.checkpoint(label, &snap);
+        let bytes = snap.estimated_bytes();
+        self.undo.checkpoint_sized(label, &snap, bytes);
         self.is_dirty = true;
+    }
+
+    pub fn history_metrics(&self) -> petunia_commands::HistoryMetrics {
+        self.undo.metrics()
     }
 
     /// Retorna os índices resolvidos válidos dos assets selecionados para exportação.
@@ -338,6 +353,9 @@ pub struct ToolState {
     /// Espaçamento entre dabs como fração do diâmetro (0.01..=1.0).
     pub brush_spacing: f32,
     pub paint_isolate_selection: bool,
+    pub brush_projection: crate::brush::BrushProjectionMode,
+    pub brush_lock: crate::brush::BrushLock,
+    pub fill_scope: crate::brush::FillScope,
     /// Canal de textura alvo da pintura (P3D-062). V1: só Albedo opera;
     /// demais canais ficam desabilitados na UI até V1.x.
     pub paint_channel: petunia_project::TextureChannel,
@@ -401,6 +419,9 @@ impl ToolState {
             brush_flow: 1.0,
             brush_spacing: 0.15,
             paint_isolate_selection: false,
+            brush_projection: crate::brush::BrushProjectionMode::Surface,
+            brush_lock: crate::brush::BrushLock::None,
+            fill_scope: crate::brush::FillScope::ConnectedPixels,
             paint_channel: petunia_project::TextureChannel::Albedo,
             paint_pixel_grid: true,
             transform_delta: [0.0; 3],
@@ -1471,6 +1492,8 @@ impl AppState {
 
     pub fn emit_mesh_changed(&mut self) {
         let id = self.project.assets.get(self.project.active).map(|a| a.id);
+        self.project.project.bump_topology();
+        self.project.project.bump_positions();
         if let Some(asset_id) = id {
             self.events.emit(AppEvent::MeshChanged { asset_id });
         }
@@ -1847,12 +1870,90 @@ impl AppState {
 
     /// Despacha um comando registrado no CommandDispatcher da aplicação.
     pub fn dispatch_command(&mut self, id: &str) -> Result<(), crate::command::CommandError> {
-        let cmd = self.commands.get(id).ok_or_else(|| {
-            crate::command::CommandError::Execution(format!(
-                "Command '{id}' not found in dispatcher"
-            ))
-        })?;
+        let cmd = self
+            .commands
+            .get(id)
+            .ok_or_else(|| crate::command::CommandError::UnknownCommand(id.to_string()))?;
         crate::command::CommandDispatcher::dispatch(self, cmd.as_ref())
+    }
+
+    /// Canonical Application API entry: UI / CLI / FFI / MCP / Lua all land here.
+    pub fn dispatch_intent(
+        &mut self,
+        intent: &crate::schema_contracts::CommandIntent,
+    ) -> Result<(), crate::command::CommandError> {
+        if let Some(id) = intent
+            .asset_id
+            .as_deref()
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+            && let Some(idx) = self.project.find(id)
+        {
+            self.project.active = idx;
+        }
+        match intent.command.as_str() {
+            "model.extrude" => {
+                if let Some(dist) = intent.args.first() {
+                    self.tools.extrude_dist = *dist as f32;
+                }
+                self.dispatch(&crate::command::ExtrudeSelectedCmd {
+                    dist: self.tools.extrude_dist,
+                })
+            }
+            "model.subdivide" => {
+                if let Some(cuts) = intent.args.first() {
+                    self.tools.subdivide_cuts = (*cuts as u32).clamp(1, 6);
+                }
+                self.dispatch(&crate::command::SubdivideSelectionCmd)
+            }
+            "model.bevel" => {
+                if let Some(amount) = intent.args.first() {
+                    self.tools.bevel_amount = *amount as f32;
+                }
+                if let Some(segs) = intent.args.get(1) {
+                    self.tools.bevel_segments = (*segs as u32).clamp(1, 4);
+                }
+                self.dispatch(&crate::command::BevelCmd {
+                    amount: self.tools.bevel_amount,
+                    segments: self.tools.bevel_segments,
+                })
+            }
+            "model.scale" | "model.scale_selection" => {
+                let factor = intent.args.first().copied().unwrap_or(1.0) as f32;
+                self.dispatch(&crate::command::ScaleSelectionCmd { factor })
+            }
+            "model.loop_cut" => {
+                let cuts = intent.args.first().copied().unwrap_or(1.0) as u32;
+                let even = intent.args.get(1).copied().unwrap_or(1.0) >= 0.5;
+                self.dispatch(&crate::command::LoopCutCmd {
+                    cuts: cuts.clamp(1, 32),
+                    even,
+                    slide: 0.0,
+                })
+            }
+            "uv.unwrap_auto" => self.dispatch(&crate::command::UnwrapAutoCmd),
+            "uv.pack_islands" => {
+                let padding = intent.args.first().copied().unwrap_or(0.01) as f32;
+                self.dispatch(&crate::command::UvPackIslandsCmd { padding })
+            }
+            "uv.project_view" => self.dispatch(&crate::command::UvProjectFromViewCmd),
+            "model.add_primitive" | "model.add_cube" => {
+                let kind = if intent.command == "model.add_cube" {
+                    crate::command::PrimitiveKind::Cube
+                } else {
+                    match intent.asset_id.as_deref() {
+                        Some(name) => crate::command::PrimitiveKind::parse(name)?,
+                        None => crate::command::PrimitiveKind::Cube,
+                    }
+                };
+                let name = intent.asset_id.clone();
+                self.dispatch(&crate::command::AddPrimitiveCmd {
+                    kind,
+                    name,
+                    at_cursor: true,
+                })
+            }
+            other => self.dispatch_command(other),
+        }
     }
 
     /// Cria uma nova instância de um asset da biblioteca na posição do 3D Cursor.

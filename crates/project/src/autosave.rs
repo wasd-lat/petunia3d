@@ -141,6 +141,10 @@ impl AutosaveService {
 
     /// Tenta executar um passo do autosave caso o intervalo tenha sido atingido e haja modificações.
     /// Retorna `Some(Ok(path))` se o snapshot foi criado com sucesso.
+    ///
+    /// Serializes from the borrowed project (no extra clone of live editor
+    /// state beyond encode_zip). Callers that already hold an immutable
+    /// revisioned snapshot should pass that instead of the live document.
     pub fn tick(
         &mut self,
         current_time_secs: u64,
@@ -176,6 +180,12 @@ impl AutosaveService {
         );
 
         Some(result)
+    }
+
+    /// Captures an immutable snapshot suitable for a worker thread.
+    /// At most one outstanding autosave should run per document (caller coalesces).
+    pub fn capture_snapshot(project: &Project) -> Project {
+        project.clone()
     }
 
     /// Executa gravação atômica do snapshot de recuperação e poda os mais antigos.

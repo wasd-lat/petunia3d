@@ -396,6 +396,46 @@ impl FormatExporter for GlbExporter {
     }
 }
 
+/// Adaptador importador para glTF 2.0 Binário (GLB).
+#[derive(Default)]
+pub struct GlbImporter;
+
+impl FormatImporter for GlbImporter {
+    fn format(&self) -> FileFormat {
+        FileFormat::Glb
+    }
+
+    fn capabilities(&self) -> FormatCapabilities {
+        FormatCapabilities {
+            supports_materials: true,
+            supports_textures: true,
+            supports_vertex_colors: true,
+            supports_multi_mesh: true,
+            supports_binary: true,
+        }
+    }
+
+    fn import_bytes(
+        &self,
+        data: &[u8],
+        name_hint: &str,
+        options: &ImportOptions,
+    ) -> Result<ImportPayload, PipelineError> {
+        let meshes = import_gltf::import_glb_bytes(
+            data,
+            name_hint,
+            options.triangulate,
+            options.scale,
+        )
+        .map_err(|e| PipelineError::Import(e.to_string()))?;
+        Ok(ImportPayload {
+            meshes,
+            materials: Vec::new(),
+            warnings: Vec::new(),
+        })
+    }
+}
+
 /// Adaptador importador para glTF 2.0 (validação estrutural de schema — P3D-071).
 #[derive(Default)]
 pub struct GltfImporter;
@@ -541,6 +581,7 @@ impl Default for DeliveryPipeline {
 
         pipe.register_importer(Box::new(ObjImporter));
         pipe.register_importer(Box::new(GltfImporter));
+        pipe.register_importer(Box::new(GlbImporter));
         pipe.register_importer(Box::new(PkgImporter));
 
         pipe
@@ -569,7 +610,34 @@ impl DeliveryPipeline {
     }
 
     pub fn capabilities(&self, format: FileFormat) -> Option<FormatCapabilities> {
-        self.exporters.get(&format).map(|e| e.capabilities())
+        self.exporters
+            .get(&format)
+            .map(|e| e.capabilities())
+            .or_else(|| self.importers.get(&format).map(|i| i.capabilities()))
+    }
+
+    /// Honest capability matrix derived from registered adapters.
+    pub fn capability_matrix(&self) -> Vec<(FileFormat, bool, bool, FormatCapabilities)> {
+        FileFormat::ALL
+            .into_iter()
+            .map(|fmt| {
+                let import = self.importers.contains_key(&fmt);
+                let export = self.exporters.contains_key(&fmt);
+                let caps = self
+                    .exporters
+                    .get(&fmt)
+                    .map(|e| e.capabilities())
+                    .or_else(|| self.importers.get(&fmt).map(|i| i.capabilities()))
+                    .unwrap_or(FormatCapabilities {
+                        supports_materials: false,
+                        supports_textures: false,
+                        supports_vertex_colors: false,
+                        supports_multi_mesh: false,
+                        supports_binary: false,
+                    });
+                (fmt, import, export, caps)
+            })
+            .collect()
     }
 
     /// P3D-068: Exporta um asset individual com validação, opções e geração de relatório.

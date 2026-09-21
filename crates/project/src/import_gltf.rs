@@ -34,6 +34,74 @@ pub enum GltfImportError {
 }
 
 use gltf_json::validation::Validate;
+use petunia_mesh::{Face, Mesh, Vertex};
+
+/// Imported GLB meshes (name, mesh).
+pub type GlbMeshes = Vec<(String, Mesh)>;
+
+/// Imports a GLB (or glTF with embedded buffers) into meshes.
+pub fn import_glb_bytes(
+    data: &[u8],
+    name_hint: &str,
+    triangulate: bool,
+    scale: f32,
+) -> Result<GlbMeshes, GltfImportError> {
+    let gltf = gltf::Gltf::from_slice(data).map_err(|e| GltfImportError::Parse(e.to_string()))?;
+    let blob = gltf.blob.as_deref();
+    let mut meshes = Vec::new();
+    for (mi, mesh) in gltf.meshes().enumerate() {
+        let mut out = Mesh::default();
+        for primitive in mesh.primitives() {
+            let reader = primitive.reader(|buffer| {
+                if buffer.index() == 0 {
+                    blob
+                } else {
+                    None
+                }
+            });
+            let Some(positions) = reader.read_positions() else {
+                continue;
+            };
+            let base = out.verts.len() as u32;
+            for pos in positions {
+                let mut v = Vertex::new(pos[0] * scale, pos[1] * scale, pos[2] * scale);
+                if !v.pos.iter().all(|x| x.is_finite()) {
+                    v.pos = [0.0, 0.0, 0.0];
+                }
+                out.verts.push(v);
+            }
+            if let Some(indices) = reader.read_indices() {
+                let idx: Vec<u32> = indices.into_u32().collect();
+                for tri in idx.chunks(3) {
+                    if tri.len() == 3 {
+                        out.push_face(Face::new(vec![
+                            base + tri[0],
+                            base + tri[1],
+                            base + tri[2],
+                        ]));
+                    }
+                }
+            }
+        }
+        if triangulate {
+            out.triangulate();
+        }
+        out.validate();
+        if !out.verts.is_empty() {
+            let name = mesh
+                .name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("{name_hint}_{mi}"));
+            meshes.push((name, out));
+        }
+    }
+    if meshes.is_empty() {
+        return Err(GltfImportError::Validation(
+            "GLB does not contain mesh primitives".into(),
+        ));
+    }
+    Ok(meshes)
+}
 
 /// Parses and structurally validates a glTF JSON document.
 ///

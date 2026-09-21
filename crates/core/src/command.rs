@@ -20,6 +20,10 @@ pub enum CommandError {
     InvalidMode(EditMode),
     #[error("Nenhum elemento selecionado")]
     EmptySelection,
+    #[error("Primitiva desconhecida: {0}")]
+    UnknownPrimitive(String),
+    #[error("Comando não registrado: {0}")]
+    UnknownCommand(String),
     #[error("Erro ao executar comando: {0}")]
     Execution(String),
 }
@@ -170,6 +174,22 @@ impl CommandDispatcher {
         self.registry.insert(id, Arc::new(cmd));
     }
 
+    /// Alias for a registered command id (keymap/MCP/Lua dialects).
+    pub fn alias(&mut self, from: impl Into<String>, to: &str) {
+        let from = from.into();
+        if let Some(cmd) = self.registry.get(to).cloned() {
+            self.registry.insert(from.clone(), cmd);
+        }
+        if let Some(meta) = self.metadata.get(to).cloned() {
+            self.metadata.insert(from, meta);
+        }
+    }
+
+    /// True when `id` is a registered command (including aliases).
+    pub fn contains(&self, id: &str) -> bool {
+        self.registry.contains_key(id)
+    }
+
     pub fn get(&self, id: &str) -> Option<Arc<dyn Command>> {
         self.registry.get(id).cloned()
     }
@@ -195,23 +215,33 @@ impl CommandDispatcher {
             .get(id)
             .ok_or_else(|| CommandError::Execution(format!("Comando '{id}' não registrado")))?
             .clone();
+        cmd.can_execute(state)
+            .map_err(|reason| CommandError::Execution(reason.to_string()))?;
         Self::dispatch(state, cmd.as_ref())
     }
 
     pub fn dispatch(state: &mut AppState, cmd: &dyn Command) -> Result<(), CommandError> {
-        if cmd.is_destructive() {
-            state.checkpoint(cmd.label());
-        }
-        let res = cmd.execute(state);
-        if res.is_ok() {
-            if cmd.is_destructive() {
-                state.mark_document_dirty();
+        let original = cmd.is_destructive().then(|| state.project.project.clone());
+        if let Err(error) = cmd.execute(state) {
+            if let Some(original) = original {
+                state.project.project = original;
+                state.sync_selection();
             }
-            state.sync_selection();
-            state.emit_mesh_changed();
-            state.mark_dirty();
+            return Err(error);
         }
-        res
+
+        if let Some(original) = original {
+            let bytes = original.estimated_bytes();
+            state
+                .project
+                .undo
+                .checkpoint_sized(cmd.label(), &original, bytes);
+            state.mark_document_dirty();
+        }
+        state.sync_selection();
+        state.emit_mesh_changed();
+        state.mark_dirty();
+        Ok(())
     }
 
     /// Consulta a lista de comandos filtrados por busca fuzzy/substring para a Command Palette (P3D-081).
@@ -286,6 +316,16 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "file.open",
+                "Open Project",
+                "Open a Petunia3D project from disk",
+                CommandCategory::File,
+            )
+            .with_docs(DocsTopic::GettingStarted),
+            OpenProjectCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "file.save_as",
                 "Save Project As",
                 "Save active project to a new file",
@@ -344,6 +384,7 @@ impl CommandDispatcher {
             ),
             UndoCmd,
         );
+        d.alias("global.undo", "edit.undo");
         d.register_with_meta(
             CommandMetadata::new(
                 "edit.redo",
@@ -353,6 +394,7 @@ impl CommandDispatcher {
             ),
             RedoCmd,
         );
+        d.alias("global.redo", "edit.redo");
         d.register_with_meta(
             CommandMetadata::new(
                 "edit.delete",
@@ -362,6 +404,7 @@ impl CommandDispatcher {
             ),
             DeleteSelectionCmd,
         );
+        d.alias("model.delete", "edit.delete");
         d.register_with_meta(
             CommandMetadata::new(
                 "edit.duplicate",
@@ -371,6 +414,7 @@ impl CommandDispatcher {
             ),
             DuplicateSelectionCmd,
         );
+        d.alias("model.duplicate", "edit.duplicate");
 
         // 3. Seleção (Select)
         d.register_with_meta(
@@ -382,6 +426,7 @@ impl CommandDispatcher {
             ),
             SelectAllCmd,
         );
+        d.alias("model.select_all", "select.all");
         d.register_with_meta(
             CommandMetadata::new(
                 "select.none",
@@ -391,6 +436,7 @@ impl CommandDispatcher {
             ),
             ClearSelectionCmd,
         );
+        d.alias("model.deselect_all", "select.none");
         d.register_with_meta(
             CommandMetadata::new(
                 "select.invert",
@@ -400,6 +446,7 @@ impl CommandDispatcher {
             ),
             InvertSelectionCmd,
         );
+        d.alias("model.invert_selection", "select.invert");
         d.register_with_meta(
             CommandMetadata::new(
                 "select.linked",
@@ -608,6 +655,16 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "model.scale_selection",
+                "Scale Selection",
+                "Scale selected geometry uniformly around its center",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            ScaleSelectionCmd::default(),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.subdivide",
                 "Subdivide",
                 "Subdivide selected geometry",
@@ -618,6 +675,46 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "model.loop_cut",
+                "Loop Cut",
+                "Insert evenly spaced cuts along a quad ring",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::LoopCut),
+            LoopCutCmd::default(),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "uv.unwrap_auto",
+                "Auto UV",
+                "Unwrap the active mesh with the generic UV provider",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::UvUnwrapping),
+            UnwrapAutoCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "uv.pack_islands",
+                "Pack UV Islands",
+                "Pack UV islands into 0..1 without overlaps",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::UvUnwrapping),
+            UvPackIslandsCmd::default(),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "uv.project_view",
+                "Project From View",
+                "Project UVs from the current camera view",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::UvUnwrapping),
+            UvProjectFromViewCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.merge",
                 "Merge Center",
                 "Merge selected vertices into center point",
@@ -625,6 +722,16 @@ impl CommandDispatcher {
             )
             .with_docs(DocsTopic::Modeling),
             MergeCenterCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "model.connect",
+                "Connect Loops",
+                "Bridge two selected faces with connecting quads",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            ConnectLoopsCmd,
         );
         d.register_with_meta(
             CommandMetadata::new(
@@ -930,6 +1037,23 @@ pub enum PrimitiveKind {
 }
 
 impl PrimitiveKind {
+    /// Parses a primitive name. Unknown names are errors — never a silent Cone.
+    pub fn parse(name: &str) -> Result<Self, CommandError> {
+        match name {
+            "Cube" | "cube" => Ok(Self::Cube),
+            "Plane" | "plane" => Ok(Self::Plane),
+            "Cylinder8" | "Cylinder" | "cylinder" => Ok(Self::Cylinder),
+            "Sphere" | "sphere" => Ok(Self::Sphere),
+            "Capsule" | "capsule" => Ok(Self::Capsule),
+            "Cone" | "cone" => Ok(Self::Cone),
+            "Wedge" | "wedge" => Ok(Self::Wedge),
+            "Circle" | "circle" => Ok(Self::Circle),
+            "Torus" | "torus" => Ok(Self::Torus),
+            "Icosphere" | "icosphere" => Ok(Self::Icosphere),
+            other => Err(CommandError::UnknownPrimitive(other.to_string())),
+        }
+    }
+
     pub fn default_name(&self) -> &'static str {
         match self {
             Self::Cube => "Cube",
@@ -1433,6 +1557,8 @@ impl Command for SeparateSelectionCmd {
 }
 
 /// Comando para subdividir a geometria selecionada na malha ativa.
+/// Cuts come from `state.tools.subdivide_cuts` (default 1) so CLI/FFI/tools
+/// share one implementation without changing the unit-struct call sites.
 #[derive(Debug, Clone, Default)]
 pub struct SubdivideSelectionCmd;
 
@@ -1442,9 +1568,14 @@ impl Command for SubdivideSelectionCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.edit_mode() != EditMode::Edit {
-            Err("Requires Edit mode")
-        } else if state.selection.is_empty() {
+        if state.project.active_mesh().is_none() {
+            Err("No active mesh")
+        } else if state.selection.is_empty()
+            && state
+                .project
+                .active_mesh()
+                .is_none_or(|m| !m.faces.iter().any(|f| f.selected) && m.selected_edges.is_empty())
+        {
             Err("Select geometry to subdivide")
         } else {
             Ok(())
@@ -1452,11 +1583,12 @@ impl Command for SubdivideSelectionCmd {
     }
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let cuts = state.tools.subdivide_cuts.clamp(1, 6);
         let Some(mesh) = state.project.active_mesh_mut() else {
             return Err(CommandError::NoActiveAsset);
         };
-        mesh.subdivide_selected();
-        state.set_status("Subdivided selection");
+        mesh.subdivide_selected_cuts(cuts);
+        state.set_status(format!("Subdivided selection ({cuts} cuts)"));
         Ok(())
     }
 }
@@ -1982,6 +2114,25 @@ impl Command for SaveProjectCmd {
     }
 }
 
+/// Comando de boundary para solicitar a abertura de um projeto.
+#[derive(Debug, Clone, Default)]
+pub struct OpenProjectCmd;
+
+impl Command for OpenProjectCmd {
+    fn label(&self) -> &'static str {
+        "open project"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state.set_status("Open Project requested");
+        Ok(())
+    }
+}
+
 /// Comando para salvar o projeto em novo arquivo.
 #[derive(Debug, Clone, Default)]
 pub struct SaveProjectAsCmd;
@@ -1989,6 +2140,10 @@ pub struct SaveProjectAsCmd;
 impl Command for SaveProjectAsCmd {
     fn label(&self) -> &'static str {
         "save project as"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
     }
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
@@ -2154,6 +2309,8 @@ impl Command for ExtrudeSelectedCmd {
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         if state.edit_mode() != EditMode::Edit {
             Err("Requires Edit mode")
+        } else if state.project.active_mesh().is_none() {
+            Err("No active mesh")
         } else if !state.selection.faces.is_empty()
             || state
                 .project
@@ -2202,8 +2359,8 @@ impl Command for InsetFacesCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.edit_mode() != EditMode::Edit {
-            Err("Requires Edit mode")
+        if state.project.active_mesh().is_none() {
+            Err("No active mesh")
         } else if !state.selection.faces.is_empty()
             || state
                 .project
@@ -2238,11 +2395,15 @@ impl Command for InsetFacesCmd {
 #[derive(Debug, Clone)]
 pub struct BevelCmd {
     pub amount: f32,
+    pub segments: u32,
 }
 
 impl Default for BevelCmd {
     fn default() -> Self {
-        Self { amount: 0.1 }
+        Self {
+            amount: 0.1,
+            segments: 1,
+        }
     }
 }
 
@@ -2252,9 +2413,7 @@ impl Command for BevelCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.edit_mode() != EditMode::Edit {
-            Err("Requires Edit mode")
-        } else if let Some(mesh) = state.project.active_mesh() {
+        if let Some(mesh) = state.project.active_mesh() {
             if mesh.selected_edges.is_empty() {
                 Err("Select edges first")
             } else {
@@ -2271,14 +2430,65 @@ impl Command for BevelCmd {
         } else {
             state.tools.bevel_amount
         };
+        let segments = if self.segments == 0 {
+            state.tools.bevel_segments.clamp(1, 4)
+        } else {
+            self.segments.clamp(1, 4)
+        };
         let Some(mesh) = state.project.active_mesh_mut() else {
             return Err(CommandError::NoActiveAsset);
         };
         if mesh.selected_edges.is_empty() {
             return Err(CommandError::EmptySelection);
         }
-        let (v_count, f_count) = mesh.bevel_selected(amount);
+        let (v_count, f_count) = if segments > 1 {
+            mesh.bevel_selected_segments(amount, segments)
+        } else {
+            mesh.bevel_selected(amount)
+        };
         state.set_status(format!("Beveled (+{} verts, +{} faces)", v_count, f_count));
+        Ok(())
+    }
+}
+
+/// Uniform scale of the current selection around its center.
+#[derive(Debug, Clone)]
+pub struct ScaleSelectionCmd {
+    pub factor: f32,
+}
+
+impl Default for ScaleSelectionCmd {
+    fn default() -> Self {
+        Self { factor: 1.0 }
+    }
+}
+
+impl Command for ScaleSelectionCmd {
+    fn label(&self) -> &'static str {
+        "scale"
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.project.active_mesh().is_none() {
+            Err("No active mesh")
+        } else {
+            Ok(())
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let factor = if self.factor == 0.0 {
+            state.tools.transform_scale
+        } else {
+            self.factor
+        };
+        let Some(mesh) = state.project.active_mesh_mut() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        let center = mesh.selection_center();
+        mesh.scale_selected(factor, center);
+        state.tools.transform_scale = 1.0;
+        state.set_status(format!("Scaled selection ({factor:.2})"));
         Ok(())
     }
 }
@@ -2298,8 +2508,8 @@ impl Command for ToggleWireframeCmd {
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         state.shading = match state.shading {
-            petunia_render::Shading::Wireframe => petunia_render::Shading::Solid,
-            _ => petunia_render::Shading::Wireframe,
+            crate::Shading::Wireframe => crate::Shading::Solid,
+            _ => crate::Shading::Wireframe,
         };
         state.mark_dirty();
         Ok(())
@@ -2539,6 +2749,174 @@ impl Command for ToggleHelpCmd {
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         state.ui.show_help = !state.ui.show_help;
         state.mark_dirty();
+        Ok(())
+    }
+}
+
+/// Even Loop Cut on the first selected edge (uniform spacing when `even`).
+#[derive(Debug, Clone)]
+pub struct LoopCutCmd {
+    pub cuts: u32,
+    pub even: bool,
+    pub slide: f32,
+}
+
+impl Default for LoopCutCmd {
+    fn default() -> Self {
+        Self {
+            cuts: 1,
+            even: true,
+            slide: 0.0,
+        }
+    }
+}
+
+impl Command for LoopCutCmd {
+    fn label(&self) -> &'static str {
+        "loop cut"
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        let mesh = state.project.active_mesh().ok_or("No active mesh")?;
+        if mesh.selected_edges.is_empty() {
+            Err("Select an edge on a quad ring")
+        } else {
+            Ok(())
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let cuts = self.cuts.clamp(1, 32) as usize;
+        let Some(mesh) = state.project.active_mesh() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        let seed = mesh
+            .selected_edges
+            .iter()
+            .copied()
+            .next()
+            .ok_or(CommandError::EmptySelection)?;
+        let ring = petunia_mesh::loop_cut::LoopRing::discover(mesh, seed)
+            .map_err(|e| CommandError::Execution(e.to_string()))?;
+        let next = ring
+            .apply_even(mesh, cuts, self.slide, self.even)
+            .map_err(|e| CommandError::Execution(e.to_string()))?;
+        if let Some(dst) = state.project.active_mesh_mut() {
+            *dst = next;
+        }
+        state.set_status(format!("Loop cut ({cuts}{})", if self.even { " even" } else { "" }));
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UnwrapAutoCmd;
+
+impl Command for UnwrapAutoCmd {
+    fn label(&self) -> &'static str {
+        "auto uv"
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let Some(mesh) = state.project.active_mesh_mut() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        let charts = mesh
+            .unwrap_auto()
+            .map_err(|e| CommandError::Execution(e.to_string()))?;
+        state.set_status(format!("Auto UV ({charts} charts)"));
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UvPackIslandsCmd {
+    pub padding: f32,
+}
+
+impl Default for UvPackIslandsCmd {
+    fn default() -> Self {
+        Self { padding: 0.01 }
+    }
+}
+
+impl Command for UvPackIslandsCmd {
+    fn label(&self) -> &'static str {
+        "pack uv"
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let Some(mesh) = state.project.active_mesh_mut() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        let n = mesh.pack_uv_islands(self.padding);
+        state.set_status(format!("Packed {n} UV islands"));
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UvProjectFromViewCmd;
+
+impl Command for UvProjectFromViewCmd {
+    fn label(&self) -> &'static str {
+        "project from view"
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let origin = state.camera.eye();
+        let forward = state.camera.forward();
+        let up = state.camera.up();
+        let right = forward.cross(up).normalize_or_zero();
+        let Some(mesh) = state.project.active_mesh_mut() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        mesh.project_from_view(right, up, origin);
+        state.set_status("Projected UVs from view");
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ConnectLoopsCmd;
+
+impl Command for ConnectLoopsCmd {
+    fn label(&self) -> &'static str {
+        "connect"
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        let mesh = state.project.active_mesh().ok_or("No active mesh")?;
+        let n = mesh.faces.iter().filter(|f| f.selected).count();
+        if n == 2 {
+            Ok(())
+        } else {
+            Err("Select exactly two faces")
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let faces: Vec<usize> = state
+            .project
+            .active_mesh()
+            .map(|m| {
+                m.faces
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, f)| f.selected)
+                    .map(|(i, _)| i)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if faces.len() != 2 {
+            return Err(CommandError::EmptySelection);
+        }
+        let Some(mesh) = state.project.active_mesh_mut() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        mesh.connect_loops(faces[0], faces[1])
+            .map_err(CommandError::Execution)?;
+        state.set_status("Connected loops");
         Ok(())
     }
 }

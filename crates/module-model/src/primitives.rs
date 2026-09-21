@@ -28,21 +28,22 @@ impl PrimitivesTool {
     /// única + cartão Last Operation) em vez de inserir a malha diretamente.
     ///
     /// Nomes legados mantidos para CLI/FFI/testes (`Cylinder8`, …).
+    /// UI/legacy entry: unknown names are rejected (never silently Cone).
     pub fn add_primitive(state: &mut AppState, name: &str) {
-        use petunia_core::PrimitiveKind as K;
-        let kind = match name {
-            "Cube" => K::Cube,
-            "Plane" => K::Plane,
-            "Cylinder8" | "Cylinder" => K::Cylinder,
-            "Sphere" => K::Sphere,
-            "Capsule" => K::Capsule,
-            "Cone" => K::Cone,
-            "Wedge" => K::Wedge,
-            "Circle" => K::Circle,
-            "Torus" => K::Torus,
-            "Icosphere" => K::Icosphere,
-            _ => K::Cone,
-        };
-        state.begin_primitive(kind, Some(name.to_string()));
+        if let Err(err) = Self::try_add_primitive(state, name) {
+            state.set_status(format!("add primitive: {err}"));
+        }
+    }
+
+    pub fn try_add_primitive(
+        state: &mut AppState,
+        name: &str,
+    ) -> Result<(), petunia_core::CommandError> {
+        let kind = petunia_core::PrimitiveKind::parse(name)?;
+        state.dispatch(&petunia_core::AddPrimitiveCmd {
+            kind,
+            name: Some(name.to_string()),
+            at_cursor: true,
+        })
     }
 }

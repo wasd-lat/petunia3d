@@ -40,15 +40,9 @@ impl ConnectTool {
         };
 
         if sel_faces.len() == 2 {
-            state.checkpoint("connect");
-            if let Some(m) = state.project.active_mesh_mut() {
-                match m.connect_loops(sel_faces[0], sel_faces[1]) {
-                    Ok(_) => state.set_status(state.t("status.connected")),
-                    Err(e) => state.set_status(format!("{}: {e}", state.t("status.connect_err"))),
-                }
+            if let Err(err) = state.dispatch(&petunia_core::ConnectLoopsCmd) {
+                state.set_status(format!("{}: {err}", state.t("status.connect_err")));
             }
-            state.sync_selection();
-            state.emit_mesh_changed();
         } else {
             state.set_status(state.t("status.connect_need_2"));
         }

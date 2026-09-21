@@ -10,9 +10,8 @@
 //! por frame. Não há estado global: chamadores guardam o último fingerprint.
 
 use petunia_project::Project;
-use petunia_render::Shading;
 
-use super::state::ReferenceImage;
+use super::state::{ReferenceImage, Shading};
 
 /// Fingerprint separado para geometria vs layout de referências.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -56,10 +55,9 @@ pub struct FingerprintFlags {
 
 /// Fingerprint barato da cena para invalidação de buffers GPU.
 ///
-/// Inclui: ids, visibilidade, contagem e conteúdo posicional dos vértices,
-/// índices das faces + seleção + slots de material, cores base, canvas de
-/// textura (dims + len + hash de pixels), e flags de sombreamento. Exclui
-/// deliberadamente: câmera, viewport, hover efêmero, UI.
+/// Primary path: mix **revision counters** (O(assets)), not vertex/texture
+/// bytes. When a mesh has never been revisioned (legacy files, tests that
+/// poke fields directly) we fall back to a content hash of that asset only.
 pub fn fingerprint_scene(
     project: &Project,
     refs: &[ReferenceImage],
@@ -74,6 +72,12 @@ pub fn fingerprint_scene(
     h = mix(h, flags.show_wireframe_overlay as u64);
     h = mix(h, project.assets.len() as u64);
     h = mix(h, project.materials.len() as u64);
+    h = mix(h, project.topology_revision);
+    h = mix(h, project.position_revision);
+    h = mix(h, project.selection_revision);
+    h = mix(h, project.material_revision);
+    h = mix(h, project.texture_revision);
+    h = mix(h, project.transform_revision);
 
     for mat in &project.materials {
         h = hash_bytes(h, mat.id.as_bytes());
@@ -94,7 +98,6 @@ pub fn fingerprint_scene(
         h = mix(h, asset.visible as u64);
         h = mix(h, asset.mesh.verts.len() as u64);
         h = mix(h, asset.mesh.faces.len() as u64);
-        h = mix(h, asset.mesh.selected_edges.len() as u64);
         h = mix(h, asset.modifiers.len() as u64);
         for modifier in &asset.modifiers {
             h = hash_bytes(h, modifier.id.as_bytes());
@@ -133,25 +136,39 @@ pub fn fingerprint_scene(
                 })
                 .unwrap_or(0),
         );
-        for v in &asset.mesh.verts {
-            for c in v.pos {
-                h = hash_f32(h, c);
+        let unrevisioned = project.topology_revision == 0
+            && project.position_revision == 0
+            && project.selection_revision == 0
+            && project.texture_revision == 0
+            && project.material_revision == 0;
+        if unrevisioned {
+            for v in &asset.mesh.verts {
+                for c in v.pos {
+                    h = hash_f32(h, c);
+                }
+                h = mix(h, v.selected as u64);
+                for c in v.color {
+                    h = hash_f32(h, c);
+                }
             }
-            h = mix(h, v.selected as u64);
-        }
-        for f in &asset.mesh.faces {
-            h = mix(h, f.verts.len() as u64);
-            for &i in &f.verts {
-                h = mix(h, i as u64);
+            for f in &asset.mesh.faces {
+                h = mix(h, f.verts.len() as u64);
+                for &i in &f.verts {
+                    h = mix(h, i as u64);
+                }
+                h = mix(h, f.selected as u64);
+                h = mix(h, f.material_slot.unwrap_or(usize::MAX) as u64);
             }
-            h = mix(h, f.selected as u64);
-            h = mix(h, f.material_slot.unwrap_or(usize::MAX) as u64);
-        }
-        if let Some(canvas) = asset.texture.as_ref() {
+            if let Some(canvas) = asset.texture.as_ref() {
+                h = mix(h, canvas.w as u64);
+                h = mix(h, canvas.h as u64);
+                h = mix(h, canvas.pixels.len() as u64);
+                h = hash_bytes(h, &canvas.pixels);
+            }
+        } else if let Some(canvas) = asset.texture.as_ref() {
             h = mix(h, canvas.w as u64);
             h = mix(h, canvas.h as u64);
             h = mix(h, canvas.pixels.len() as u64);
-            h = hash_bytes(h, &canvas.pixels);
         }
     }
 

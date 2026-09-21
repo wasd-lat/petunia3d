@@ -36,6 +36,35 @@ pub enum BrushType {
     Airbrush,
 }
 
+/// How a 3D brush sample maps onto the surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum BrushProjectionMode {
+    #[default]
+    Surface,
+    ScreenSpace,
+}
+
+/// Restricts which surfaces receive paint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum BrushLock {
+    #[default]
+    None,
+    FirstObject,
+    FirstFace,
+    SelectedFaces,
+}
+
+/// Fill foundation scopes (single algorithm, different seeds).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum FillScope {
+    #[default]
+    ConnectedPixels,
+    Face,
+    SelectedFaces,
+    UvIsland,
+    Object,
+}
+
 impl BrushType {
     /// Pincéis de traço livre (carimbam dabs).
     pub const fn is_free_brush(self) -> bool {

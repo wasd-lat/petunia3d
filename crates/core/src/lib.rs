@@ -27,6 +27,7 @@ pub mod selection;
 pub mod snap;
 pub mod state;
 pub mod viewport;
+pub mod viewport_query;
 
 pub use cutting_session::CutSession;
 pub use diagnostics::{DiagnosticCategory, DiagnosticEvent, log_event};
@@ -37,7 +38,9 @@ pub use petunia_project::{
     AssetSummary, AutosaveConfig, AutosaveService, ModelLibraryQuery, ModelLibraryService,
     ModelLibrarySort, RecoveryInfo, SessionLockInfo,
 };
-pub use queries::{SceneHierarchyDto, SceneObjectDto, SelectionDetailsDto, ToolStatusDto};
+pub use queries::{
+    SceneHierarchyDto, SceneObjectDto, SelectionDetailsDto, ToolStatusDto, UvDiagnosticsDto,
+};
 pub use recent_projects::{RecentProjectEntry, RecentProjects};
 pub use render_revision::{FingerprintFlags, SceneFingerprint, fingerprint_scene};
 pub use schema_contracts::{
@@ -47,22 +50,25 @@ pub use schema_contracts::{
 
 pub use command::{
     AddPrimitiveCmd, BevelCmd, BoxSelectCmd, ClearSelectionCmd, Command, CommandCategory,
-    CommandDispatcher, CommandError, CommandMetadata, CommandPaletteItem, CycleSelectionDomainCmd,
+    CommandDispatcher, CommandError, CommandMetadata, CommandPaletteItem, ConnectLoopsCmd,
+    CycleSelectionDomainCmd,
     DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd, DuplicateSelectionCmd, ExportGlbCmd,
     ExportObjCmd, ExtrudeIndividualCmd, ExtrudeSelectedCmd, FlipDiagonalCmd, FlipNormalsCmd,
     FrameSelectionCmd, ImportObjCmd, InsetFacesCmd, InstantiateAssetCmd, InvertSelectionCmd,
-    MergeCenterCmd, NewProjectCmd, PrimitiveKind, RedoCmd, ResetCameraCmd, RevolveCmd,
-    SaveActiveAsAssetCmd, SaveProjectAsCmd, SaveProjectCmd, SelectAllCmd, SelectLinkedCmd,
-    SeparateSelectionCmd, SetAssetCollectionCmd, SetSelectionDomainCmd, SubdivideSelectionCmd,
-    SymmetrizeCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd, ToggleCommandPaletteCmd,
-    ToggleHelpCmd, ToggleLockAssetCmd, ToggleProjectionCmd, ToggleSettingsCmd,
-    ToggleVisibilityAssetCmd, ToggleWireframeCmd, ToggleXRayCmd, UndoCmd, WeldCmd,
+    LoopCutCmd, MergeCenterCmd, NewProjectCmd, OpenProjectCmd, PrimitiveKind, RedoCmd,
+    ResetCameraCmd,
+    RevolveCmd, SaveActiveAsAssetCmd, SaveProjectAsCmd, SaveProjectCmd, ScaleSelectionCmd,
+    SelectAllCmd, SelectLinkedCmd, SeparateSelectionCmd, SetAssetCollectionCmd,
+    SetSelectionDomainCmd, SubdivideSelectionCmd, SymmetrizeCmd, ToggleCollectionLockCmd,
+    ToggleCollectionVisibilityCmd, ToggleCommandPaletteCmd, ToggleHelpCmd, ToggleLockAssetCmd,
+    ToggleProjectionCmd, ToggleSettingsCmd, ToggleVisibilityAssetCmd, ToggleWireframeCmd,
+    ToggleXRayCmd, UndoCmd, UnwrapAutoCmd, UvPackIslandsCmd, UvProjectFromViewCmd, WeldCmd,
 };
 pub use project_service::{ProjectService, ProjectServiceError, sanitize_filename};
 
 pub use brush::{
-    BrushPreviewKind, BrushPreviewStyle, BrushSettings, BrushType, brush_type_from_kind,
-    kind_from_brush_type,
+    BrushLock, BrushPreviewKind, BrushPreviewStyle, BrushProjectionMode, BrushSettings, BrushType,
+    FillScope, brush_type_from_kind, kind_from_brush_type,
 };
 pub use camera::{Camera, Projection, ViewPreset};
 pub use events::{AppEvent, EventBus};
@@ -79,12 +85,15 @@ pub use state::{
     AnnotationItem, AnnotationStroke, AppState, DirtyReason, DockOrientation, DockSide,
     DomainState, EditMode, EditorSession, GridSettings, Measurement, MeasurementItem, PivotPoint,
     ProfileState, ProjectState, RefAxis, ReferenceImage, RenderResources, RenderStats, SceneFilter,
-    SceneObjectState, ToolState, TransformOrientation, UiDensity, UiState, WorkspaceUiMemory,
-    workspace_index,
+    SceneObjectState, Shading, ToolState, TransformOrientation, UiDensity, UiState,
+    WorkspaceUiMemory, workspace_index,
 };
 pub use viewport::{
     LogicalRect, PhysicalViewport, unproject_cursor_or_vertex_snap,
     unproject_to_surface_or_cursor_plane,
+};
+pub use viewport_query::{
+    AttachmentValidity, SurfaceAttachment, ViewportQueryBuffer, ViewportQuerySample,
 };
 
 pub use modal::{ModalConstraint, ModalError, ModalKind, ModalOp};

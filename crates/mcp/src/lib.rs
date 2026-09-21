@@ -7,15 +7,15 @@
 //!     ↓
 //! Petunia MCP adapter (this crate)
 //!     ↓
-//! capability/validation (allowlisted tools, bounded args)
+//! capability/validation (Command registry + bounded args)
 //!     ↓
-//! Petunia domain (Project + UndoStack + DTOs)
+//! Application API (`AppState::dispatch_intent`)
+//!     ↓
+//! CommandDispatcher → transaction → domain
 //! ```
 //!
-//! The server never touches UI, renderer or filesystem on its own: tools
-//! mutate an in-memory [`Project`](petunia_project::Project) through
-//! checkpoints (undo-safe) and return DTOs. Tokio lives only inside this
-//! crate (`serve_stdio`); no Tokio type crosses into Core.
+//! The server never owns a parallel Document/Undo stack. Tokio lives only
+//! inside this crate (`serve_stdio`); no Tokio type crosses into Core.
 
 pub mod server;
 

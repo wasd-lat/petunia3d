@@ -29,13 +29,9 @@ impl Tool for SubdivideTool {
 
 impl SubdivideTool {
     pub fn apply_subdivide(state: &mut AppState) {
-        state.checkpoint("subdivide");
-        let cuts = state.subdivide_cuts.clamp(1, 6);
-        if let Some(m) = state.project.active_mesh_mut() {
-            m.subdivide_selected_cuts(cuts);
+        if let Err(err) = state.dispatch(&petunia_core::SubdivideSelectionCmd) {
+            state.set_status(format!("subdivide: {err}"));
         }
-        state.sync_selection();
-        state.emit_mesh_changed();
     }
 
     pub fn apply_triangulate(state: &mut AppState) {

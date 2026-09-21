@@ -1,58 +1,39 @@
 //! Tools-only MCP server over stdio.
+//!
+//! MCP is an adapter: requests validate, then call the Application API
+//! (`AppState::dispatch_intent`). It does not own a parallel Document/Undo.
 
 use std::sync::Arc;
 
-use petunia_commands::UndoStack;
-use petunia_core::SceneItemContract;
-use petunia_mesh::Mesh;
-use petunia_project::Project;
+use petunia_core::{
+    AddPrimitiveCmd, AppState, CommandIntent, PrimitiveKind, ProjectService, SceneItemContract,
+    UndoCmd,
+};
 use rmcp::ErrorData as McpError;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{ServiceExt, tool, tool_router, transport::stdio};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-/// Command ids exposed through [`PetuniaMcp::validate_intent`].
-/// Mirrors real core action ids; execution itself stays with the app.
-const MCP_COMMAND_ALLOWLIST: &[&str] = &[
-    "global.redo",
-    "global.undo",
-    "model.delete",
-    "model.deselect_all",
-    "model.duplicate",
-    "model.extrude",
-    "model.frame_selection",
-    "model.invert_selection",
-    "model.select_all",
-];
-
-/// Shared mutable domain behind the tool boundary.
-#[derive(Debug)]
-struct McpDomain {
-    project: Project,
-    undo: UndoStack<Project>,
+/// Shared Application session behind the tool boundary.
+struct McpSession {
+    state: AppState,
 }
 
-impl McpDomain {
+impl McpSession {
     fn new() -> Self {
-        Self {
-            project: Project::new(),
-            undo: UndoStack::new(),
-        }
-    }
-
-    fn checkpoint(&mut self, label: &str) {
-        let snapshot = self.project.clone();
-        self.undo.checkpoint(label, &snapshot);
+        let mut state = AppState::new("en");
+        ProjectService::new_project(&mut state);
+        Self { state }
     }
 }
 
 /// Parameters for [`PetuniaMcp::add_primitive`].
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct AddPrimitiveParams {
-    /// Primitive kind: `"cube"` or `"plane"`.
+    /// Primitive kind: `"cube"`, `"plane"`, `"sphere"`, …
     kind: String,
-    /// Edge size in world units (0.01..=100).
+    /// Edge size in world units (0.01..=100). Reserved; V1 uses default mesh.
     size: f64,
 }
 
@@ -76,10 +57,23 @@ struct ValidateIntentParams {
     args: Vec<f64>,
 }
 
+/// Parameters for [`PetuniaMcp::execute_intent`].
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExecuteIntentParams {
+    /// Command id, e.g. `"model.extrude"`.
+    command: String,
+    /// Optional target asset UUID.
+    #[serde(default)]
+    asset_id: Option<String>,
+    /// Numeric args in command-defined order.
+    #[serde(default)]
+    args: Vec<f64>,
+}
+
 /// Validation report returned by [`PetuniaMcp::validate_intent`].
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct IntentReport {
-    /// Whether the intent is well-formed and allowlisted.
+    /// Whether the intent is well-formed and registered.
     valid: bool,
     /// Stable reason code (`"ok"`, `"bad_shape"`, `"not_allowlisted"`).
     reason: String,
@@ -96,30 +90,48 @@ struct AssetSummaryDto {
     visible: bool,
 }
 
-/// Petunia MCP server. Clone shares the same domain.
-#[derive(Clone, Debug)]
+/// Petunia MCP server. Clone shares the same Application session.
+#[derive(Clone)]
 pub struct PetuniaMcp {
-    domain: Arc<Mutex<McpDomain>>,
+    session: Arc<Mutex<McpSession>>,
+}
+
+impl std::fmt::Debug for PetuniaMcp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PetuniaMcp").finish_non_exhaustive()
+    }
 }
 
 impl PetuniaMcp {
-    /// Creates a server with a fresh default project.
+    /// Creates a server with a fresh Application session.
     pub fn new() -> Self {
         Self {
-            domain: Arc::new(Mutex::new(McpDomain::new())),
+            session: Arc::new(Mutex::new(McpSession::new())),
         }
     }
 
-    fn asset_summaries(project: &Project) -> Vec<AssetSummaryDto> {
-        project
+    fn asset_summaries(state: &AppState) -> Vec<AssetSummaryDto> {
+        state
+            .query_scene_hierarchy()
             .assets
-            .iter()
+            .into_iter()
             .map(|asset| AssetSummaryDto {
-                name: asset.name.clone(),
+                name: asset.name,
                 kind: "object".to_string(),
                 visible: asset.visible,
             })
             .collect()
+    }
+
+    fn intent_well_formed(command: &str, asset_id: Option<&str>, args: &[f64]) -> bool {
+        let asset_ok = asset_id.is_none_or(|id| uuid::Uuid::parse_str(id).is_ok());
+        !command.is_empty()
+            && command.len() <= 64
+            && command
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
+            && args.iter().all(|a| a.is_finite())
+            && asset_ok
     }
 }
 
@@ -134,12 +146,12 @@ impl PetuniaMcp {
     /// Lists scene assets as `{name, kind, visible}` DTOs.
     #[tool(description = "List scene assets (name, kind, visible).")]
     async fn list_assets(&self) -> Result<Json<Vec<AssetSummaryDto>>, McpError> {
-        let domain = self.domain.lock().await;
-        Ok(Json(Self::asset_summaries(&domain.project)))
+        let session = self.session.lock().await;
+        Ok(Json(Self::asset_summaries(&session.state)))
     }
 
-    /// Adds a primitive (cube/plane) with an undo checkpoint.
-    #[tool(description = "Add a cube or plane primitive to the scene (undoable).")]
+    /// Adds a primitive through the Application command spine.
+    #[tool(description = "Add a primitive to the scene (undoable).")]
     async fn add_primitive(
         &self,
         Parameters(params): Parameters<AddPrimitiveParams>,
@@ -150,21 +162,23 @@ impl PetuniaMcp {
                 None,
             ));
         }
-        let mesh = match params.kind.as_str() {
-            "cube" => Mesh::cube(params.size as f32),
-            "plane" => Mesh::plane(params.size as f32),
-            other => {
-                return Err(McpError::invalid_params(
-                    format!("unknown primitive '{other}' (want cube|plane)"),
-                    None,
-                ));
-            }
-        };
-        let mut domain = self.domain.lock().await;
-        domain.checkpoint("mcp add_primitive");
-        let name = format!("MCP {}", params.kind);
-        domain.project.add(&name, mesh);
-        let asset = domain.project.assets.last().expect("just added");
+        let kind = PrimitiveKind::parse(&params.kind).map_err(|e| {
+            McpError::invalid_params(format!("unknown primitive '{}': {e}", params.kind), None)
+        })?;
+        let mut session = self.session.lock().await;
+        session
+            .state
+            .dispatch(&AddPrimitiveCmd {
+                kind,
+                name: Some(format!("MCP {}", params.kind)),
+                at_cursor: true,
+            })
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let asset = session
+            .state
+            .project
+            .active()
+            .ok_or_else(|| McpError::internal_error("no active asset after add", None))?;
         Ok(Json(AssetSummaryDto {
             name: asset.name.clone(),
             kind: "object".to_string(),
@@ -172,20 +186,11 @@ impl PetuniaMcp {
         }))
     }
 
-    /// Undoes the last checkpointed MCP mutation.
-    #[tool(description = "Undo the last MCP scene mutation.")]
+    /// Undoes the last Application mutation.
+    #[tool(description = "Undo the last scene mutation.")]
     async fn undo(&self) -> Result<Json<bool>, McpError> {
-        let mut domain = self.domain.lock().await;
-        if !domain.undo.can_undo() {
-            return Ok(Json(false));
-        }
-        let current = domain.project.clone();
-        if let Some(previous) = domain.undo.undo(current) {
-            domain.project = previous;
-            Ok(Json(true))
-        } else {
-            Ok(Json(false))
-        }
+        let mut session = self.session.lock().await;
+        Ok(Json(session.state.dispatch(&UndoCmd).is_ok()))
     }
 
     /// Exports one asset as OBJ text (bounded by scene content).
@@ -194,35 +199,31 @@ impl PetuniaMcp {
         &self,
         Parameters(params): Parameters<ExportObjParams>,
     ) -> Result<String, McpError> {
-        let domain = self.domain.lock().await;
-        let asset = domain.project.assets.get(params.index).ok_or_else(|| {
-            McpError::invalid_params(format!("asset index {} out of range", params.index), None)
-        })?;
+        let session = self.session.lock().await;
+        let asset = session
+            .state
+            .project
+            .assets
+            .get(params.index)
+            .ok_or_else(|| {
+                McpError::invalid_params(format!("asset index {} out of range", params.index), None)
+            })?;
         Ok(petunia_project::export::export_obj(asset))
     }
 
-    /// Validates a command intent without executing it.
+    /// Validates a command intent against the Application registry without executing it.
     #[tool(description = "Validate a command intent (id, target, args) without executing.")]
     async fn validate_intent(
         &self,
         Parameters(params): Parameters<ValidateIntentParams>,
     ) -> Result<Json<IntentReport>, McpError> {
-        let asset_ok = params
-            .asset_id
-            .as_deref()
-            .is_none_or(|id| uuid::Uuid::parse_str(id).is_ok());
-        let well_formed = !params.command.is_empty()
-            && params.command.len() <= 64
-            && params
-                .command
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
-            && params.args.iter().all(|a| a.is_finite())
-            && asset_ok;
-        let allowlisted = MCP_COMMAND_ALLOWLIST.contains(&params.command.as_str());
+        let session = self.session.lock().await;
+        let well_formed =
+            Self::intent_well_formed(&params.command, params.asset_id.as_deref(), &params.args);
+        let registered = session.state.commands.contains(&params.command);
         let (valid, reason) = if !well_formed {
             (false, "bad_shape")
-        } else if !allowlisted {
+        } else if !registered {
             (false, "not_allowlisted")
         } else {
             (true, "ok")
@@ -233,17 +234,58 @@ impl PetuniaMcp {
         }))
     }
 
+    /// Executes a validated command intent through the Application API.
+    #[tool(description = "Execute a command intent through the Application command spine.")]
+    async fn execute_intent(
+        &self,
+        Parameters(params): Parameters<ExecuteIntentParams>,
+    ) -> Result<Json<IntentReport>, McpError> {
+        let well_formed =
+            Self::intent_well_formed(&params.command, params.asset_id.as_deref(), &params.args);
+        if !well_formed {
+            return Ok(Json(IntentReport {
+                valid: false,
+                reason: "bad_shape".to_string(),
+            }));
+        }
+        let mut session = self.session.lock().await;
+        if !session.state.commands.contains(&params.command)
+            && !matches!(
+                params.command.as_str(),
+                "model.add_primitive" | "model.add_cube" | "model.scale" | "model.scale_selection"
+            )
+        {
+            return Ok(Json(IntentReport {
+                valid: false,
+                reason: "not_allowlisted".to_string(),
+            }));
+        }
+        let intent = CommandIntent {
+            command: params.command,
+            asset_id: params.asset_id,
+            args: params.args,
+        };
+        match session.state.dispatch_intent(&intent) {
+            Ok(()) => Ok(Json(IntentReport {
+                valid: true,
+                reason: "ok".to_string(),
+            })),
+            Err(e) => Err(McpError::internal_error(e.to_string(), None)),
+        }
+    }
+
     /// Exposes the scene as query DTOs (mirrors Application Queries shape).
     #[tool(description = "Scene items as query DTOs (name, kind, visible).")]
     async fn scene_items(&self) -> Result<Json<Vec<SceneItemContract>>, McpError> {
-        let domain = self.domain.lock().await;
+        let session = self.session.lock().await;
         Ok(Json(
-            domain
-                .project
+            session
+                .state
+                .query_scene_hierarchy()
                 .assets
-                .iter()
+                .into_iter()
                 .map(|asset| SceneItemContract {
-                    name: asset.name.clone(),
+                    name: asset.name,
                     kind: "object".to_string(),
                     visible: asset.visible,
                 })
@@ -313,7 +355,7 @@ mod tests {
         assert!(
             server
                 .add_primitive(Parameters(AddPrimitiveParams {
-                    kind: "torus".to_string(),
+                    kind: "not-a-prim".to_string(),
                     size: 1.0,
                 }))
                 .await
@@ -380,5 +422,22 @@ mod tests {
             .0;
         assert!(!bad.valid);
         assert_eq!(bad.reason, "bad_shape");
+    }
+
+    #[tokio::test]
+    async fn execute_intent_uses_application_commands() {
+        let server = PetuniaMcp::new();
+        let before = server.list_assets().await.unwrap().0.len();
+        let report = server
+            .execute_intent(Parameters(ExecuteIntentParams {
+                command: "model.add_primitive".to_string(),
+                asset_id: Some("Plane".to_string()),
+                args: vec![],
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(report.valid);
+        assert_eq!(server.list_assets().await.unwrap().0.len(), before + 1);
     }
 }

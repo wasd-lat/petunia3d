@@ -214,8 +214,19 @@ impl LoopRing {
     /// Splits each ring quad into strips, sharing every new boundary vertex.
     /// Existing face UV seams are preserved through independent interpolation.
     pub fn apply(&self, mesh: &Mesh, cuts: usize, slide: f32) -> Result<Mesh, LoopCutError> {
+        self.apply_even(mesh, cuts, slide, false)
+    }
+
+    /// Even Loop Cut: equal spacing along the ring, independent of slide.
+    pub fn apply_even(
+        &self,
+        mesh: &Mesh,
+        cuts: usize,
+        slide: f32,
+        even: bool,
+    ) -> Result<Mesh, LoopCutError> {
         self.validate(mesh)?;
-        let fractions = fractions(cuts, slide)?;
+        let fractions = fractions_mode(cuts, slide, even)?;
         let mut result = mesh.clone();
         result.deselect_all();
         let mut splits = HashMap::new();
@@ -281,10 +292,19 @@ impl LoopRing {
 }
 
 fn fractions(cuts: usize, slide: f32) -> Result<Vec<f32>, LoopCutError> {
+    fractions_mode(cuts, slide, false)
+}
+
+/// Uniform (even) distribution ignores slide so strips have equal length.
+fn fractions_mode(cuts: usize, slide: f32, even: bool) -> Result<Vec<f32>, LoopCutError> {
     if !(1..=32).contains(&cuts) || !slide.is_finite() || !(-1.0..=1.0).contains(&slide) {
         return Err(LoopCutError::InvalidParameters);
     }
-    // Keep a finite strip at the endpoints instead of generating zero-area faces.
+    if even {
+        return Ok((1..=cuts)
+            .map(|i| i as f32 / (cuts + 1) as f32)
+            .collect());
+    }
     let slide = slide.clamp(-0.999, 0.999);
     Ok((1..=cuts)
         .map(|i| (i as f32 + slide) / (cuts + 1) as f32)

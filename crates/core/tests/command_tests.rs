@@ -230,6 +230,28 @@ fn test_command_dispatcher_registry() {
 }
 
 #[test]
+fn unavailable_command_does_not_create_history_or_dirty_document() {
+    let mut state = AppState::default();
+    let original = state.project.project.clone();
+    let mut dispatcher = CommandDispatcher::new();
+    dispatcher.register(
+        "delete.invalid",
+        DeleteAssetCmd {
+            asset_index: Some(999),
+        },
+    );
+
+    let error = dispatcher
+        .execute("delete.invalid", &mut state)
+        .unwrap_err();
+
+    assert!(matches!(error, CommandError::Execution(_)));
+    assert_eq!(state.project.assets.len(), original.assets.len());
+    assert!(!state.project.undo.can_undo());
+    assert!(!state.is_document_dirty());
+}
+
+#[test]
 fn test_headless_full_modeling_session() {
     // Prova de execução 100% headless sem qualquer binding de UI
     let mut state = AppState::default();
@@ -612,15 +634,15 @@ fn test_app_state_dispatch_command_string_id() {
     let mut state = AppState::default();
 
     // Toggle wireframe
-    assert_ne!(state.shading, petunia_render::Shading::Wireframe);
+    assert_ne!(state.shading, petunia_core::Shading::Wireframe);
     state
         .dispatch_command("view.toggle_wireframe")
         .expect("toggle wireframe command");
-    assert_eq!(state.shading, petunia_render::Shading::Wireframe);
+    assert_eq!(state.shading, petunia_core::Shading::Wireframe);
     state
         .dispatch_command("view.toggle_wireframe")
         .expect("toggle wireframe command again");
-    assert_ne!(state.shading, petunia_render::Shading::Wireframe);
+    assert_ne!(state.shading, petunia_core::Shading::Wireframe);
 
     // Toggle command palette
     assert!(!state.ui.show_command_palette);

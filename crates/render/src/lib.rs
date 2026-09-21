@@ -6,15 +6,9 @@
 
 pub mod scene;
 
-/// Modos de shading do viewport (§35).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Shading {
-    #[default]
-    Solid,
-    Smooth,
-    Unlit,
-    Wireframe,
-}
+/// Viewport shading. Defined in core (session state); re-exported here so
+/// existing `petunia_render::Shading` call sites keep compiling.
+pub use petunia_core::Shading;
 
 /// Contadores do frame para overlay e benchmarks.
 #[derive(Debug, Clone, Copy, Default)]
