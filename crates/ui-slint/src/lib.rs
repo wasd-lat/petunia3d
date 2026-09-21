@@ -68,6 +68,48 @@ impl Default for ViewportRenderState {
     }
 }
 
+/// Gizmo 3D projetado para o overlay da viewport.
+///
+/// A projeção acontece no bridge; o Slint só desenha as três hastes a partir
+/// de origem, comprimento e ângulo em pixels. O overlay não conhece câmera,
+/// GPU nem matriz de projeção.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GizmoModel {
+    pub visible: bool,
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub x_end_x: f32,
+    pub x_end_y: f32,
+    pub y_end_x: f32,
+    pub y_end_y: f32,
+    pub z_end_x: f32,
+    pub z_end_y: f32,
+}
+
+impl Default for GizmoModel {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            x_end_x: 0.0,
+            x_end_y: 0.0,
+            y_end_x: 0.0,
+            y_end_y: 0.0,
+            z_end_x: 0.0,
+            z_end_y: 0.0,
+        }
+    }
+}
+
+/// Sessão de arrasto transacional iniciada na viewport.
+#[derive(Debug, Clone, Copy)]
+pub struct ViewportDrag {
+    pub kind: TransformKind,
+    pub start: [f32; 2],
+    pub viewport: [f32; 2],
+}
+
 /// Ação semântica emitida pelo shell Slint.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiIntent {
@@ -149,6 +191,7 @@ pub struct ShellViewModel {
     pub is_orthographic: bool,
     pub is_wireframe: bool,
     pub asset_library_visible: bool,
+    pub gizmo: GizmoModel,
 }
 
 impl ShellViewModel {
@@ -232,6 +275,7 @@ impl ShellViewModel {
             is_orthographic: state.session.camera.proj == petunia_core::Projection::Ortho,
             is_wireframe: state.session.show_wireframe_overlay,
             asset_library_visible: false,
+            gizmo: GizmoModel::default(),
         }
     }
 
@@ -331,6 +375,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub position: [NumericFieldState; 3],
     pub rotation: [NumericFieldState; 3],
     pub scale: [NumericFieldState; 3],
+    pub drag: Option<ViewportDrag>,
+    pub viewport_size: [f32; 2],
 }
 
 impl<V: PetuniaViewport> SlintUiBridge<V> {
@@ -343,6 +389,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             asset_library_visible: false,
             command_search_visible: false,
             settings_visible: false,
+            drag: None,
+            viewport_size: [1024.0, 768.0],
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -491,21 +539,15 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 self.state.session.tools.active_tool = tool.clone();
                 self.state.set_status(format!("Ferramenta ativa: {tool}"));
                 match tool.as_str() {
-                    "move" => {
-                        if let Err(error) = self.state.begin_modal(petunia_core::ModalKind::Move) {
-                            self.state.set_status(error.to_string());
-                        }
-                    }
-                    "rotate" => {
-                        if let Err(error) = self.state.begin_modal(petunia_core::ModalKind::Rotate)
-                        {
-                            self.state.set_status(error.to_string());
-                        }
-                    }
-                    "scale" => {
-                        if let Err(error) = self.state.begin_modal(petunia_core::ModalKind::Scale) {
-                            self.state.set_status(error.to_string());
-                        }
+                    // Transformações são transacionais por arrasto: a sessão
+                    // modal abre no pointer-down da viewport, não ao escolher a
+                    // ferramenta.
+                    "move" | "rotate" | "scale" => {
+                        self.state.session.tools.gizmo_mode = match tool.as_str() {
+                            "rotate" => petunia_core::ModalKind::Rotate,
+                            "scale" => petunia_core::ModalKind::Scale,
+                            _ => petunia_core::ModalKind::Move,
+                        };
                     }
                     "cut" => {
                         if let Some(mesh) = self.state.project.active_mesh().cloned() {
@@ -653,8 +695,101 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let width = width.max(1);
         let height = height.max(1);
         self.viewport.resize(width, height);
+        self.viewport_size = [width as f32, height as f32];
         self.state.session.camera.aspect = width as f32 / height as f32;
         self.state.mark_dirty();
+    }
+
+    /// Inicia uma transformação modal por arrasto na viewport.
+    pub fn begin_viewport_transform(&mut self, kind: TransformKind, x: f32, y: f32) -> bool {
+        let modal_kind = match kind {
+            TransformKind::Position => petunia_core::ModalKind::Move,
+            TransformKind::Rotation => petunia_core::ModalKind::Rotate,
+            TransformKind::Scale => petunia_core::ModalKind::Scale,
+        };
+        match self.state.begin_modal(modal_kind) {
+            Ok(()) => {
+                self.reset_transform_fields();
+                self.drag = Some(ViewportDrag {
+                    kind,
+                    start: [x, y],
+                    viewport: self.viewport_size,
+                });
+                true
+            }
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Atualiza a transformação a partir do deslocamento absoluto do ponteiro.
+    pub fn update_viewport_transform(&mut self, x: f32, y: f32) -> bool {
+        let Some(drag) = self.drag else {
+            return false;
+        };
+        let total_x = x - drag.start[0];
+        let total_y = y - drag.start[1];
+        let world_per_pixel =
+            self.state.session.camera.visible_height() / drag.viewport[1].max(1.0);
+        let result = match drag.kind {
+            TransformKind::Position => {
+                let right = self.state.session.camera.right();
+                let up = self.state.session.camera.up();
+                let delta = right * (total_x * world_per_pixel) + up * (-total_y * world_per_pixel);
+                self.state.update_modal(delta, 0.0)
+            }
+            TransformKind::Rotation => self.state.update_modal(glam::Vec3::ZERO, total_x * 0.5),
+            TransformKind::Scale => {
+                let factor = (1.0 + total_x * 0.005).max(0.001);
+                self.state.update_modal(glam::Vec3::ZERO, factor)
+            }
+        };
+        match result {
+            Ok(()) => {
+                let components = self
+                    .state
+                    .session
+                    .tools
+                    .modal
+                    .as_ref()
+                    .map(|modal| modal.components);
+                if let Some(components) = components {
+                    let fields = match drag.kind {
+                        TransformKind::Position => &mut self.position,
+                        TransformKind::Rotation => &mut self.rotation,
+                        TransformKind::Scale => &mut self.scale,
+                    };
+                    fields[0].set_value(components.x);
+                    fields[1].set_value(components.y);
+                    fields[2].set_value(components.z);
+                }
+                self.state.mark_dirty();
+                true
+            }
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Confirma a transformação por arrasto como uma única operação de undo.
+    pub fn end_viewport_transform(&mut self) -> bool {
+        if self.drag.take().is_none() {
+            return false;
+        }
+        self.commit_transform();
+        self.reset_transform_fields();
+        true
+    }
+
+    pub fn cancel_viewport_transform(&mut self) -> bool {
+        if self.drag.take().is_none() {
+            return false;
+        }
+        self.cancel_transform()
     }
 
     pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
@@ -703,7 +838,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             SelectionDomain::Object => {
                 let mut best = None;
                 for (index, asset) in self.state.project.assets.iter().enumerate() {
-                    if !asset.visible || asset.mesh.verts.is_empty() {
+                    if !asset.visible || asset.locked || asset.mesh.verts.is_empty() {
                         continue;
                     }
                     let center = glam::Vec3::from_array(asset.mesh.selection_center());
@@ -755,14 +890,19 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
             SelectionDomain::Edge => {
-                if let Some((index, _)) = self.state.pick_vertex(origin, direction)
+                if let Some((edge, _)) = self.state.pick_edge(origin, direction)
                     && let Some(mesh) = self.state.project.active_mesh_mut()
                 {
-                    mesh.sync_edge_selection_from_verts();
-                    if let Some(vertex) = mesh.verts.get_mut(index) {
-                        vertex.selected = true;
+                    if !extend {
+                        mesh.selected_edges.clear();
+                        mesh.deselect_all();
                     }
-                    mesh.sync_edge_selection_from_verts();
+                    mesh.selected_edges.insert(edge);
+                    for vertex in [edge.0, edge.1] {
+                        if let Some(vertex) = mesh.verts.get_mut(vertex as usize) {
+                            vertex.selected = true;
+                        }
+                    }
                 }
             }
         }
@@ -772,6 +912,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.drag.take().is_some() {
+            self.cancel_transform();
+            return true;
+        }
+        if self.state.session.tools.cut_session.take().is_some() {
+            self.state.set_status("Cut cancelled");
+            return true;
+        }
         if self.cancel_transform() {
             return true;
         }
@@ -1030,6 +1178,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.is_orthographic = self.state.session.camera.proj == petunia_core::Projection::Ortho;
         vm.is_wireframe = self.state.session.show_wireframe_overlay;
         vm.asset_library_visible = self.asset_library_visible;
+        vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
         vm
     }
 
@@ -1066,6 +1215,67 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             OverlayId::SceneDrawer => self.scene_drawer_visible = false,
             OverlayId::AssetLibrary => self.asset_library_visible = false,
         }
+    }
+}
+
+/// Projeta o pivô da seleção e os três eixos do mundo para o overlay Slint.
+fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
+    if state.workspace != Workspace::Model {
+        return GizmoModel::default();
+    }
+    let Some(asset) = state.project.active() else {
+        return GizmoModel::default();
+    };
+    if asset.mesh.verts.is_empty() {
+        return GizmoModel::default();
+    }
+    let pivot = if asset.mesh.has_selection() {
+        glam::Vec3::from_array(asset.mesh.selection_center())
+    } else {
+        let mut min = glam::Vec3::splat(f32::MAX);
+        let mut max = glam::Vec3::splat(f32::MIN);
+        for vertex in &asset.mesh.verts {
+            let point = vertex.vec();
+            min = min.min(point);
+            max = max.max(point);
+        }
+        if !min.is_finite() || !max.is_finite() {
+            return GizmoModel::default();
+        }
+        (min + max) * 0.5
+    };
+    let view_proj = state.session.camera.view_proj();
+    let project = |point: glam::Vec3| -> Option<[f32; 2]> {
+        let clip = view_proj * glam::Vec4::new(point.x, point.y, point.z, 1.0);
+        if clip.w <= 0.05 {
+            return None;
+        }
+        let inv_w = 1.0 / clip.w;
+        Some([
+            (clip.x * inv_w * 0.5 + 0.5) * width,
+            (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height,
+        ])
+    };
+    let Some(origin) = project(pivot) else {
+        return GizmoModel::default();
+    };
+    let world_length = state.session.camera.visible_height() * 0.18;
+    let end_of = |direction: glam::Vec3| -> [f32; 2] {
+        project(pivot + direction * world_length).unwrap_or(origin)
+    };
+    let x_end = end_of(glam::Vec3::X);
+    let y_end = end_of(glam::Vec3::Y);
+    let z_end = end_of(glam::Vec3::Z);
+    GizmoModel {
+        visible: true,
+        origin_x: origin[0],
+        origin_y: origin[1],
+        x_end_x: x_end[0],
+        x_end_y: x_end[1],
+        y_end_x: y_end[0],
+        y_end_y: y_end[1],
+        z_end_x: z_end[0],
+        z_end_y: z_end[1],
     }
 }
 
@@ -1236,6 +1446,16 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
         .collect();
     let model = std::rc::Rc::new(slint::VecModel::from(scene_items));
     window.set_scene_items(model.into());
+
+    window.set_gizmo_visible(vm.gizmo.visible);
+    window.set_gizmo_origin_x(vm.gizmo.origin_x);
+    window.set_gizmo_origin_y(vm.gizmo.origin_y);
+    window.set_gizmo_x_end_x(vm.gizmo.x_end_x);
+    window.set_gizmo_x_end_y(vm.gizmo.x_end_y);
+    window.set_gizmo_y_end_x(vm.gizmo.y_end_x);
+    window.set_gizmo_y_end_y(vm.gizmo.y_end_y);
+    window.set_gizmo_z_end_x(vm.gizmo.z_end_x);
+    window.set_gizmo_z_end_y(vm.gizmo.z_end_y);
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -1663,6 +1883,51 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let transform_begin_bridge = Arc::clone(&bridge);
+    window.on_viewport_transform_begin(move |kind_str, x, y| {
+        let kind = match kind_str.as_str() {
+            "pos" => TransformKind::Position,
+            "rot" => TransformKind::Rotation,
+            "scale" => TransformKind::Scale,
+            _ => return,
+        };
+        if let Ok(mut bridge) = transform_begin_bridge.lock() {
+            bridge.begin_viewport_transform(kind, x, y);
+        }
+    });
+
+    let transform_drag_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_transform_update(move |x, y| {
+        if let Ok(mut bridge) = transform_drag_bridge.lock() {
+            bridge.update_viewport_transform(x, y);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let transform_end_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_transform_end(move || {
+        if let Ok(mut bridge) = transform_end_bridge.lock() {
+            bridge.end_viewport_transform();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let select_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_scene_select(move |id| {
@@ -1787,12 +2052,13 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let primitive_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_add_primitive_requested(move |kind_str| {
-        let kind = match kind_str.as_str() {
-            "cube" => petunia_core::PrimitiveKind::Cube,
-            "sphere" => petunia_core::PrimitiveKind::Sphere,
-            "cylinder" => petunia_core::PrimitiveKind::Cylinder,
-            "plane" => petunia_core::PrimitiveKind::Plane,
-            _ => petunia_core::PrimitiveKind::Cube,
+        let Some(kind) = petunia_core::PrimitiveKind::parse(kind_str.as_str()).ok() else {
+            if let Ok(mut bridge) = primitive_bridge.lock() {
+                bridge
+                    .state
+                    .set_status(format!("Unknown primitive: {kind_str}"));
+            }
+            return;
         };
         if let Ok(mut bridge) = primitive_bridge.lock() {
             bridge.apply(UiIntent::AddPrimitive(kind));
@@ -2505,6 +2771,120 @@ mod tests {
         assert!(bridge.state.is_document_dirty());
         assert!(bridge.state.undo());
         assert_eq!(bridge.state.project.assets.len(), before);
+    }
+
+    #[test]
+    fn viewport_drag_transform_moves_geometry_and_commits_one_undo_step() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        let before = bridge.state.project.active_mesh().unwrap().verts.clone();
+
+        assert!(bridge.begin_viewport_transform(TransformKind::Position, 400.0, 300.0));
+        assert!(bridge.update_viewport_transform(460.0, 300.0));
+        assert!(bridge.end_viewport_transform());
+
+        let after = &bridge.state.project.active_mesh().unwrap().verts;
+        assert!(
+            after
+                .iter()
+                .zip(&before)
+                .all(|(after, before)| (after.pos[0] - before.pos[0]).abs() > 1.0e-4)
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.undo());
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .verts
+                .iter()
+                .zip(&before)
+                .all(|(restored, before)| restored.pos == before.pos)
+        );
+        assert!(bridge.drag.is_none());
+    }
+
+    #[test]
+    fn escape_cancels_viewport_drag_without_touching_history() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        let before = bridge.state.project.active_mesh().unwrap().verts.clone();
+
+        assert!(bridge.begin_viewport_transform(TransformKind::Position, 400.0, 300.0));
+        assert!(bridge.update_viewport_transform(460.0, 300.0));
+        assert!(bridge.handle_escape());
+
+        assert!(bridge.drag.is_none());
+        assert!(!bridge.state.project.undo.can_undo());
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .verts
+                .iter()
+                .zip(&before)
+                .all(|(restored, before)| restored.pos == before.pos)
+        );
+    }
+
+    #[test]
+    fn edge_domain_selects_a_real_edge() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+
+        // Aponta para o centro do cubo padrão, onde uma aresta é atingível.
+        bridge.select_viewport(0.5, 0.5, false);
+
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(
+            mesh.selected_edges.iter().any(|&(a, b)| {
+                mesh.verts.get(a as usize).is_some_and(|v| v.selected)
+                    || mesh.verts.get(b as usize).is_some_and(|v| v.selected)
+            }),
+            "edge selection must mark the picked edge or its endpoints"
+        );
+    }
+
+    #[test]
+    fn locked_asset_is_not_picked_in_the_viewport() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::ToggleSceneAssetLock(
+            bridge.state.project.assets[0].id.to_string(),
+        ));
+
+        let cursor_before = bridge.state.session.cursor_3d;
+        bridge.select_viewport(0.5, 0.5, false);
+
+        assert_eq!(bridge.state.session.cursor_3d, cursor_before);
+        assert!(bridge.state.project.assets[0].locked);
+    }
+
+    #[test]
+    fn gizmo_projects_axes_for_the_active_object() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let gizmo = bridge.view_model().gizmo;
+
+        assert!(gizmo.visible);
+        assert!((gizmo.origin_x - 512.0).abs() < 64.0);
+        assert!((gizmo.origin_y - 384.0).abs() < 64.0);
+        let x_length = ((gizmo.x_end_x - gizmo.origin_x).powi(2)
+            + (gizmo.x_end_y - gizmo.origin_y).powi(2))
+        .sqrt();
+        assert!(x_length > 4.0, "gizmo X axis must have visible length");
+    }
+
+    #[test]
+    fn gizmo_is_hidden_outside_the_model_workspace() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+
+        assert!(!bridge.view_model().gizmo.visible);
     }
 
     #[test]
