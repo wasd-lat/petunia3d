@@ -102,6 +102,68 @@ impl Default for GizmoModel {
     }
 }
 
+/// Ferramenta paramétrica com preview modal e Tool Properties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolModalKind {
+    Extrude,
+    Inset,
+    Bevel,
+    PushPull,
+}
+
+impl ToolModalKind {
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "model.extrude" => Some(Self::Extrude),
+            "model.inset" => Some(Self::Inset),
+            "model.bevel" => Some(Self::Bevel),
+            "model.push_pull" => Some(Self::PushPull),
+            _ => None,
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Extrude => "Extrude",
+            Self::Inset => "Inset",
+            Self::Bevel => "Bevel",
+            Self::PushPull => "Push/Pull",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Extrude | Self::PushPull => "Distance",
+            Self::Inset => "Amount",
+            Self::Bevel => "Width",
+        }
+    }
+
+    pub const fn modal_kind(self) -> petunia_core::ModalKind {
+        match self {
+            Self::Extrude => petunia_core::ModalKind::Extrude,
+            Self::Inset => petunia_core::ModalKind::Inset,
+            Self::Bevel => petunia_core::ModalKind::Bevel,
+            Self::PushPull => petunia_core::ModalKind::PushPull,
+        }
+    }
+
+    pub const fn bounds(self) -> (f32, f32) {
+        match self {
+            Self::Inset => (0.0, 0.95),
+            Self::Bevel => (0.0, 100.0),
+            Self::Extrude | Self::PushPull => (-100.0, 100.0),
+        }
+    }
+
+    pub const fn step(self) -> f32 {
+        match self {
+            Self::Inset => 0.01,
+            _ => 0.1,
+        }
+    }
+}
+
 /// Sessão de arrasto transacional iniciada na viewport.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewportDrag {
@@ -196,6 +258,13 @@ pub struct ShellViewModel {
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
     pub add_menu_open: bool,
+    pub tool_modal_active: bool,
+    pub tool_modal_title: String,
+    pub tool_modal_label: String,
+    pub tool_modal_value: f32,
+    pub tool_modal_step: f32,
+    pub tool_modal_min: f32,
+    pub tool_modal_max: f32,
 }
 
 impl ShellViewModel {
@@ -281,6 +350,13 @@ impl ShellViewModel {
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
             add_menu_open: false,
+            tool_modal_active: false,
+            tool_modal_title: String::new(),
+            tool_modal_label: String::new(),
+            tool_modal_value: 0.0,
+            tool_modal_step: 0.1,
+            tool_modal_min: 0.0,
+            tool_modal_max: 0.0,
         }
     }
 
@@ -386,6 +462,9 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub paint_last: Option<[f32; 2]>,
     /// Menu de primitivas aberto (apresentação).
     pub add_menu_open: bool,
+    /// Ferramenta paramétrica modal ativa (Extrude, Inset, Bevel, Push/Pull).
+    pub tool_modal: Option<ToolModalKind>,
+    pub tool_modal_value: f32,
 }
 
 impl<V: PetuniaViewport> SlintUiBridge<V> {
@@ -402,6 +481,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             viewport_size: [1024.0, 768.0],
             paint_last: None,
             add_menu_open: false,
+            tool_modal: None,
+            tool_modal_value: 0.0,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -884,6 +965,84 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Abre a sessão modal de uma ferramenta paramétrica com preview próprio.
+    pub fn begin_tool_modal(&mut self, kind: ToolModalKind) -> bool {
+        match self.state.begin_modal(kind.modal_kind()) {
+            Ok(()) => {
+                self.tool_modal = Some(kind);
+                let initial = match kind {
+                    ToolModalKind::Inset => 0.2,
+                    ToolModalKind::Bevel => 0.05,
+                    _ => 0.0,
+                };
+                self.tool_modal_value = initial;
+                if initial != 0.0 {
+                    let _ = self.state.update_modal(glam::Vec3::ZERO, initial);
+                }
+                self.state.mark_dirty();
+                true
+            }
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Ajusta o preview pelo arrasto vertical na viewport.
+    pub fn scrub_tool_modal(&mut self, delta_y: f32, fine: bool) -> bool {
+        let Some(kind) = self.tool_modal else {
+            return false;
+        };
+        let step = if fine { kind.step() * 0.1 } else { kind.step() };
+        let world_per_pixel =
+            self.state.session.camera.visible_height() / self.viewport_size[1].max(1.0);
+        let delta = match kind {
+            ToolModalKind::Inset => -delta_y * step * 0.5,
+            ToolModalKind::Bevel => -delta_y * world_per_pixel * 0.5,
+            _ => -delta_y * world_per_pixel * 0.5,
+        };
+        self.set_tool_modal_value(self.tool_modal_value + delta)
+    }
+
+    /// Define o valor absoluto do preview (arrasto e campo numérico).
+    pub fn set_tool_modal_value(&mut self, value: f32) -> bool {
+        let Some(kind) = self.tool_modal else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
+        }
+        let (minimum, maximum) = kind.bounds();
+        let value = value.clamp(minimum, maximum);
+        if self.state.update_modal(glam::Vec3::ZERO, value).is_err() {
+            // Topologia recusada (ex.: bevel inválido): mantém o último preview.
+            return false;
+        }
+        self.tool_modal_value = value;
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Confirma a ferramenta paramétrica como uma única operação de undo.
+    pub fn commit_tool_modal(&mut self) -> bool {
+        if self.tool_modal.take().is_none() {
+            return false;
+        }
+        self.state.commit_modal();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn cancel_tool_modal(&mut self) -> bool {
+        if self.tool_modal.take().is_none() {
+            return false;
+        }
+        self.state.cancel_modal();
+        self.state.mark_dirty();
+        true
+    }
+
     fn paint_dab_at(&mut self, x: f32, y: f32) {
         let width = self.viewport_size[0].max(1.0);
         let height = self.viewport_size[1].max(1.0);
@@ -1037,6 +1196,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if self.cancel_paint_stroke() {
             return true;
         }
+        if self.cancel_tool_modal() {
+            return true;
+        }
         if self.drag.take().is_some() {
             self.cancel_transform();
             return true;
@@ -1141,6 +1303,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     pub fn execute_core_command(&mut self, id: &str) -> Result<(), petunia_core::CommandError> {
         self.command_search_visible = false;
         self.overlays.remove(OverlayId::CommandPalette);
+        // Ferramentas paramétricas abrem uma sessão modal com Tool Properties
+        // próprias em vez de rodar como one-shot de valor fixo.
+        if let Some(kind) = ToolModalKind::from_id(id) {
+            self.begin_tool_modal(kind);
+            return Ok(());
+        }
         match id {
             "uv.unwrap" => self.state.dispatch_command("uv.unwrap_auto"),
             "uv.pack_islands" => self.state.dispatch_command("uv.pack_islands"),
@@ -1351,6 +1519,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.asset_library_visible = self.asset_library_visible;
         vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
         vm.add_menu_open = self.add_menu_open;
+        if let Some(kind) = self.tool_modal {
+            let (minimum, maximum) = kind.bounds();
+            vm.tool_modal_active = true;
+            vm.tool_modal_title = kind.title().to_string();
+            vm.tool_modal_label = kind.label().to_string();
+            vm.tool_modal_value = self.tool_modal_value;
+            vm.tool_modal_step = kind.step();
+            vm.tool_modal_min = minimum;
+            vm.tool_modal_max = maximum;
+        }
         vm
     }
 
@@ -1629,6 +1807,13 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_gizmo_z_end_x(vm.gizmo.z_end_x);
     window.set_gizmo_z_end_y(vm.gizmo.z_end_y);
     window.set_add_menu_open(vm.add_menu_open);
+    window.set_tool_modal_active(vm.tool_modal_active);
+    window.set_tool_modal_title(vm.tool_modal_title.as_str().into());
+    window.set_tool_modal_label(vm.tool_modal_label.as_str().into());
+    window.set_tool_modal_value(vm.tool_modal_value);
+    window.set_tool_modal_step(vm.tool_modal_step);
+    window.set_tool_modal_min(vm.tool_modal_min);
+    window.set_tool_modal_max(vm.tool_modal_max);
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -2146,6 +2331,75 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_add_menu_changed(move |open| {
         if let Ok(mut bridge) = add_menu_bridge.lock() {
             bridge.add_menu_open = open;
+        }
+    });
+
+    let tool_scrub_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_scrubbed(move |delta, fine| {
+        if let Ok(mut bridge) = tool_scrub_bridge.lock() {
+            bridge.scrub_tool_modal(delta, fine);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let tool_text_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_text_committed(move |text| {
+        if let Ok(mut bridge) = tool_text_bridge.lock() {
+            match numeric::parse_numeric(text.as_str()) {
+                Ok(value) => {
+                    bridge.set_tool_modal_value(value);
+                }
+                Err(error) => bridge.state.set_status(format!("Invalid value: {error:?}")),
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let tool_apply_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_apply(move || {
+        if let Ok(mut bridge) = tool_apply_bridge.lock() {
+            bridge.commit_tool_modal();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let tool_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_cancel(move || {
+        if let Ok(mut bridge) = tool_cancel_bridge.lock() {
+            bridge.cancel_tool_modal();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
         }
     });
 
@@ -3189,6 +3443,60 @@ mod tests {
 
         assert!(state.dispatch_command("model.knife").is_ok());
         assert!(state.session.tools.cut_session.is_some());
+    }
+
+    #[test]
+    fn extrude_tool_modal_previews_with_drag_and_commits_one_undo() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        assert!(bridge.begin_tool_modal(ToolModalKind::Extrude));
+        assert!(bridge.view_model().tool_modal_active);
+        assert!(bridge.scrub_tool_modal(-40.0, false));
+        assert!(bridge.tool_modal_value > 0.0);
+        assert!(bridge.commit_tool_modal());
+
+        assert!(bridge.state.project.undo.can_undo());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(!bridge.view_model().tool_modal_active);
+    }
+
+    #[test]
+    fn tool_modal_cancel_restores_geometry_and_keeps_history_clean() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let before = bridge.state.project.project.clone();
+
+        assert!(bridge.begin_tool_modal(ToolModalKind::Inset));
+        assert!(bridge.scrub_tool_modal(-30.0, false));
+        assert!(bridge.cancel_tool_modal());
+
+        assert!(!bridge.state.project.undo.can_undo());
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        let original = before.active_mesh().unwrap();
+        assert_eq!(mesh.verts.len(), original.verts.len());
+        assert_eq!(mesh.faces.len(), original.faces.len());
+    }
+
+    #[test]
+    fn executing_extrude_command_opens_the_tool_modal_not_a_fixed_preview() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        bridge.execute_core_command("model.extrude").unwrap();
+
+        assert!(bridge.tool_modal.is_some());
+        assert!(bridge.view_model().tool_modal_active);
+        assert!(bridge.handle_escape());
+        assert!(bridge.tool_modal.is_none());
     }
 
     #[test]

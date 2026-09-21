@@ -337,6 +337,13 @@ export component PetuniaSlintShell inherits Window {
     in-out property <length> gizmo-z-end-x: 0px;
     in-out property <length> gizmo-z-end-y: 0px;
     in-out property <bool> add-menu-open: false;
+    in-out property <bool> tool-modal-active: false;
+    in-out property <string> tool-modal-title: "";
+    in-out property <string> tool-modal-label: "";
+    in-out property <float> tool-modal-value: 0.0;
+    in-out property <float> tool-modal-step: 0.1;
+    in-out property <float> tool-modal-min: 0.0;
+    in-out property <float> tool-modal-max: 0.0;
 
     callback workspace-changed(string);
     callback save-requested;
@@ -365,6 +372,10 @@ export component PetuniaSlintShell inherits Window {
     callback viewport-paint-update(float, float);
     callback viewport-paint-end;
     callback add-menu-changed(bool);
+    callback tool-modal-scrubbed(float, bool);
+    callback tool-modal-text-committed(string);
+    callback tool-modal-apply;
+    callback tool-modal-cancel;
     callback open-project-requested;
     callback scene-select(string);
     callback scene-toggle-visibility(string);
@@ -744,6 +755,8 @@ export component PetuniaSlintShell inherits Window {
                         property <bool> extend-selection: false;
                         property <bool> is-transform: false;
                         property <bool> is-painting: false;
+                        property <bool> is-tool-drag: false;
+                        property <bool> tool-drag-fine: false;
                         property <string> local-kind: "";
 
                         function transform-tool() -> string {
@@ -786,6 +799,9 @@ export component PetuniaSlintShell inherits Window {
                                     if root.active-workspace == "PAINT" {
                                         is-painting = true;
                                         root.viewport-paint-begin(self.mouse-x / 1px, self.mouse-y / 1px);
+                                    } else if root.tool-modal-active {
+                                        is-tool-drag = true;
+                                        tool-drag-fine = event.modifiers.shift;
                                     } else {
                                         local-kind = self.transform-tool();
                                         if local-kind != "" {
@@ -804,6 +820,10 @@ export component PetuniaSlintShell inherits Window {
                                 if is-painting {
                                     root.viewport-paint-end();
                                     is-painting = false;
+                                }
+                                if is-tool-drag {
+                                    root.tool-modal-apply();
+                                    is-tool-drag = false;
                                 }
                             }
                         }
@@ -825,6 +845,11 @@ export component PetuniaSlintShell inherits Window {
                             } else if is-painting {
                                 moved-since-down = true;
                                 root.viewport-paint-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                            } else if is-tool-drag {
+                                moved-since-down = true;
+                                root.tool-modal-scrubbed((self.mouse-y - last-y) / 1px, tool-drag-fine);
+                                last-x = self.mouse-x;
+                                last-y = self.mouse-y;
                             }
                         }
 
@@ -1199,6 +1224,59 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "MODEL": VerticalLayout {
                             spacing: 10px;
+
+                            if tool-modal-active: InspectorSection {
+                                title: tool-modal-title;
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 28px;
+
+                                        Text {
+                                            text: root.tool-modal-label;
+                                            color: DesignTokens.text-secondary;
+                                            font-size: 11px;
+                                            width: 72px;
+                                            vertical-alignment: center;
+                                        }
+                                        NumericField {
+                                            label: "";
+                                            value: root.tool-modal-value;
+                                            horizontal-stretch: 1;
+                                            scrubbed(delta, fine) => { root.tool-modal-scrubbed(delta, fine); }
+                                            text-committed(text) => { root.tool-modal-text-committed(text); }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Cancel"; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.tool-modal-cancel(); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.accent;
+                                            Text { text: "Apply"; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.tool-modal-apply(); } }
+                                        }
+                                    }
+                                }
+                            }
 
                             if selection-domain == "OBJECT": InspectorSection {
                                 title: "Transform";
