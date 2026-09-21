@@ -40,6 +40,12 @@ struct SelectionVertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    /// xyz = direção da luz (normalizada), w = livre.
+    light_dir: [f32; 4],
+    /// x = ambiente, y = difusa, z/w = livres.
+    light_params: [f32; 4],
+    /// x = alpha do X-Ray, y/z/w = livres.
+    xray: [f32; 4],
 }
 
 #[repr(C)]
@@ -100,6 +106,7 @@ pub struct Renderer {
     line_pipeline: wgpu::RenderPipeline,
     line_xray_pipeline: wgpu::RenderPipeline,
     xray: bool,
+    xray_opacity: f32,
     ref_pipeline: wgpu::RenderPipeline,
     ref_xray_pipeline: wgpu::RenderPipeline,
     cam_buffer: wgpu::Buffer,
@@ -137,7 +144,12 @@ pub struct Renderer {
 /// Seleção: cor chapada, sem iluminação, com alpha. A seleção precisa ser
 /// legível sobre qualquer shading e nunca depender da luz da cena.
 const SELECTION_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 
 struct In {
@@ -164,7 +176,12 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
 "#;
 
 const MESH_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 
 struct In {
@@ -193,25 +210,24 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     if (length(in.normal) < 0.1) {
         return vec4<f32>(in.color, 1.0);
     }
-    let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
+    let light = normalize(cam.light_dir.xyz);
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
-    let amb = LIGHT_AMB;
-    let c = in.color * (amb + LIGHT_DIF * diff);
+    let c = in.color * (cam.light_params.x + cam.light_params.y * diff);
     return vec4<f32>(c, 1.0);
 }
 
 @fragment
 fn fs_xray(in: Out) -> @location(0) vec4<f32> {
     if (length(in.normal) < 0.1) {
-        return vec4<f32>(in.color, 0.45);
+        return vec4<f32>(in.color, cam.xray.x);
     }
     let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
     let amb = LIGHT_AMB;
     let c = in.color * (amb + LIGHT_DIF * diff);
-    return vec4<f32>(c, 0.45);
+    return vec4<f32>(c, cam.xray.x);
 }
 "#;
 
@@ -219,7 +235,12 @@ fn fs_xray(in: Out) -> @location(0) vec4<f32> {
 /// cor do vértice pelo texel do canvas do asset. Fora do modo texturizado
 /// (ou sem canvas) o range usa o pipeline de cor sólida.
 const MESH_TEX_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var smp: sampler;
@@ -259,11 +280,10 @@ fn fs_tex(in: Out) -> @location(0) vec4<f32> {
     if (length(in.normal) < 0.1) {
         return vec4<f32>(base, 1.0);
     }
-    let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
+    let light = normalize(cam.light_dir.xyz);
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
-    let amb = LIGHT_AMB;
-    let c = base * (amb + LIGHT_DIF * diff);
+    let c = base * (cam.light_params.x + cam.light_params.y * diff);
     return vec4<f32>(c, 1.0);
 }
 
@@ -272,14 +292,14 @@ fn fs_tex_xray(in: Out) -> @location(0) vec4<f32> {
     let t = textureSample(tex, smp, in.uv);
     let base = in.color * t.rgb;
     if (length(in.normal) < 0.1) {
-        return vec4<f32>(base, 0.45);
+        return vec4<f32>(base, cam.xray.x);
     }
     let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
     let amb = LIGHT_AMB;
     let c = base * (amb + LIGHT_DIF * diff);
-    return vec4<f32>(c, 0.45);
+    return vec4<f32>(c, cam.xray.x);
 }
 "#;
     (MESH_TEX_WGSL.to_string() + FRAG)
@@ -314,7 +334,12 @@ fn mesh_wgsl() -> String {
 }
 
 const LINE_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 
 struct In {
@@ -339,7 +364,12 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
 "#;
 
 const REF_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 struct Params { opacity: f32, _p0: f32, _p1: f32, _p2: f32 };
 @group(1) @binding(0) var<uniform> params: Params;
@@ -401,7 +431,8 @@ impl Renderer {
             label: Some("simple3d-cam-layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                // O fragment lê a luz e a opacidade de X-Ray deste uniform.
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -935,6 +966,7 @@ impl Renderer {
             line_pipeline,
             line_xray_pipeline,
             xray: false,
+            xray_opacity: 0.42,
             ref_pipeline,
             ref_xray_pipeline,
             cam_buffer,
@@ -983,6 +1015,11 @@ impl Renderer {
         self.last_fingerprint = None;
     }
 
+    /// Opacidade da geometria em X-Ray, aplicada no uniform do shader.
+    pub fn set_xray_opacity(&mut self, opacity: f32) {
+        self.xray_opacity = opacity.clamp(0.1, 0.9);
+    }
+
     pub fn set_overlays(&mut self, show_overlays: bool, show_grid: bool) {
         self.show_overlays = show_overlays;
         self.show_grid = show_grid;
@@ -1027,6 +1064,7 @@ impl Renderer {
         xray: bool,
         show_triangulation: bool,
         textured: bool,
+        show_wireframe_overlay: bool,
         edit_domain: petunia_core::SelectionDomain,
     ) {
         puffin::profile_function!();
@@ -1036,11 +1074,39 @@ impl Renderer {
             self.last_domain = Some(edit_domain);
             self.last_fingerprint = None;
         }
+        // Fonte de luz por modo: Solid/Material usam o estúdio fixo da viewport,
+        // Rendered usa a primeira luz habilitada da cena. Sem luz na cena o
+        // Rendered cai no estúdio em vez de renderizar preto.
+        let (light_dir, ambient, diffuse) = match (shading.uses_scene_light(), scene.active_light())
+        {
+            (true, Some(light)) => {
+                let [x, y, z] = light.normalized_direction();
+                let intensity = light.intensity.clamp(0.0, 8.0);
+                (
+                    [x, y, z, 0.0],
+                    petunia_render::scene::LIGHT_AMBIENT * 0.35,
+                    petunia_render::scene::LIGHT_DIFFUSE * intensity,
+                )
+            }
+            _ => (
+                [
+                    petunia_render::scene::LIGHT_DIR[0],
+                    petunia_render::scene::LIGHT_DIR[1],
+                    petunia_render::scene::LIGHT_DIR[2],
+                    0.0,
+                ],
+                petunia_render::scene::LIGHT_AMBIENT,
+                petunia_render::scene::LIGHT_DIFFUSE,
+            ),
+        };
         queue.write_buffer(
             &self.cam_buffer,
             0,
             bytemuck::cast_slice(&[CameraUniform {
                 view_proj: camera.view_proj().to_cols_array_2d(),
+                light_dir,
+                light_params: [ambient, diffuse, 0.0, 0.0],
+                xray: [self.xray_opacity, 0.0, 0.0, 0.0],
             }]),
         );
 
@@ -1053,7 +1119,7 @@ impl Renderer {
                 show_triangulation,
                 textured,
                 edit_mode_is_edit: false,
-                show_wireframe_overlay: false,
+                show_wireframe_overlay,
             },
         );
         let mesh_changed = self.last_fingerprint.map(|f| f.mesh) != Some(fp.mesh);
@@ -1071,9 +1137,12 @@ impl Renderer {
         let mut mv: Vec<MeshVertex> = Vec::new();
         let mut lv: Vec<LineVertex> = Vec::new();
         let mut mesh_ranges: Vec<MeshRange> = Vec::new();
-        let smooth = shading == Shading::Smooth;
-        let unlit = shading == Shading::Unlit;
-        let is_wire = shading == Shading::Wireframe;
+        // Wireframe não preenche; os outros três modos preenchem e diferem no
+        // que amostram: cor do objeto, textura do material, ou material sob a
+        // luz da cena. `smooth` é ortogonal: normais suavizadas por vértice.
+        let is_wire = !shading.fills_faces();
+        let unlit = false;
+        let smooth = false;
         for obj in &scene.assets {
             if !obj.visible {
                 continue;
@@ -1142,7 +1211,9 @@ impl Renderer {
                 mesh_ranges.push(MeshRange {
                     start: range_start,
                     count: range_count,
-                    asset_id: if textured && tex_canvas.is_some() {
+                    // Material Preview e Rendered sempre amostram o material; nos
+                    // outros modos a textura é opt-in pelo toggle `textured`.
+                    asset_id: if (textured || shading.samples_material()) && tex_canvas.is_some() {
                         Some(obj.id)
                     } else {
                         None
@@ -1151,23 +1222,22 @@ impl Renderer {
             }
 
             if is_wire {
+                // Wireframe mostra topologia, não seleção: arestas neutras para
+                // a camada de seleção continuar sendo o único destaque.
                 for (a, b, sel) in mesh.to_edges() {
                     let c = if sel {
-                        [1.0, 0.3, 0.1]
+                        [1.0, 0.62, 0.20]
                     } else {
-                        [1.0, 0.6, 0.2]
+                        [0.62, 0.66, 0.74]
                     };
                     lv.push(LineVertex { pos: a, color: c });
                     lv.push(LineVertex { pos: b, color: c });
                 }
-            } else {
-                // overlay sutil das arestas (estilo Blender: wire sobre solid)
-                for (a, b, sel) in mesh.to_edges() {
-                    let c = if sel {
-                        [1.0, 0.35, 0.1]
-                    } else {
-                        [0.05, 0.05, 0.06]
-                    };
+            } else if show_wireframe_overlay {
+                // Overlay de wireframe é opt-in: sem ele, Solid/Material/Rendered
+                // mostram faces limpas e só a camada de seleção destaca arestas.
+                for (a, b, _sel) in mesh.to_edges() {
+                    let c = [0.05, 0.05, 0.06];
                     lv.push(LineVertex {
                         pos: [a[0], a[1] + 0.001, a[2]],
                         color: c,

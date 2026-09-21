@@ -14,15 +14,65 @@ use super::camera::Camera;
 use super::events::{AppEvent, EventBus};
 use super::selection::{SelectMode, Selection, SelectionDomain, Workspace};
 
-/// Viewport shading mode. Lives in core so session state does not depend on a
-/// renderer crate (ch. 28: core must not know concrete render backends).
+/// Modo de sombreamento da viewport.
+///
+/// Nomeia o que o usuário vê, não o modelo de iluminação: cada variante
+/// corresponde a um pipeline real no renderer. Vive no core para o estado de
+/// sessão não depender de crate de render (cap. 28).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Shading {
+    /// Só topologia: sem preenchimento de face, arestas neutras.
+    Wireframe,
+    /// Faces preenchidas com iluminação de estúdio da viewport, cor do objeto.
     #[default]
     Solid,
-    Smooth,
-    Unlit,
-    Wireframe,
+    /// Faces preenchidas com a textura do material amostrada por UV.
+    MaterialPreview,
+    /// Faces preenchidas com o material sob a luz da cena.
+    Rendered,
+}
+
+impl Shading {
+    pub const ALL: [Shading; 4] = [
+        Shading::Wireframe,
+        Shading::Solid,
+        Shading::MaterialPreview,
+        Shading::Rendered,
+    ];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Wireframe => "wireframe",
+            Self::Solid => "solid",
+            Self::MaterialPreview => "material",
+            Self::Rendered => "rendered",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "wireframe" => Some(Self::Wireframe),
+            "solid" => Some(Self::Solid),
+            "material" => Some(Self::MaterialPreview),
+            "rendered" => Some(Self::Rendered),
+            _ => None,
+        }
+    }
+
+    /// A viewport desenha faces preenchidas neste modo?
+    pub const fn fills_faces(self) -> bool {
+        !matches!(self, Self::Wireframe)
+    }
+
+    /// A textura do material é amostrada neste modo?
+    pub const fn samples_material(self) -> bool {
+        matches!(self, Self::MaterialPreview | Self::Rendered)
+    }
+
+    /// A iluminação vem da cena (não do estúdio fixo da viewport)?
+    pub const fn uses_scene_light(self) -> bool {
+        matches!(self, Self::Rendered)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -615,6 +665,8 @@ pub struct EditorSession {
     pub pivot_point: PivotPoint,
     pub show_overlays: bool,
     pub show_xray: bool,
+    /// Opacidade da geometria em X-Ray (0.1..=0.9). Ajustável pelo popover.
+    pub xray_opacity: f32,
     pub show_triangulation: bool,
     pub show_nav_hud: bool,
     pub show_grid: bool,
@@ -674,6 +726,7 @@ impl EditorSession {
             pivot_point: PivotPoint::MedianPoint,
             show_overlays: true,
             show_xray: false,
+            xray_opacity: 0.42,
             show_triangulation: false,
             show_nav_hud: true,
             show_grid: true,

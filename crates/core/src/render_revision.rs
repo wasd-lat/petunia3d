@@ -229,15 +229,15 @@ mod tests {
     #[test]
     fn identical_scene_same_fingerprint() {
         let p = cube_project();
-        let a = fingerprint_scene(&p, &[], flags(Shading::Smooth));
-        let b = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let a = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
+        let b = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         assert_eq!(a, b);
     }
 
     #[test]
     fn shading_flag_changes_mesh_fingerprint() {
         let p = cube_project();
-        let a = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let a = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         let b = fingerprint_scene(&p, &[], flags(Shading::Wireframe));
         assert_ne!(a.mesh, b.mesh);
     }
@@ -245,27 +245,27 @@ mod tests {
     #[test]
     fn vertex_move_changes_fingerprint_without_count_change() {
         let mut p = cube_project();
-        let a = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let a = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         p.assets[0].mesh.verts[0].pos = [5.0, 0.0, 0.0];
-        let b = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let b = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         assert_ne!(a.mesh, b.mesh);
     }
 
     #[test]
     fn selection_change_invalidates() {
         let mut p = cube_project();
-        let a = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let a = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         p.assets[0].mesh.verts[0].selected = true;
-        let b = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let b = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         assert_ne!(a.mesh, b.mesh);
     }
 
     #[test]
     fn visibility_change_invalidates() {
         let mut p = cube_project();
-        let a = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let a = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         p.assets[0].visible = false;
-        let b = fingerprint_scene(&p, &[], flags(Shading::Smooth));
+        let b = fingerprint_scene(&p, &[], flags(Shading::MaterialPreview));
         assert_ne!(a.mesh, b.mesh);
     }
 }

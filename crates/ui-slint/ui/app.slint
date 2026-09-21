@@ -547,6 +547,10 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> asset-library-visible: false;
     in-out property <bool> is-orthographic: false;
     in-out property <bool> is-wireframe: false;
+    in-out property <string> shading-mode: "solid";
+    in-out property <float> xray-opacity: 0.42;
+    in-out property <bool> shading-popover-open: false;
+    in-out property <bool> show-xray: false;
     in-out property <bool> gizmo-visible: false;
     in-out property <bool> selection-overlay-visible: false;
     in-out property <string> selection-outline-commands: "";
@@ -727,6 +731,10 @@ export component PetuniaSlintShell inherits Window {
     callback asset-library-requested;
     callback toggle-projection-requested;
     callback toggle-wireframe-requested;
+    callback shading-mode-set(string);
+    callback xray-opacity-set(float);
+    callback shading-popover-toggled(bool);
+    callback toggle-xray-requested;
     callback reset-camera-requested;
     callback save-active-as-asset-requested;
     callback place-asset-requested(string);
@@ -1291,12 +1299,6 @@ export component PetuniaSlintShell inherits Window {
                                 clicked => { root.toggle-projection-requested(); }
                             }
                             ViewportBarButton {
-                                icon: IconSet.Box;
-                                label: "Wireframe";
-                                active: is-wireframe;
-                                clicked => { root.toggle-wireframe-requested(); }
-                            }
-                            ViewportBarButton {
                                 icon: IconSet.Maximize2;
                                 label: "Frame";
                                 active: false;
@@ -1308,6 +1310,40 @@ export component PetuniaSlintShell inherits Window {
                                 active: false;
                                 clicked => { root.reset-camera-requested(); }
                             }
+                            }
+
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+
+                            // Quatro modos de shading, cada um com pipeline real.
+                            HorizontalLayout {
+                                spacing: 3px;
+                                alignment: start;
+                            for mode in [
+                                { id: "wireframe", icon: IconSet.Box, label: "Wireframe" },
+                                { id: "solid", icon: IconSet.Square, label: "Solid" },
+                                { id: "material", icon: IconSet.Image, label: "Material preview" },
+                                { id: "rendered", icon: IconSet.Sparkles, label: "Rendered" },
+                            ]: ViewportBarButton {
+                                icon: mode.icon;
+                                label: mode.label;
+                                active: root.shading-mode == mode.id;
+                                clicked => { root.shading-mode-set(mode.id); }
+                            }
+                            }
+
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+
+                            ViewportBarButton {
+                                icon: IconSet.Eye;
+                                label: "X-Ray";
+                                active: root.show-xray;
+                                clicked => { root.toggle-xray-requested(); }
+                            }
+                            ViewportBarButton {
+                                icon: IconSet.Settings2;
+                                label: "Shading options";
+                                active: root.shading-popover-open;
+                                clicked => { root.shading-popover-toggled(!root.shading-popover-open); }
                             }
 
                             Rectangle { horizontal-stretch: 1; }
@@ -3260,6 +3296,126 @@ export component PetuniaSlintShell inherits Window {
                         ? root.menu-edit-items
                         : (root.menu-open == "view" ? root.menu-view-items : root.menu-window-items));
                 invoked(id) => { root.menu-item-invoked(id); }
+            }
+        }
+
+        // Popover de shading: só opções com backend real.
+        if shading-popover-open: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+
+            TouchArea {
+                clicked => { root.shading-popover-toggled(false); }
+            }
+
+            Rectangle {
+                x: min(max(8px, (parent.width - self.width) / 2), parent.width - self.width - 8px);
+                y: 54px;
+                width: 280px;
+                height: shading-options.preferred-height + 24px;
+                border-radius: 8px;
+                background: DesignTokens.surface-raised;
+                border-width: 1px;
+                border-color: DesignTokens.border;
+                drop-shadow-blur: 14px;
+                drop-shadow-color: #00000090;
+                drop-shadow-offset-y: 4px;
+
+                shading-options := VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "Shading";
+                        color: DesignTokens.text-primary;
+                        font-size: 12px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "Mode: \{root.shading-mode}";
+                        color: DesignTokens.text-muted;
+                        font-size: 10px;
+                    }
+
+                    Rectangle { height: 1px; background: DesignTokens.border; }
+
+                    Text {
+                        text: "X-Ray";
+                        color: DesignTokens.text-primary;
+                        font-size: 11px;
+                        font-weight: 600;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 24px;
+                        alignment: center;
+                        Text {
+                            text: "Opacity";
+                            color: DesignTokens.text-secondary;
+                            font-size: 10px;
+                            width: 56px;
+                            vertical-alignment: center;
+                        }
+                        Slider {
+                            horizontal-stretch: 1;
+                            minimum: 0.1;
+                            maximum: 0.9;
+                            value: root.xray-opacity;
+                            changed(value) => { root.xray-opacity-set(value); }
+                        }
+                        Text {
+                            text: "\{round(root.xray-opacity * 100)}%";
+                            color: DesignTokens.text-muted;
+                            font-size: 10px;
+                            width: 36px;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        height: 26px;
+                        border-radius: 4px;
+                        background: root.show-xray ? DesignTokens.accent : DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        accessible-role: checkbox;
+                        accessible-label: "X-Ray enabled";
+                        accessible-checked: root.show-xray;
+                        Text {
+                            text: root.show-xray ? "X-Ray on" : "X-Ray off";
+                            color: root.show-xray ? DesignTokens.canvas : DesignTokens.text-primary;
+                            font-size: 11px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.toggle-xray-requested(); } }
+                    }
+
+                    Rectangle { height: 1px; background: DesignTokens.border; }
+
+                    Rectangle {
+                        height: 26px;
+                        border-radius: 4px;
+                        background: root.is-wireframe ? DesignTokens.accent : DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        accessible-role: checkbox;
+                        accessible-label: "Wireframe overlay";
+                        accessible-checked: root.is-wireframe;
+                        Text {
+                            text: root.is-wireframe ? "Wireframe overlay on" : "Wireframe overlay off";
+                            color: root.is-wireframe ? DesignTokens.canvas : DesignTokens.text-primary;
+                            font-size: 11px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.toggle-wireframe-requested(); } }
+                    }
+                }
             }
         }
 

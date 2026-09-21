@@ -147,8 +147,11 @@ impl WgpuViewport {
             state.xray,
             state.show_triangulation,
             state.textured,
+            state.show_wireframe_overlay,
             state.selection_domain,
         );
+        self.renderer.set_xray_opacity(state.xray_opacity);
+        self.renderer.set_overlays(true, state.show_grid);
 
         let mut encoder = self
             .device
@@ -256,6 +259,8 @@ mod tests {
                         textured: false,
                         show_wireframe_overlay: false,
                         selection_domain: petunia_core::SelectionDomain::Object,
+                        xray_opacity: 0.42,
+                        show_grid: true,
                     },
                 );
                 assert!(img.is_ok());

@@ -47,7 +47,7 @@ pub enum ViewportGesture {
     Zoom { delta: f32 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewportRenderState {
     pub shading: petunia_render::Shading,
     pub xray: bool,
@@ -56,6 +56,10 @@ pub struct ViewportRenderState {
     pub show_wireframe_overlay: bool,
     /// Domínio de seleção: a camada de seleção precisa saber o que desenhar.
     pub selection_domain: petunia_core::SelectionDomain,
+    /// Opacidade da geometria em X-Ray.
+    pub xray_opacity: f32,
+    /// Overlays: grade e wireframe opcional sobre as faces.
+    pub show_grid: bool,
 }
 
 impl Default for ViewportRenderState {
@@ -67,6 +71,8 @@ impl Default for ViewportRenderState {
             textured: false,
             show_wireframe_overlay: false,
             selection_domain: petunia_core::SelectionDomain::Object,
+            xray_opacity: 0.42,
+            show_grid: true,
         }
     }
 }
@@ -267,6 +273,10 @@ pub struct ShellViewModel {
     pub current_theme: String,
     pub is_orthographic: bool,
     pub is_wireframe: bool,
+    pub shading_mode: String,
+    pub xray_opacity: f32,
+    pub show_xray: bool,
+    pub shading_popover_open: bool,
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
     pub selection_overlay: SelectionOverlayModel,
@@ -435,6 +445,10 @@ impl ShellViewModel {
             current_theme: state.ui.active_theme_id.clone(),
             is_orthographic: state.session.camera.proj == petunia_core::Projection::Ortho,
             is_wireframe: state.session.show_wireframe_overlay,
+            shading_mode: state.shading.id().to_string(),
+            xray_opacity: state.session.xray_opacity,
+            show_xray: state.session.show_xray,
+            shading_popover_open: false,
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
             selection_overlay: SelectionOverlayModel::default(),
@@ -621,6 +635,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub context_menu: Option<ContextMenuState>,
     /// Menu da barra superior aberto, se houver.
     pub menu_open: Option<MenuKind>,
+    /// Popover de opções de shading aberto.
+    pub shading_popover_open: bool,
     /// Forma ancorada (Line/Rectangle) em curso: canto inicial em pixels do canvas.
     pub shape_anchor: Option<(u32, u32)>,
     /// Plano de corte (Slice) ativo: âncora em pixels lógicos da viewport.
@@ -810,6 +826,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             shape_anchor: None,
             slice_anchor: None,
             loop_cut: None,
+            shading_popover_open: false,
             autosave: petunia_core::AutosaveService::default(),
             pending_recovery: None,
             position: [
@@ -1154,6 +1171,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             textured: self.state.session.textured,
             show_wireframe_overlay: self.state.session.show_wireframe_overlay,
             selection_domain: self.state.selection_domain(),
+            xray_opacity: self.state.session.xray_opacity,
+            show_grid: self.state.session.show_grid,
         };
         self.viewport.render_frame(
             &self.state.project,
@@ -1524,6 +1543,42 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return false;
         }
         self.state.finish_paint_stroke(true);
+        true
+    }
+
+    /// Define o modo de sombreamento da viewport pelo id estável.
+    ///
+    /// Cada modo corresponde a um pipeline real: Wireframe não preenche,
+    /// Solid usa o estúdio da viewport, MaterialPreview amostra a textura e
+    /// Rendered usa a luz da cena.
+    pub fn set_shading_mode(&mut self, id: &str) -> bool {
+        let Some(mode) = petunia_core::Shading::from_id(id) else {
+            return false;
+        };
+        if self.state.shading == mode {
+            return false;
+        }
+        self.state.shading = mode;
+        // Material/Rendered dependem de amostrar o material.
+        if mode.samples_material() {
+            self.state.session.textured = true;
+        }
+        self.state.set_status(format!("Shading: {}", mode.id()));
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Opacidade da geometria em X-Ray.
+    pub fn set_xray_opacity(&mut self, opacity: f32) -> bool {
+        if !opacity.is_finite() {
+            return false;
+        }
+        let clamped = opacity.clamp(0.1, 0.9);
+        if (clamped - self.state.session.xray_opacity).abs() < f32::EPSILON {
+            return false;
+        }
+        self.state.session.xray_opacity = clamped;
+        self.state.mark_dirty();
         true
     }
 
@@ -3166,6 +3221,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.rename_active = true;
             vm.rename_value = draft.clone();
         }
+        vm.shading_popover_open = self.shading_popover_open;
         if let Some(menu) = self.context_menu {
             vm.context_menu_open = true;
             vm.context_menu_x = menu.x;
@@ -3832,6 +3888,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
         textured: state.session.textured,
         show_wireframe_overlay: state.session.show_wireframe_overlay,
         selection_domain: state.selection_domain(),
+        xray_opacity: state.session.xray_opacity,
+        show_grid: state.session.show_grid,
     };
     if let Some(frame) = viewport.render_frame(&state.project, &state.session.camera, render_state)
     {
@@ -3963,6 +4021,10 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_selection_domain(domain_str.into());
     window.set_is_orthographic(vm.is_orthographic);
     window.set_is_wireframe(vm.is_wireframe);
+    window.set_shading_mode(vm.shading_mode.as_str().into());
+    window.set_show_xray(vm.show_xray);
+    window.set_shading_popover_open(vm.shading_popover_open);
+    window.set_xray_opacity(vm.xray_opacity);
     window.set_asset_library_visible(vm.asset_library_visible);
     window.set_paint_color(slint::Color::from_argb_f32(
         1.0,
@@ -5007,6 +5069,50 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                     window.set_viewport_image(frame);
                 }
                 bridge.publish_canvas_image(&window);
+            }
+        }
+    });
+
+    let shading_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_shading_mode_set(move |id| {
+        if let Ok(mut bridge) = shading_bridge.lock() {
+            bridge.set_shading_mode(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let xray_opacity_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_xray_opacity_set(move |opacity| {
+        if let Ok(mut bridge) = xray_opacity_bridge.lock() {
+            bridge.set_xray_opacity(opacity);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let shading_popover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_shading_popover_toggled(move |open| {
+        if let Ok(mut bridge) = shading_popover_bridge.lock() {
+            bridge.shading_popover_open = open;
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
             }
         }
     });
@@ -8380,6 +8486,85 @@ mod tests {
                 "triangulação ainda pinta seleção: {color:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_four_shading_modes_are_distinct_and_reachable() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert_eq!(bridge.view_model().shading_mode, "solid");
+
+        // Cada modo tem semântica própria: preencher, amostrar material e usar
+        // a luz da cena são eixos separados.
+        assert!(petunia_core::Shading::Solid.fills_faces());
+        assert!(!petunia_core::Shading::Solid.samples_material());
+        assert!(!petunia_core::Shading::Solid.uses_scene_light());
+
+        assert!(!petunia_core::Shading::Wireframe.fills_faces());
+
+        assert!(petunia_core::Shading::MaterialPreview.fills_faces());
+        assert!(petunia_core::Shading::MaterialPreview.samples_material());
+        assert!(!petunia_core::Shading::MaterialPreview.uses_scene_light());
+
+        assert!(petunia_core::Shading::Rendered.uses_scene_light());
+
+        for mode in petunia_core::Shading::ALL {
+            assert!(bridge.set_shading_mode(mode.id()), "{}", mode.id());
+            assert_eq!(bridge.view_model().shading_mode, mode.id());
+            assert_eq!(bridge.state.shading, mode);
+            // Material e Rendered precisam amostrar o material de fato.
+            if mode.samples_material() {
+                assert!(bridge.state.session.textured, "{}", mode.id());
+            }
+        }
+
+        assert!(!bridge.set_shading_mode("nope"));
+        assert_eq!(
+            bridge.state.shading,
+            petunia_core::Shading::Rendered,
+            "valor inválido não altera o modo"
+        );
+    }
+
+    #[test]
+    fn xray_opacity_is_clamped_and_reported() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_xray_opacity(0.7));
+        assert!((bridge.view_model().xray_opacity - 0.7).abs() < 1.0e-6);
+
+        assert!(bridge.set_xray_opacity(5.0));
+        assert!((bridge.view_model().xray_opacity - 0.9).abs() < 1.0e-6);
+        assert!(bridge.set_xray_opacity(-1.0));
+        assert!((bridge.view_model().xray_opacity - 0.1).abs() < 1.0e-6);
+
+        assert!(!bridge.set_xray_opacity(f32::NAN));
+        assert!((bridge.view_model().xray_opacity - 0.1).abs() < 1.0e-6);
+        assert!(!bridge.set_xray_opacity(0.1), "sem mudança real");
+    }
+
+    #[test]
+    fn the_scene_carries_a_real_light_for_rendered_mode() {
+        let project = petunia_project::Project::new();
+        let light = project.active_light().expect("luz padrão da cena");
+        assert!(light.enabled);
+        assert_eq!(light.kind, petunia_project::LightKind::Directional);
+
+        // A direção é normalizada e nunca degenera.
+        let direction = light.normalized_direction();
+        let length = (direction[0].powi(2) + direction[1].powi(2) + direction[2].powi(2)).sqrt();
+        assert!((length - 1.0).abs() < 1.0e-4);
+
+        let degenerate = petunia_project::Light::directional("Zero", [0.0, 0.0, 0.0]);
+        assert_eq!(degenerate.normalized_direction(), [0.0, 1.0, 0.0]);
+        let hostile = petunia_project::Light::directional("NaN", [f32::NAN, 1.0, 0.0]);
+        assert_eq!(hostile.normalized_direction(), [0.0, 1.0, 0.0]);
+
+        // Desabilitar todas as luzes faz o Rendered cair no estúdio da viewport,
+        // nunca renderizar preto.
+        let mut project = petunia_project::Project::new();
+        for light in &mut project.lights {
+            light.enabled = false;
+        }
+        assert!(project.active_light().is_none());
     }
 
     #[test]

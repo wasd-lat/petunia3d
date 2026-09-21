@@ -27,9 +27,7 @@ pub use animation::{
 };
 pub use autosave::{AutosaveConfig, AutosaveService, RecoveryInfo, SessionLockInfo};
 pub use export::{ExportError, export_gltf, export_obj};
-pub use import_gltf::{
-    GltfImportError, GltfSummary, GlbMeshes, import_glb_bytes, parse_gltf_json,
-};
+pub use import_gltf::{GlbMeshes, GltfImportError, GltfSummary, import_glb_bytes, parse_gltf_json};
 pub use import_obj::{ObjImportError, import_obj_bytes};
 pub use io_atomic::{AtomicIoError, TempScope, atomic_write};
 pub use material::{AlphaMode, Material, ShaderProfile, TextureChannel};
@@ -244,8 +242,7 @@ impl Asset {
     /// sobre `mesh`, preservando a natureza não destrutiva da pilha.
     pub fn evaluated_mesh(&self) -> Mesh {
         let key = (
-            self.mesh.verts.len() as u64 * 1_000_003
-                + self.mesh.faces.len() as u64,
+            self.mesh.verts.len() as u64 * 1_000_003 + self.mesh.faces.len() as u64,
             self.modifiers.len() as u64,
         );
         if let Some((k0, k1, cached)) = &self.eval_cache
@@ -480,6 +477,76 @@ fn default_project_name() -> String {
 }
 
 /// Projeto: metadados, lista de assets com UUID persistente, paleta, coleções, anotações e medições.
+/// Tipo de luz de cena (P3D-134). V1 tem direcional; os demais entram depois.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum LightKind {
+    /// Direcional: só a direção importa, como o sol.
+    #[default]
+    Directional,
+    /// Ponto: posição + alcance.
+    Point,
+}
+
+impl LightKind {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Directional => "directional",
+            Self::Point => "point",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "directional" => Some(Self::Directional),
+            "point" => Some(Self::Point),
+            _ => None,
+        }
+    }
+}
+
+/// Luz de cena usada pelo modo Rendered da viewport.
+///
+/// A direção é normalizada no renderer; `intensity` escala a contribuição
+/// difusa e `color` tinge a luz. Sem luz habilitada o Rendered cai no estúdio
+/// da viewport em vez de renderizar preto.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Light {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: LightKind,
+    pub direction: [f32; 3],
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub enabled: bool,
+}
+
+impl Light {
+    pub fn directional(name: impl Into<String>, direction: [f32; 3]) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            kind: LightKind::Directional,
+            direction,
+            color: [1.0, 1.0, 1.0],
+            intensity: 1.0,
+            enabled: true,
+        }
+    }
+
+    /// Direção normalizada, caindo no eixo Y quando degenerada.
+    pub fn normalized_direction(&self) -> [f32; 3] {
+        let [x, y, z] = self.direction;
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return [0.0, 1.0, 0.0];
+        }
+        let length = (x * x + y * y + z * z).sqrt();
+        if length <= 1.0e-5 {
+            return [0.0, 1.0, 0.0];
+        }
+        [x / length, y / length, z / length]
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Project {
     #[serde(default = "Uuid::new_v4")]
@@ -507,6 +574,8 @@ pub struct Project {
     #[serde(default)]
     pub materials: Vec<Material>,
     #[serde(default)]
+    pub lights: Vec<Light>,
+    #[serde(default)]
     pub skeletons: Vec<Skeleton>,
     #[serde(default)]
     pub animations: Vec<AnimationAsset>,
@@ -525,6 +594,13 @@ pub struct Project {
     pub transform_revision: u64,
 }
 
+impl Project {
+    /// Primeira luz habilitada da cena, se houver.
+    pub fn active_light(&self) -> Option<&Light> {
+        self.lights.iter().find(|light| light.enabled)
+    }
+}
+
 impl Default for Project {
     fn default() -> Self {
         Self {
@@ -541,6 +617,9 @@ impl Default for Project {
             annotations_locked: false,
             measurements_visible: true,
             materials: vec![Material::new("Default Material")],
+            // Uma direcional padrão: o modo Rendered precisa de luz real, e sem
+            // nenhuma a cena renderizaria preta.
+            lights: vec![Light::directional("Key Light", [0.4, 0.9, 0.6])],
             skeletons: Vec::new(),
             animations: Vec::new(),
             topology_revision: 0,
@@ -614,6 +693,7 @@ impl Project {
             annotations_locked: false,
             measurements_visible: true,
             materials: vec![def_mat],
+            lights: vec![Light::directional("Key Light", [0.4, 0.9, 0.6])],
             skeletons: Vec::new(),
             animations: Vec::new(),
             topology_revision: 0,
