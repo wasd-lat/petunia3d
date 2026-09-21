@@ -550,6 +550,12 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> shading-mode: "solid";
     in-out property <float> xray-opacity: 0.42;
     in-out property <bool> shading-popover-open: false;
+    in-out property <bool> operation-hud-active: false;
+    in-out property <string> operation-hud-title: "";
+    in-out property <[string]> operation-hud-lines: [];
+    in-out property <string> operation-hud-subject: "";
+    in-out property <string> operation-hud-hint: "";
+    in-out property <string> context-hint: "";
     in-out property <int> gizmo-hover-axis: -1;
     in-out property <int> gizmo-active-axis: -1;
     in-out property <bool> show-xray: false;
@@ -3346,6 +3352,60 @@ export component PetuniaSlintShell inherits Window {
                         ? root.menu-edit-items
                         : (root.menu-open == "view" ? root.menu-view-items : root.menu-window-items));
                 invoked(id) => { root.menu-item-invoked(id); }
+            }
+        }
+
+        // Mini HUD da operação: o que está acontecendo, com que valor, e como
+        // confirmar. Fica acima da status bar e nunca no centro da geometria.
+        if operation-hud-active: Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: parent.height - self.height - 48px;
+            width: max(operation-hud-content.preferred-width + 24px, 220px);
+            height: operation-hud-content.preferred-height + 20px;
+            border-radius: 8px;
+            background: DesignTokens.surface-raised;
+            border-width: 1px;
+            border-color: DesignTokens.accent;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000080;
+            drop-shadow-offset-y: 3px;
+
+            operation-hud-content := VerticalLayout {
+                padding: 10px;
+                spacing: 4px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: center;
+                    Text {
+                        text: root.operation-hud-title;
+                        color: DesignTokens.accent;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.operation-hud-subject;
+                        color: DesignTokens.text-muted;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                for line in root.operation-hud-lines: Text {
+                    text: line;
+                    color: DesignTokens.text-primary;
+                    font-size: 12px;
+                    font-weight: 600;
+                    font-family: "monospace";
+                }
+
+                Text {
+                    text: root.operation-hud-hint;
+                    color: DesignTokens.text-muted;
+                    font-size: 9px;
+                }
             }
         }
 

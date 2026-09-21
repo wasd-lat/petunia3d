@@ -277,6 +277,15 @@ pub struct ShellViewModel {
     pub xray_opacity: f32,
     pub show_xray: bool,
     pub shading_popover_open: bool,
+    /// HUD da operação: título, linhas de valor e dica de controles.
+    pub operation_hud_active: bool,
+    pub operation_hud_title: String,
+    pub operation_hud_lines: Vec<String>,
+    pub operation_hud_hint: String,
+    /// Feedback curto abaixo da ação ("Moving 3 vertices").
+    pub operation_hud_subject: String,
+    /// Barra de status contextual.
+    pub context_hint: String,
     pub gizmo_hover_axis: i32,
     pub gizmo_active_axis: i32,
     pub asset_library_visible: bool,
@@ -451,6 +460,12 @@ impl ShellViewModel {
             xray_opacity: state.session.xray_opacity,
             show_xray: state.session.show_xray,
             shading_popover_open: false,
+            operation_hud_active: false,
+            operation_hud_title: String::new(),
+            operation_hud_lines: Vec::new(),
+            operation_hud_hint: String::new(),
+            operation_hud_subject: String::new(),
+            context_hint: String::new(),
             gizmo_hover_axis: -1,
             gizmo_active_axis: -1,
             asset_library_visible: false,
@@ -1327,6 +1342,138 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.viewport_size = [width as f32, height as f32];
         self.state.session.camera.aspect = width as f32 / height as f32;
         self.state.mark_dirty();
+    }
+
+    /// Preenche o HUD da operação e a barra de status contextual.
+    ///
+    /// O HUD diz *o que está acontecendo e com que valor*; a barra diz *como
+    /// controlar*. Os dois nunca repetem a mesma informação.
+    fn fill_operation_hud(&self, vm: &mut ShellViewModel) {
+        let axis_name = |index: usize| ["X", "Y", "Z"][index.min(2)];
+
+        // Ferramenta paramétrica modal.
+        if let Some(kind) = self.tool_modal {
+            let (minimum, maximum) = kind.bounds();
+            let _ = (minimum, maximum);
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = kind.title().to_string();
+            vm.operation_hud_lines =
+                vec![format!("{}   {:.3}", kind.label(), self.tool_modal_value)];
+            vm.operation_hud_subject = self
+                .state
+                .project
+                .active_mesh()
+                .map(|mesh| {
+                    let faces = mesh.faces.iter().filter(|face| face.selected).count();
+                    let verts = mesh.verts.iter().filter(|vert| vert.selected).count();
+                    if faces > 0 {
+                        format!("{faces} face(s)")
+                    } else {
+                        format!("{verts} point(s)")
+                    }
+                })
+                .unwrap_or_default();
+            vm.operation_hud_hint = format!(
+                "{} Confirm   Esc Cancel   Shift Precision",
+                if self.is_instant_tool_mode() {
+                    "Click"
+                } else {
+                    "Release"
+                }
+            );
+            vm.context_hint = format!("{} · {}", kind.title(), vm.operation_hud_hint);
+            return;
+        }
+
+        // Loop Cut.
+        if let Some(session) = &self.loop_cut {
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = "Loop Cut".to_string();
+            vm.operation_hud_lines = vec![
+                format!("Cuts    {}", session.cuts),
+                format!("Slide   {:.3}", session.slide),
+            ];
+            vm.operation_hud_subject = format!("{} cut(s)", session.cuts);
+            vm.operation_hud_hint = "Enter Confirm   Esc Cancel   Drag to slide".to_string();
+            vm.context_hint = format!("Loop Cut · {}", vm.operation_hud_hint);
+            return;
+        }
+
+        // Transformação por arrasto (gizmo ou ferramenta ativa).
+        if let Some(modal) = self.state.session.tools.modal.as_ref() {
+            let title = match modal.kind {
+                petunia_core::ModalKind::Move => "Move",
+                petunia_core::ModalKind::Rotate => "Rotate",
+                petunia_core::ModalKind::Scale => "Scale",
+                petunia_core::ModalKind::Extrude => "Extrude",
+                petunia_core::ModalKind::ExtrudeIndividual => "Extrude Individual",
+                petunia_core::ModalKind::Inset => "Inset",
+                petunia_core::ModalKind::Bevel => "Bevel",
+                petunia_core::ModalKind::PushPull => "Push/Pull",
+            };
+            let mut lines = Vec::new();
+            match modal.constraint {
+                petunia_core::ModalConstraint::Axis(i) => {
+                    lines.push(format!("{}   {:.3}", axis_name(i), modal.value));
+                }
+                petunia_core::ModalConstraint::Plane(i) => {
+                    lines.push(format!(
+                        "Plane {}{}   {:.3}",
+                        axis_name((i + 1) % 3),
+                        axis_name((i + 2) % 3),
+                        modal.value
+                    ));
+                }
+                petunia_core::ModalConstraint::Free => {
+                    let components = modal.components;
+                    if modal.kind == petunia_core::ModalKind::Move {
+                        lines.push(format!("X   {:.3}", components.x));
+                        lines.push(format!("Y   {:.3}", components.y));
+                        lines.push(format!("Z   {:.3}", components.z));
+                    } else {
+                        lines.push(format!("Value   {:.3}", modal.value));
+                    }
+                }
+            }
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = title.to_string();
+            vm.operation_hud_lines = lines;
+            vm.operation_hud_subject = format!(
+                "{} · {}",
+                if self.state.selection_domain() == petunia_core::SelectionDomain::Object {
+                    "object"
+                } else {
+                    "selection"
+                },
+                match modal.constraint {
+                    petunia_core::ModalConstraint::Axis(i) => format!("{} axis", axis_name(i)),
+                    petunia_core::ModalConstraint::Plane(i) => {
+                        format!("{}{} plane", axis_name((i + 1) % 3), axis_name((i + 2) % 3))
+                    }
+                    petunia_core::ModalConstraint::Free => "free".to_string(),
+                }
+            );
+            vm.operation_hud_hint = "Enter Confirm   Esc Cancel   Shift Precision".to_string();
+            vm.context_hint = format!("{title} · {}", vm.operation_hud_hint);
+            return;
+        }
+
+        // Em repouso: a barra informa o domínio e a navegação.
+        vm.operation_hud_active = false;
+        vm.context_hint = match self.state.selection_domain() {
+            petunia_core::SelectionDomain::Object => {
+                "Selection: Object   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+            petunia_core::SelectionDomain::Vertex => {
+                "Selection: Point   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+            petunia_core::SelectionDomain::Edge => {
+                "Selection: Edge   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+            petunia_core::SelectionDomain::Face => {
+                "Selection: Face   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+        };
     }
 
     /// Orbita a câmera, usando a seleção como pivô quando existe.
@@ -3438,6 +3585,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.shading_popover_open = self.shading_popover_open;
         vm.gizmo_hover_axis = self.gizmo_hover.map_or(-1, |h| h.axis() as i32);
         vm.gizmo_active_axis = self.gizmo_drag.map_or(-1, |h| h.axis() as i32);
+        self.fill_operation_hud(&mut vm);
         if let Some(menu) = self.context_menu {
             vm.context_menu_open = true;
             vm.context_menu_x = menu.x;
@@ -4255,6 +4403,17 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_shading_popover_open(vm.shading_popover_open);
     window.set_gizmo_hover_axis(vm.gizmo_hover_axis);
     window.set_gizmo_active_axis(vm.gizmo_active_axis);
+    window.set_operation_hud_active(vm.operation_hud_active);
+    window.set_operation_hud_title(vm.operation_hud_title.as_str().into());
+    window.set_operation_hud_subject(vm.operation_hud_subject.as_str().into());
+    window.set_operation_hud_hint(vm.operation_hud_hint.as_str().into());
+    window.set_context_hint(vm.context_hint.as_str().into());
+    let hud_lines: Vec<slint::SharedString> = vm
+        .operation_hud_lines
+        .iter()
+        .map(|line| line.as_str().into())
+        .collect();
+    window.set_operation_hud_lines(hud_lines.as_slice().into());
     window.set_xray_opacity(vm.xray_opacity);
     window.set_asset_library_visible(vm.asset_library_visible);
     window.set_paint_color(slint::Color::from_argb_f32(
@@ -8947,6 +9106,83 @@ mod tests {
         let target = bridge.state.session.camera.target;
         assert!(bridge.orbit_viewport(10.0, 0.0));
         assert_eq!(bridge.state.session.camera.target, target);
+    }
+
+    #[test]
+    fn the_operation_hud_reports_the_real_value_and_the_axis() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        // Extrude exige faces selecionadas, não vértices.
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        // Em repouso o HUD some e a barra informa domínio e navegação.
+        let vm = bridge.view_model();
+        assert!(!vm.operation_hud_active);
+        assert!(
+            vm.context_hint.contains("Selection:"),
+            "veio: {}",
+            vm.context_hint
+        );
+        assert!(vm.context_hint.contains("Orbit"));
+
+        // Com ferramenta aberta o HUD mostra título, valor e como confirmar.
+        bridge.execute_core_command("model.extrude").unwrap();
+        let vm = bridge.view_model();
+        assert!(vm.operation_hud_active);
+        assert_eq!(vm.operation_hud_title, "Extrude");
+        assert_eq!(vm.operation_hud_lines.len(), 1);
+        assert!(
+            vm.operation_hud_lines[0].starts_with("Distance"),
+            "veio: {}",
+            vm.operation_hud_lines[0]
+        );
+        assert!(vm.operation_hud_hint.contains("Confirm"));
+        assert!(vm.operation_hud_hint.contains("Cancel"));
+        assert!(!vm.operation_hud_subject.is_empty());
+
+        // O valor do HUD acompanha o arrasto.
+        bridge.scrub_tool_modal(-40.0, false);
+        let vm = bridge.view_model();
+        assert!(
+            vm.operation_hud_lines[0] != "Distance   0.000",
+            "o HUD precisa refletir o valor real: {}",
+            vm.operation_hud_lines[0]
+        );
+
+        bridge.commit_tool_modal();
+        assert!(!bridge.view_model().operation_hud_active);
+    }
+
+    #[test]
+    fn the_operation_hud_shows_the_axis_constraint() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+        let gizmo = bridge.view_model().gizmo;
+        let numbers: Vec<f32> = gizmo
+            .y_commands
+            .split_whitespace()
+            .filter_map(|token| token.parse::<f32>().ok())
+            .collect();
+        assert!(bridge.begin_gizmo_drag(numbers[2], numbers[3]));
+
+        let vm = bridge.view_model();
+        assert!(vm.operation_hud_active);
+        assert_eq!(vm.operation_hud_title, "Move");
+        assert!(
+            vm.operation_hud_lines[0].starts_with('Y'),
+            "a linha precisa nomear o eixo: {}",
+            vm.operation_hud_lines[0]
+        );
+        assert!(vm.operation_hud_subject.contains("Y axis"));
+        assert!(vm.context_hint.contains("Move"));
+        bridge.end_gizmo_drag();
     }
 
     #[test]
