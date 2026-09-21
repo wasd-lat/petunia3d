@@ -27,6 +27,7 @@ ao estado de MVP realmente utilizável e, depois, a Release Candidate.
 | `03-interaction-manifest.md` | Inventário obrigatório de elementos interativos e regras de cobertura. |
 | `04-issue-ledger.md` | Ledger de issues do Gauntlet. |
 | `05-scorecard.md` | Scorecard final por área. |
+| `06-full-mvp-functional-remediation.md` | Remediação funcional completa do MVP e shell moderno obrigatório (medidas, tokens e critérios de done). |
 
 ## Regra central
 
