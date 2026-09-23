@@ -41,6 +41,7 @@ Roteador central de intenção e mapa canônico de navegação do projeto **Petu
 - [Padrões de Código e Engenharia](development/coding-standards.md) — Diretrizes de Rust, `rustfmt` e `clippy`
 - [Estratégia de Testes e Conformance](development/testing-strategy.md) — Pirâmide de testes, gates e validações
 - [Plano e evidências de interação premium](development/premium-interaction-plan.md) — auditoria atual e critérios pendentes
+- [Plano de Context, workspaces e viewport](development/workspace-inspector-implementation-plan.md) — arquitetura compartilhada e próximo recorte MODEL/viewport
 - [Relatório de Evidências Gauntlet](GAUNTLET.md) — Histórico de rodadas de validação, benchmarks e métricas
 - [Governança do Repositório](governance/repository-governance.md) — Políticas de branch, commits convencionais e PRs
 - [Contrato de Segurança e Modelo de Confiança](security/security-contract.md) — Limites de confiança e sanitização de I/O

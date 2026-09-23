@@ -9,6 +9,7 @@
 - **Frontend de produção**: `petunia_ui_slint` (Slint 1.18) — shell declarativo, 169 testes unitários, bridge de intents, viewport WGPU/software fallback. UI egui (`crates/ui/`) arquivada como legado de transição (`--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`).
 - Context methodology: **Lean Progressive Context (LPC)**
 - Last updated: `2026-09-23`
+- Current planning focus: [Context/workspaces/viewport](docs/development/workspace-inspector-implementation-plan.md), com próxima discussão restrita a MODEL e viewport. O plano é proposta, não implementação nem reabertura silenciosa das decisões de Paint/UV.
 
 ### Retomada e publicação de 23/09/2026
 
@@ -211,7 +212,14 @@ Evidence is preserved in `.prumo/history/premium/`, [`docs/GAUNTLET.md`](file://
 
 ## Next action
 
-**Iniciativa Paint (decisão 2026-09-16)** — precede a Wave 11. Branches
+**Prioridade de trabalho solicitada em 23/09/2026:** discutir e refinar somente
+MODEL e viewport, começando pelas fases 1–4 do
+[plano de Context/workspaces](docs/development/workspace-inspector-implementation-plan.md).
+O plano completo registra PAINT/UV para preservar a arquitetura compartilhada,
+mas não autoriza sua implementação nesta rodada.
+
+**Iniciativa Paint (decisão 2026-09-16)** — permanece no roadmap canônico antes
+da Wave 11. Branches
 `paint/core-engine` (motor, descriptors, effects, graph headless) e
 `paint/ui-redesign` (layout mini-Photoshop, painel Layers/Brush/Effects).
 

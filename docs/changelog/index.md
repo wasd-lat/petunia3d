@@ -5,6 +5,9 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Planejado — arquitetura de Context e workspaces (23/09/2026)
+- Plano incremental de shell rolável e seções compartilhadas, seguido por hierarquia MODEL e deduplicação das barras da viewport; PAINT/UV ficam documentados para fase posterior, sujeitos ao Livro Vivo.
+
 ### Corrigido — integração Paint/UV e viewport (23/09/2026)
 - A projeção de tinta 3D e o picking UV usam triangulação correta de polígonos côncavos; o Paint não alcança o vazio da concavidade.
 - A cor escolhida no Slint chega ao pincel real; o conta-gotas 3D amostra a textura composta e mantém os dois caminhos de cor sincronizados.
