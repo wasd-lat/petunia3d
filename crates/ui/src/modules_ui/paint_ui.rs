@@ -22,7 +22,7 @@
 use egui::{
     Color32, ComboBox, Id, Rect, RichText, ScrollArea, Sense, Slider, StrokeKind, TextEdit, Ui,
 };
-use petunia_config::text_id;
+use petunia_config::{TextId, text_id};
 use petunia_core::AppState;
 use petunia_module_paint::{BrushType, PaintModule};
 use petunia_module_uv::UvModule;
@@ -38,6 +38,24 @@ use crate::widgets::{self, PetuniaIconButton, PetuniaToolbarButton};
 
 /// Chave da textura da tela 2D na memória do `Context`.
 const CANVAS_TEXTURE_ID: &str = "paint.canvas_tex";
+
+const FILL_SCOPES: [petunia_core::FillScope; 5] = [
+    petunia_core::FillScope::ConnectedPixels,
+    petunia_core::FillScope::Face,
+    petunia_core::FillScope::SelectedFaces,
+    petunia_core::FillScope::UvIsland,
+    petunia_core::FillScope::Object,
+];
+
+fn fill_scope_label(scope: petunia_core::FillScope) -> TextId {
+    match scope {
+        petunia_core::FillScope::ConnectedPixels => text_id::PAINT_FILL_CONNECTED_PIXELS,
+        petunia_core::FillScope::Face => text_id::PAINT_FILL_FACE,
+        petunia_core::FillScope::SelectedFaces => text_id::PAINT_FILL_SELECTED_FACES,
+        petunia_core::FillScope::UvIsland => text_id::PAINT_FILL_UV_ISLAND,
+        petunia_core::FillScope::Object => text_id::PAINT_FILL_OBJECT,
+    }
+}
 
 /// Modos de mistura oferecidos pelo seletor, na ordem de exibição.
 ///
@@ -788,6 +806,26 @@ fn draw_brush_block(ui: &mut Ui, state: &mut AppState) {
         state.mark_dirty();
     }
 
+    if state.paint_brush_kind == 3 {
+        ui.horizontal(|ui| {
+            ui.label(state.t_id(text_id::PAINT_FILL_SCOPE));
+            let mut scope_changed = false;
+            ComboBox::from_id_salt("paint_fill_scope")
+                .selected_text(state.t_id(fill_scope_label(state.fill_scope)))
+                .show_ui(ui, |ui| {
+                    for scope in FILL_SCOPES {
+                        let label = state.t_id(fill_scope_label(scope));
+                        scope_changed |= ui
+                            .selectable_value(&mut state.fill_scope, scope, label)
+                            .changed();
+                    }
+                });
+            if scope_changed {
+                state.mark_dirty();
+            }
+        });
+    }
+
     ui.horizontal(|ui| {
         let fill_label = state.t("paint.fill_sel");
         if ui
@@ -1147,25 +1185,72 @@ fn canvas_single_dab(
     brush: BrushType,
     response: &egui::Response,
 ) {
-    if !(response.dragged() || response.clicked()) {
+    let activated = if brush == BrushType::Fill {
+        response.clicked()
+    } else {
+        response.dragged() || response.clicked()
+    };
+    if !activated {
         return;
     }
     let Some(pos) = response.interact_pointer_pos() else {
         return;
     };
-    if response.drag_started() || response.clicked() {
-        state.checkpoint("canvas brush");
-    }
     let (px, py) = view.texel(pos);
-    let mut settings = state.brush_settings();
-    settings.kind = brush;
-    PaintModule::canvas_brush_with_settings(state, px, py, settings);
+    if brush == BrushType::Fill {
+        fill_canvas_at(state, view, px, py);
+    } else {
+        if response.drag_started() || response.clicked() {
+            state.checkpoint("canvas brush");
+        }
+        let mut settings = state.brush_settings();
+        settings.kind = brush;
+        PaintModule::canvas_brush_with_settings(state, px, py, settings);
+    }
     if brush == BrushType::Eyedropper {
         state.set_status(state.t("paint.picked"));
     }
     if response.drag_stopped() {
         state.emit_mesh_changed();
     }
+}
+
+/// Applies the current Fill scope at the clicked texel on the UV canvas.
+fn fill_canvas_at(state: &mut AppState, view: CanvasView, x: u32, y: u32) -> bool {
+    if state.project.active().is_none() {
+        return false;
+    }
+    let u = (x as f32 + 0.5) / view.w as f32;
+    let v = 1.0 - (y as f32 + 0.5) / view.h as f32;
+    let face_hint = UvModule::uv_hit(state, u, v);
+    let scope = state.fill_scope;
+    let has_target = match scope {
+        petunia_core::FillScope::ConnectedPixels | petunia_core::FillScope::Object => true,
+        petunia_core::FillScope::Face => face_hint.is_some_and(|face| {
+            state
+                .project
+                .active_mesh()
+                .is_some_and(|mesh| mesh.faces.get(face).is_some())
+        }),
+        petunia_core::FillScope::SelectedFaces => state
+            .project
+            .active_mesh()
+            .is_some_and(|mesh| mesh.faces.iter().any(|face| face.selected)),
+        petunia_core::FillScope::UvIsland => face_hint.is_some_and(|face| {
+            state.project.active_mesh().is_some_and(|mesh| {
+                mesh.uv_islands()
+                    .iter()
+                    .any(|island| island.faces.contains(&face))
+            })
+        }),
+    };
+    if !has_target {
+        return false;
+    }
+
+    state.checkpoint("scoped canvas fill");
+    PaintModule::canvas_fill_scoped(state, face_hint, Some((x, y)), scope);
+    true
 }
 
 /// Formas: arrastar define o retângulo/segmento, soltar confirma.
@@ -1589,6 +1674,113 @@ fn apply_layer_actions(state: &mut AppState, actions: Vec<LayerAction>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use petunia_project::Canvas;
+
+    #[test]
+    fn fill_scope_selector_covers_all_five_domain_scopes() {
+        assert_eq!(
+            FILL_SCOPES,
+            [
+                petunia_core::FillScope::ConnectedPixels,
+                petunia_core::FillScope::Face,
+                petunia_core::FillScope::SelectedFaces,
+                petunia_core::FillScope::UvIsland,
+                petunia_core::FillScope::Object,
+            ]
+        );
+        let labels: Vec<_> = FILL_SCOPES.into_iter().map(fill_scope_label).collect();
+        assert_eq!(
+            labels,
+            [
+                text_id::PAINT_FILL_CONNECTED_PIXELS,
+                text_id::PAINT_FILL_FACE,
+                text_id::PAINT_FILL_SELECTED_FACES,
+                text_id::PAINT_FILL_UV_ISLAND,
+                text_id::PAINT_FILL_OBJECT,
+            ]
+        );
+    }
+
+    #[test]
+    fn fill_scope_controls_render_for_the_fill_brush() {
+        let context = egui::Context::default();
+        let mut state = AppState::new("en");
+        state.paint_brush_kind = 3;
+
+        context
+            .run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_brush_block(ui, &mut state);
+                });
+            })
+            .textures_delta
+            .clear();
+
+        assert_eq!(state.fill_scope, petunia_core::FillScope::ConnectedPixels);
+    }
+
+    #[test]
+    fn fill_brush_uses_connected_pixel_seed() {
+        let mut state = AppState::new("en");
+        PaintModule::ensure_stack(&mut state);
+        PaintModule::resize_canvas(&mut state, 4, 4);
+        state.paint_color = [1.0, 0.0, 0.0];
+        state.fill_scope = petunia_core::FillScope::ConnectedPixels;
+
+        let mut canvas = Canvas::new(4, 4, [0, 0, 0, 255]);
+        for y in 0..4 {
+            canvas.set(2, y, [255, 255, 255, 255]);
+        }
+        if let Some(layer) = state
+            .project
+            .active_mut()
+            .and_then(|asset| asset.paint_stack.as_mut())
+            .and_then(|stack| stack.active_mut())
+            && let Some(layer_canvas) = layer.canvas_mut()
+        {
+            *layer_canvas = canvas;
+        }
+        state.project.active_mut().unwrap().texture = Some(Canvas::new(4, 4, [0, 0, 0, 255]));
+
+        fill_canvas_at(
+            &mut state,
+            CanvasView {
+                rect: Rect::NOTHING,
+                scale: 1.0,
+                w: 4,
+                h: 4,
+            },
+            0,
+            0,
+        );
+
+        let result = state.project.active().unwrap().texture.as_ref().unwrap();
+        assert_eq!(result.get(0, 0), Some([255, 0, 0, 255]));
+        assert_eq!(result.get(3, 0), Some([0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn scoped_fill_without_a_target_does_not_create_an_undo_step() {
+        let mut state = AppState::new("en");
+        state.fill_scope = petunia_core::FillScope::SelectedFaces;
+        let undo_before = state.project.undo.undo_label().map(str::to_owned);
+
+        assert!(!fill_canvas_at(
+            &mut state,
+            CanvasView {
+                rect: Rect::NOTHING,
+                scale: 1.0,
+                w: 256,
+                h: 256,
+            },
+            0,
+            0,
+        ));
+        assert_eq!(
+            state.project.undo.undo_label().map(str::to_owned),
+            undo_before
+        );
+    }
 
     /// A paleta cobre os oito índices do contrato, uma vez cada.
     ///

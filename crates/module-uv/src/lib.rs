@@ -173,6 +173,53 @@ impl UvModule {
         state.emit_mesh_changed();
     }
 
+    /// Alterna as costuras das arestas da primeira face UV selecionada.
+    pub fn toggle_selected_face_seams(state: &mut AppState) -> bool {
+        let Some(edges) = state.project.active_mesh().and_then(|mesh| {
+            mesh.faces.iter().find(|face| face.selected).map(|face| {
+                let mut edges = Vec::with_capacity(face.verts.len());
+                for index in 0..face.verts.len() {
+                    edges.push((
+                        face.verts[index],
+                        face.verts[(index + 1) % face.verts.len()],
+                    ));
+                }
+                edges
+            })
+        }) else {
+            return false;
+        };
+        if edges.len() < 3 {
+            return false;
+        }
+
+        state.checkpoint("toggle uv face seams");
+        if let Some(mesh) = state.project.active_mesh_mut() {
+            for (a, b) in edges {
+                mesh.toggle_seam(a, b);
+            }
+        }
+        state.emit_mesh_changed();
+        true
+    }
+
+    /// Remove todas as costuras da malha ativa.
+    pub fn clear_all_seams(state: &mut AppState) -> bool {
+        let Some(mesh) = state.project.active_mesh() else {
+            return false;
+        };
+        if mesh.uv_seams.is_empty() {
+            return false;
+        }
+
+        state.checkpoint("clear all uv seams");
+        if let Some(mesh) = state.project.active_mesh_mut() {
+            mesh.uv_seams.clear();
+        }
+        state.emit_mesh_changed();
+        true
+    }
+
     pub fn diagnostics(state: &AppState) -> Option<petunia_mesh::uv_tools::UvDiagnostics> {
         state.project.active_mesh().map(|m| m.uv_diagnostics())
     }
@@ -338,6 +385,62 @@ mod tests {
                 .faces
                 .iter()
                 .all(|f| f.uv.iter().all(|uv| uv[0].is_finite() && uv[1].is_finite()))
+        );
+    }
+
+    #[test]
+    fn selected_face_seams_toggle_and_clear_transactionally() {
+        let mut state = AppState::new("en");
+        let verts = {
+            let mesh = state.project.active_mesh_mut().expect("active mesh");
+            mesh.faces[0].selected = true;
+            mesh.faces[0].verts.clone()
+        };
+
+        assert!(UvModule::toggle_selected_face_seams(&mut state));
+        let seam_count = state
+            .project
+            .active_mesh()
+            .expect("active mesh")
+            .uv_seams
+            .len();
+        assert_eq!(seam_count, verts.len());
+
+        assert!(UvModule::toggle_selected_face_seams(&mut state));
+        assert!(
+            state
+                .project
+                .active_mesh()
+                .expect("active mesh")
+                .uv_seams
+                .is_empty()
+        );
+
+        assert!(UvModule::toggle_selected_face_seams(&mut state));
+        assert!(UvModule::clear_all_seams(&mut state));
+        assert!(
+            state
+                .project
+                .active_mesh()
+                .expect("active mesh")
+                .uv_seams
+                .is_empty()
+        );
+        assert!(!UvModule::clear_all_seams(&mut state));
+    }
+
+    #[test]
+    fn toggling_face_seams_requires_a_selected_face() {
+        let mut state = AppState::new("en");
+
+        assert!(!UvModule::toggle_selected_face_seams(&mut state));
+        assert!(
+            state
+                .project
+                .active_mesh()
+                .expect("active mesh")
+                .uv_seams
+                .is_empty()
         );
     }
 

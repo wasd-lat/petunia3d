@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use petunia_config::text_id;
 use petunia_mesh::Mesh;
 
 use crate::camera::ViewPreset;
@@ -2579,6 +2580,14 @@ impl BooleanOpCmd {
             petunia_mesh::boolean::BooleanOp::Intersection => "intersect",
         }
     }
+
+    const fn result_text(self) -> petunia_config::TextId {
+        match self.op {
+            petunia_mesh::boolean::BooleanOp::Union => text_id::BOOLEAN_FUSE_RESULT,
+            petunia_mesh::boolean::BooleanOp::Difference => text_id::BOOLEAN_CUT_RESULT,
+            petunia_mesh::boolean::BooleanOp::Intersection => text_id::BOOLEAN_INTERSECT_RESULT,
+        }
+    }
 }
 
 impl Command for BooleanOpCmd {
@@ -2615,10 +2624,10 @@ impl Command for BooleanOpCmd {
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         match state.apply_boolean(self.op) {
             Ok(verts) => {
-                state.set_status(format!(
-                    "{}: result with {verts} vertices",
-                    self.label_for()
-                ));
+                let status = state
+                    .t_id(self.result_text())
+                    .replace("{vertices}", &verts.to_string());
+                state.set_status(status);
                 Ok(())
             }
             Err(error) => Err(CommandError::Execution(error.to_string())),
@@ -2663,7 +2672,10 @@ impl Command for JoinObjectsCmd {
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         match state.join_active_with_operand() {
             Ok(verts) => {
-                state.set_status(format!("Join: {verts} vertices merged"));
+                let status = state
+                    .t_id(text_id::BOOLEAN_JOIN_RESULT)
+                    .replace("{vertices}", &verts.to_string());
+                state.set_status(status);
                 Ok(())
             }
             Err(reason) => Err(CommandError::Execution(reason.to_string())),

@@ -863,6 +863,10 @@ impl EditorSession {
                 .collect();
             sel.edges = a.mesh.selected_edges.iter().copied().collect();
         }
+        // A seleção UV é um espelho da seleção de faces da malha ativa. Atualize
+        // junto com a seleção canônica para que a troca de asset não deixe índices
+        // do asset anterior válidos até o próximo dispatch de eventos.
+        self.uv_selected = sel.faces.iter().copied().collect();
         self.selection = sel.clone();
         events.emit(AppEvent::SelectionChanged(sel));
     }

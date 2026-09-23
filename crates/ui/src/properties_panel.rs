@@ -3,6 +3,7 @@
 //! e formulários sanfonados com fidelidade estética ao Blender.svg.
 
 use egui::{Color32, RichText, ScrollArea, Ui, vec2};
+use petunia_config::text_id;
 use petunia_core::{
     AppState, ClearSelectionCmd, DuplicateSelectionCmd, InvertSelectionCmd, ModuleRegistry,
     PrimitiveKind, SelectAllCmd, SelectLinkedCmd, Workspace,
@@ -277,10 +278,90 @@ fn draw_object_sections(ui: &mut Ui, state: &mut AppState) {
     ui.add_space(gap);
     draw_geometry_section(ui, state, idx, false);
     ui.add_space(gap);
+    draw_boolean_section(ui, state);
+    ui.add_space(gap);
     draw_display_section(ui, state, idx, false);
     if !state.project.refs.is_empty() {
         ui.add_space(gap);
         crate::refs_section(ui, state);
+    }
+}
+
+/// Operand Boolean, modificador Keep Parts e operações do core compartilhado.
+fn draw_boolean_section(ui: &mut Ui, state: &mut AppState) {
+    let title = state.t_id(text_id::BOOLEAN_TITLE);
+    let operand_id = state.boolean_operand;
+    let operand = operand_id.and_then(|id| {
+        state
+            .project
+            .assets
+            .iter()
+            .find(|asset| asset.id == id)
+            .map(|asset| (id, asset.name.clone()))
+    });
+    let summary = operand.as_ref().map(|(_, name)| name.as_str());
+    let mut command_to_execute = None;
+
+    inspector_widgets::section(
+        ui,
+        state.ui.density,
+        "boolean",
+        inspector_widgets::SectionOpts {
+            title: &title,
+            summary,
+            default_open: true,
+            force_open: false,
+        },
+        |ui| {
+            if let Some((_, name)) = operand.as_ref() {
+                ui.label(format!("{}: {name}", state.t_id(text_id::BOOLEAN_OPERAND)));
+
+                let mut keep_parts = state.boolean_keep_parts;
+                if ui
+                    .checkbox(&mut keep_parts, state.t_id(text_id::BOOLEAN_KEEP_PARTS))
+                    .changed()
+                {
+                    state.boolean_keep_parts = keep_parts;
+                    state.mark_dirty();
+                }
+
+                ui.horizontal_wrapped(|ui| {
+                    for (command, label) in [
+                        ("model.fuse", text_id::BOOLEAN_FUSE),
+                        ("model.cut", text_id::BOOLEAN_CUT),
+                        ("model.intersect", text_id::BOOLEAN_INTERSECT),
+                        ("model.join", text_id::BOOLEAN_JOIN),
+                    ] {
+                        let enabled = state.commands.can_execute(command, state).is_ok();
+                        let label_text = state.t_id(label);
+                        let response = ui
+                            .add_enabled_ui(enabled, |ui| {
+                                widgets::petunia_action_button(ui, None, &label_text, false)
+                            })
+                            .inner;
+                        if response.clicked() {
+                            command_to_execute = Some(command);
+                        }
+                    }
+                });
+            } else {
+                ui.small(state.t_id(text_id::BOOLEAN_NO_OPERAND));
+            }
+
+            if operand.is_some() || operand_id.is_some() {
+                let clear_label = state.t_id(text_id::BOOLEAN_CLEAR_OPERAND);
+                if widgets::petunia_action_button(ui, None, &clear_label, false).clicked() {
+                    state.boolean_operand = None;
+                    state.mark_dirty();
+                }
+            }
+        },
+    );
+
+    if let Some(command) = command_to_execute
+        && state.dispatch_command(command).is_err()
+    {
+        state.set_status(state.t_id(text_id::BOOLEAN_COMMAND_FAILED));
     }
 }
 
@@ -1906,6 +1987,25 @@ fn draw_tab_material(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boolean_inspector_renders_with_an_assigned_operand() {
+        let context = egui::Context::default();
+        let mut state = AppState::new("en");
+        state.project.add("Operand", petunia_mesh::Mesh::cube(1.0));
+        let operand_id = state.project.assets.last().expect("operand").id;
+        state.project.active = 0;
+        state.boolean_operand = Some(operand_id);
+
+        context
+            .run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    draw_boolean_section(ui, &mut state);
+                });
+            })
+            .textures_delta
+            .clear();
+    }
 
     #[test]
     fn test_inspector_tabs_render_without_panic() {

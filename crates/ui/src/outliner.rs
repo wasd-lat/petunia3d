@@ -5,6 +5,7 @@
 
 use crate::adapters::tree::{Action, NodeBuilder, TreeView, TreeViewSettings};
 use egui::{Color32, Id, Rect, Response, ScrollArea, Ui, vec2};
+use petunia_config::text_id;
 use petunia_core::{AnnotationItem, AppState, DeleteAssetCmd, DuplicateAssetCmd, PrimitiveKind};
 use uuid::Uuid;
 
@@ -392,6 +393,35 @@ struct AssetRowSinks<'a> {
     rename_asset: &'a mut Option<(usize, String)>,
 }
 
+/// Stores a distinct scene object as operand B for the Boolean inspector.
+fn assign_boolean_operand(state: &mut AppState, operand_id: Uuid) -> bool {
+    let Some(name) = state
+        .project
+        .assets
+        .iter()
+        .find(|asset| asset.id == operand_id)
+        .map(|asset| asset.name.clone())
+    else {
+        return false;
+    };
+    let active_id = state
+        .project
+        .assets
+        .get(state.project.active)
+        .map(|asset| asset.id);
+    if active_id == Some(operand_id) {
+        return false;
+    }
+
+    state.boolean_operand = Some(operand_id);
+    let status = state
+        .t_id(text_id::BOOLEAN_OPERAND_SET)
+        .replace("{name}", &name);
+    state.set_status(status);
+    state.mark_dirty();
+    true
+}
+
 /// Inicia rename inline de asset (F2, duplo-clique/Enter, menu).
 /// Buffer começa vazio (original vai de dica): sem armadilha de anexar.
 fn begin_asset_rename(ui: &mut Ui, asset_id: Uuid) {
@@ -548,6 +578,19 @@ fn draw_asset_row(
                 {
                     *isolate_idx = Some(i);
                     ui.close();
+                }
+                ui.separator();
+                if state.boolean_operand == Some(asset_id) {
+                    ui.label(state.t_id(text_id::BOOLEAN_OPERAND));
+                } else {
+                    let operand_label = state.t_id(text_id::BOOLEAN_SET_OPERAND);
+                    if ui
+                        .add_enabled(!is_selected, egui::Button::new(operand_label))
+                        .clicked()
+                    {
+                        assign_boolean_operand(state, asset_id);
+                        ui.close();
+                    }
                 }
                 if !collections.is_empty() {
                     ui.separator();
@@ -1897,6 +1940,22 @@ mod tests {
 
         assert_eq!(state.project.collections.len(), 1);
         assert!(state.project.assets.last().unwrap().locked);
+    }
+
+    #[test]
+    fn boolean_operand_must_be_a_different_existing_asset() {
+        let mut state = AppState::new("en");
+        state.project.add("Operand", Mesh::cube(1.0));
+        let operand_id = state.project.assets.last().expect("new asset").id;
+        state.project.active = 0;
+        let active_id = state.project.assets[state.project.active].id;
+
+        assert!(!assign_boolean_operand(&mut state, active_id));
+        assert!(assign_boolean_operand(&mut state, operand_id));
+        assert_eq!(state.boolean_operand, Some(operand_id));
+
+        state.project.assets.retain(|asset| asset.id != operand_id);
+        assert!(!assign_boolean_operand(&mut state, operand_id));
     }
 
     #[test]

@@ -383,8 +383,15 @@ mod tests {
         use crate::command::SubdivideSelectionCmd;
         let mut state = AppState::new("en");
         assert!(state.begin_primitive(PrimitiveKind::Cube, None));
+        state
+            .project
+            .active_mesh_mut()
+            .expect("created primitive mesh")
+            .faces[0]
+            .selected = true;
+        state.sync_selection();
         // Outra operação com checkpoint no meio: sessão vira malha comum.
-        let _ = state.dispatch(&SubdivideSelectionCmd);
+        assert!(state.dispatch(&SubdivideSelectionCmd).is_ok());
         assert!(!state.primitive_session_valid());
         // Cancel posterior não remove nada.
         let count = state.project.assets.len();

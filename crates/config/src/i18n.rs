@@ -224,6 +224,43 @@ pub mod text_id {
     pub const UV_FACES: TextId = TextId::new("uv.faces");
     pub const UV_PREVIEW_3D: TextId = TextId::new("uv.preview_3d");
     pub const UV_HINT: TextId = TextId::new("uv.hint");
+    pub const UV_ROTATE_90: TextId = TextId::new("uv.rotate_90");
+    pub const UV_ROTATE_90_TIP: TextId = TextId::new("uv.rotate_90_tip");
+    pub const UV_ROTATE_CCW: TextId = TextId::new("uv.rotate_ccw");
+    pub const UV_ROTATE_CW: TextId = TextId::new("uv.rotate_cw");
+    pub const UV_ROTATE_CCW_TIP: TextId = TextId::new("uv.rotate_ccw_tip");
+    pub const UV_ROTATE_CW_TIP: TextId = TextId::new("uv.rotate_cw_tip");
+    pub const UV_TOGGLE_SEAMS: TextId = TextId::new("uv.toggle_seams");
+    pub const UV_TOGGLE_SEAMS_TIP: TextId = TextId::new("uv.toggle_seams_tip");
+    pub const UV_CLEAR_SEAMS: TextId = TextId::new("uv.clear_seams");
+    pub const UV_CLEAR_SEAMS_TIP: TextId = TextId::new("uv.clear_seams_tip");
+    pub const UV_SEAMS_TOGGLED: TextId = TextId::new("uv.seams_toggled");
+    pub const UV_SEAMS_NO_FACE: TextId = TextId::new("uv.seams_no_face");
+    pub const UV_SEAMS_CLEARED: TextId = TextId::new("uv.seams_cleared");
+
+    pub const BOOLEAN_TITLE: TextId = TextId::new("boolean.title");
+    pub const BOOLEAN_OPERAND: TextId = TextId::new("boolean.operand");
+    pub const BOOLEAN_SET_OPERAND: TextId = TextId::new("boolean.set_operand");
+    pub const BOOLEAN_NO_OPERAND: TextId = TextId::new("boolean.no_operand");
+    pub const BOOLEAN_KEEP_PARTS: TextId = TextId::new("boolean.keep_parts");
+    pub const BOOLEAN_FUSE: TextId = TextId::new("boolean.fuse");
+    pub const BOOLEAN_CUT: TextId = TextId::new("boolean.cut");
+    pub const BOOLEAN_INTERSECT: TextId = TextId::new("boolean.intersect");
+    pub const BOOLEAN_JOIN: TextId = TextId::new("boolean.join");
+    pub const BOOLEAN_CLEAR_OPERAND: TextId = TextId::new("boolean.clear_operand");
+    pub const BOOLEAN_OPERAND_SET: TextId = TextId::new("boolean.operand_set");
+    pub const BOOLEAN_COMMAND_FAILED: TextId = TextId::new("boolean.command_failed");
+    pub const BOOLEAN_FUSE_RESULT: TextId = TextId::new("boolean.fuse_result");
+    pub const BOOLEAN_CUT_RESULT: TextId = TextId::new("boolean.cut_result");
+    pub const BOOLEAN_INTERSECT_RESULT: TextId = TextId::new("boolean.intersect_result");
+    pub const BOOLEAN_JOIN_RESULT: TextId = TextId::new("boolean.join_result");
+
+    pub const PAINT_FILL_SCOPE: TextId = TextId::new("paint.fill_scope");
+    pub const PAINT_FILL_CONNECTED_PIXELS: TextId = TextId::new("paint.fill_connected_pixels");
+    pub const PAINT_FILL_FACE: TextId = TextId::new("paint.fill_face");
+    pub const PAINT_FILL_SELECTED_FACES: TextId = TextId::new("paint.fill_selected_faces");
+    pub const PAINT_FILL_UV_ISLAND: TextId = TextId::new("paint.fill_uv_island");
+    pub const PAINT_FILL_OBJECT: TextId = TextId::new("paint.fill_object");
 
     pub const ANIMATE_HUMANOID: TextId = TextId::new("animate.humanoid");
     pub const ANIMATE_AUTO_RIG: TextId = TextId::new("animate.auto_rig");
@@ -376,6 +413,35 @@ pub mod text_id {
         UV_FACES,
         UV_PREVIEW_3D,
         UV_HINT,
+        UV_ROTATE_90,
+        UV_ROTATE_90_TIP,
+        UV_ROTATE_CCW,
+        UV_ROTATE_CW,
+        UV_ROTATE_CCW_TIP,
+        UV_ROTATE_CW_TIP,
+        UV_TOGGLE_SEAMS,
+        UV_TOGGLE_SEAMS_TIP,
+        UV_CLEAR_SEAMS,
+        UV_CLEAR_SEAMS_TIP,
+        UV_SEAMS_TOGGLED,
+        UV_SEAMS_NO_FACE,
+        UV_SEAMS_CLEARED,
+        BOOLEAN_TITLE,
+        BOOLEAN_OPERAND,
+        BOOLEAN_SET_OPERAND,
+        BOOLEAN_NO_OPERAND,
+        BOOLEAN_KEEP_PARTS,
+        BOOLEAN_FUSE,
+        BOOLEAN_CUT,
+        BOOLEAN_INTERSECT,
+        BOOLEAN_JOIN,
+        BOOLEAN_CLEAR_OPERAND,
+        BOOLEAN_OPERAND_SET,
+        BOOLEAN_COMMAND_FAILED,
+        BOOLEAN_FUSE_RESULT,
+        BOOLEAN_CUT_RESULT,
+        BOOLEAN_INTERSECT_RESULT,
+        BOOLEAN_JOIN_RESULT,
         ANIMATE_HUMANOID,
         ANIMATE_AUTO_RIG,
         ANIMATE_PLAY,
@@ -390,6 +456,12 @@ pub mod text_id {
         ANIMATE_TIP_LAST,
         PAINT_RADIUS,
         PAINT_COLOR,
+        PAINT_FILL_SCOPE,
+        PAINT_FILL_CONNECTED_PIXELS,
+        PAINT_FILL_FACE,
+        PAINT_FILL_SELECTED_FACES,
+        PAINT_FILL_UV_ISLAND,
+        PAINT_FILL_OBJECT,
         SETTINGS_INTERFACE,
         SETTINGS_IMPORT_EXPORT,
         SETTINGS_SHOW_SHELF,

@@ -749,8 +749,8 @@ impl PaintModule {
 
     /// Preenche o canvas respeitando o `FillScope` (uma semente, algoritmos distintos).
     ///
-    /// `face_hint` é a face sob o cursor, quando existe: sem ela os escopos por
-    /// face não têm semente e caem em `Object`.
+    /// `face_hint` é a face sob o cursor, quando existe. Escopos por face sem
+    /// uma face correspondente não alteram o canvas; `Object` é explícito.
     pub fn canvas_fill_scoped(
         state: &mut AppState,
         face_hint: Option<usize>,
@@ -764,16 +764,6 @@ impl PaintModule {
             (state.paint_color[2] * 255.0) as u8,
             255,
         ];
-        let scope = if face_hint.is_none()
-            && matches!(
-                scope,
-                petunia_core::FillScope::Face | petunia_core::FillScope::UvIsland
-            ) {
-            petunia_core::FillScope::Object
-        } else {
-            scope
-        };
-
         // Coleta os polígonos UV elegíveis antes de emprestar o canvas.
         let polygons: Vec<Vec<[f32; 2]>> = match scope {
             petunia_core::FillScope::ConnectedPixels => Vec::new(),
@@ -814,6 +804,16 @@ impl PaintModule {
                 .unwrap_or_default(),
         };
 
+        if matches!(
+            scope,
+            petunia_core::FillScope::Face
+                | petunia_core::FillScope::SelectedFaces
+                | petunia_core::FillScope::UvIsland
+        ) && polygons.is_empty()
+        {
+            return;
+        }
+
         let active_idx = state.project.active;
         if let Some(o) = state.project.assets.get_mut(active_idx)
             && let Some(stack) = o.paint_stack.as_mut()
@@ -830,9 +830,6 @@ impl PaintModule {
                 }
                 petunia_core::FillScope::Object => cv.fill(color),
                 _ => {
-                    if polygons.is_empty() {
-                        cv.fill(color);
-                    }
                     for polygon in &polygons {
                         Self::fill_uv_polygon(cv, polygon, color);
                     }
@@ -1360,6 +1357,36 @@ mod tests {
         assert_eq!(cv.get(0, 3), Some([0, 255, 0, 255]));
         // Do outro lado da barreira deve permanecer intacto
         assert_eq!(cv.get(2, 0), Some([0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn face_scopes_without_matching_faces_do_not_fill_the_object() {
+        let mut state = AppState::new("en");
+        PaintModule::ensure_stack(&mut state);
+        state.paint_color = [1.0, 0.0, 0.0];
+        let before = state
+            .project
+            .active()
+            .unwrap()
+            .texture
+            .as_ref()
+            .unwrap()
+            .pixels
+            .clone();
+
+        PaintModule::canvas_fill_scoped(&mut state, None, None, petunia_core::FillScope::Face);
+
+        assert_eq!(
+            state
+                .project
+                .active()
+                .unwrap()
+                .texture
+                .as_ref()
+                .unwrap()
+                .pixels,
+            before
+        );
     }
 
     #[test]
