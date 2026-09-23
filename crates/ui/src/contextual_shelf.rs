@@ -287,7 +287,16 @@ fn widget_width_sum(widgets: &[ShelfWidget]) -> f32 {
 fn exec_shelf_action(state: &mut AppState, action: &ShelfAction) {
     match action {
         ShelfAction::SetActiveTool(id) => {
-            state.active_tool = id.to_string();
+            if state.workspace == Workspace::Paint
+                && let Some(kind) = paint_brush_kind_for_tool(id)
+            {
+                // Ação, paleta e engine usam o mesmo índice persistido. `active_tool`
+                // identifica o domínio Paint; `paint_brush_kind` escolhe o pincel.
+                state.active_tool = "paint".to_string();
+                state.paint_brush_kind = kind;
+            } else {
+                state.active_tool = id.to_string();
+            }
         }
         ShelfAction::SetGizmo(gizmo) => {
             state.active_tool = "transform".to_string();
@@ -356,6 +365,27 @@ fn tool_cmd(
         tooltip: format!("{name} · [{key}]"),
         priority,
         action,
+    }
+}
+
+fn paint_brush_kind_for_tool(id: &str) -> Option<usize> {
+    match id {
+        "paint" => Some(0),
+        "eraser" => Some(2),
+        "picker" => Some(4),
+        _ => None,
+    }
+}
+
+fn shelf_tool_is_active(state: &AppState, id: &str) -> bool {
+    if state.workspace != Workspace::Paint {
+        return state.active_tool == id;
+    }
+    match id {
+        "paint" => !matches!(state.paint_brush_kind, 2 | 4),
+        "eraser" => state.paint_brush_kind == 2,
+        "picker" => state.paint_brush_kind == 4,
+        _ => false,
     }
 }
 
@@ -606,7 +636,7 @@ fn draw_shelf_pill(
     cmd: &ShelfCommand,
     text_w: Option<f32>,
 ) -> Response {
-    let is_active = matches!(cmd.action, ShelfAction::SetActiveTool(id) if state.active_tool == id)
+    let is_active = matches!(cmd.action, ShelfAction::SetActiveTool(id) if shelf_tool_is_active(state, id))
         || matches!(cmd.action, ShelfAction::SetGizmo(g) if state.gizmo_mode == g && state.active_tool == "transform")
         || matches!(cmd.action, ShelfAction::TimelinePlayPause if state.ui.timeline_playing);
     let (bg, fg) = if is_active {
@@ -745,6 +775,22 @@ fn draw_shelf_widget(ui: &mut Ui, state: &mut AppState, widget: ShelfWidget) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paint_action_bar_selectors_share_the_engine_brush_kind() {
+        let mut state = AppState::new("en");
+        state.switch_workspace(Workspace::Paint);
+
+        for (id, kind) in [("paint", 0), ("eraser", 2), ("picker", 4)] {
+            exec_shelf_action(&mut state, &ShelfAction::SetActiveTool(id));
+            assert_eq!(state.active_tool, "paint");
+            assert_eq!(state.paint_brush_kind, kind);
+            assert!(shelf_tool_is_active(&state, id));
+            for other in ["paint", "eraser", "picker"] {
+                assert_eq!(shelf_tool_is_active(&state, other), other == id);
+            }
+        }
+    }
 
     #[test]
     fn test_contextual_shelf_renders_without_panic() {

@@ -225,7 +225,7 @@ pub fn draw_tool_palette(ui: &mut Ui, state: &mut AppState, grid: PetuniaToolGri
 
 fn draw_paint_tool(ui: &mut Ui, state: &mut AppState, tool: &PaintTool, cell: PetuniaToolCell) {
     let label = state.t(tool.label_key);
-    let active = state.active_tool == "paint" && state.paint_brush_kind == tool.kind;
+    let active = is_paint_tool_active(state, tool.kind);
     if PetuniaToolbarButton::new(tool.icon, &label)
         .selected(active)
         .compact(!cell.labeled)
@@ -238,6 +238,10 @@ fn draw_paint_tool(ui: &mut Ui, state: &mut AppState, tool: &PaintTool, cell: Pe
         state.paint_brush_kind = tool.kind;
         state.mark_dirty();
     }
+}
+
+fn is_paint_tool_active(state: &AppState, kind: usize) -> bool {
+    state.workspace == petunia_core::Workspace::Paint && state.paint_brush_kind == kind
 }
 
 /// Cor de paleta em `[f32; 3]` → `Color32` de tela.
@@ -1941,6 +1945,17 @@ mod tests {
         }
         // Índice fora da faixa nunca vira pânico (projeto legado/corrompido).
         assert_eq!(brush_type_of(999), BrushType::Pixel);
+    }
+
+    #[test]
+    fn the_paint_palette_tracks_brush_kind_independently_of_global_tool() {
+        let mut state = AppState::new("en");
+        state.switch_workspace(petunia_core::Workspace::Paint);
+        state.active_tool = "move".into();
+        state.paint_brush_kind = 2;
+
+        assert!(is_paint_tool_active(&state, 2));
+        assert!(!is_paint_tool_active(&state, 0));
     }
 
     /// Chave i18n e índice andam juntos: a linha da lista mostra o nome do modo
