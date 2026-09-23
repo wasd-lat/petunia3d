@@ -688,6 +688,155 @@ impl PaintModule {
         Self::composite_active(state);
     }
 
+    /// Preenche uma região delimitada por um polígono UV (scanline par-ímpar).
+    ///
+    /// As UVs vêm em 0..1 com origem embaixo; o canvas é topo-esquerda.
+    pub fn fill_uv_polygon(canvas: &mut Canvas, uv: &[[f32; 2]], color: [u8; 4]) {
+        if uv.len() < 3 {
+            return;
+        }
+        let points: Vec<(f32, f32)> = uv
+            .iter()
+            .filter(|p| p[0].is_finite() && p[1].is_finite())
+            .map(|p| (p[0] * canvas.w as f32, (1.0 - p[1]) * canvas.h as f32))
+            .collect();
+        if points.len() < 3 {
+            return;
+        }
+        let min_y = points
+            .iter()
+            .map(|p| p.1)
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .max(0.0) as u32;
+        let max_y = points
+            .iter()
+            .map(|p| p.1)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil()
+            .min(canvas.h as f32) as u32;
+
+        for y in min_y..max_y {
+            let scan_y = y as f32 + 0.5;
+            let mut crossings: Vec<f32> = Vec::new();
+            for index in 0..points.len() {
+                let (x0, y0) = points[index];
+                let (x1, y1) = points[(index + 1) % points.len()];
+                if (y0 <= scan_y && y1 > scan_y) || (y1 <= scan_y && y0 > scan_y) {
+                    let t = (scan_y - y0) / (y1 - y0);
+                    crossings.push(x0 + t * (x1 - x0));
+                }
+            }
+            crossings.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            for pair in crossings.chunks(2) {
+                if pair.len() < 2 {
+                    break;
+                }
+                let start = pair[0].floor().max(0.0) as u32;
+                let end = pair[1].ceil().min(canvas.w as f32) as u32;
+                for x in start..end {
+                    canvas.set(x, y, color);
+                }
+            }
+        }
+    }
+
+    /// Preenche o canvas respeitando o `FillScope` (uma semente, algoritmos distintos).
+    ///
+    /// `face_hint` é a face sob o cursor, quando existe: sem ela os escopos por
+    /// face não têm semente e caem em `Object`.
+    pub fn canvas_fill_scoped(
+        state: &mut AppState,
+        face_hint: Option<usize>,
+        seed: Option<(u32, u32)>,
+        scope: petunia_core::FillScope,
+    ) {
+        Self::ensure_stack(state);
+        let color = [
+            (state.paint_color[0] * 255.0) as u8,
+            (state.paint_color[1] * 255.0) as u8,
+            (state.paint_color[2] * 255.0) as u8,
+            255,
+        ];
+        let scope = if face_hint.is_none()
+            && matches!(
+                scope,
+                petunia_core::FillScope::Face | petunia_core::FillScope::UvIsland
+            ) {
+            petunia_core::FillScope::Object
+        } else {
+            scope
+        };
+
+        // Coleta os polígonos UV elegíveis antes de emprestar o canvas.
+        let polygons: Vec<Vec<[f32; 2]>> = match scope {
+            petunia_core::FillScope::ConnectedPixels => Vec::new(),
+            petunia_core::FillScope::Object => Vec::new(),
+            petunia_core::FillScope::Face => face_hint
+                .and_then(|face| {
+                    state
+                        .project
+                        .active_mesh()
+                        .and_then(|mesh| mesh.faces.get(face))
+                        .map(|face| vec![face.uv.clone()])
+                })
+                .unwrap_or_default(),
+            petunia_core::FillScope::SelectedFaces => state
+                .project
+                .active_mesh()
+                .map(|mesh| {
+                    mesh.faces
+                        .iter()
+                        .filter(|face| face.selected)
+                        .map(|face| face.uv.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            petunia_core::FillScope::UvIsland => face_hint
+                .and_then(|face| {
+                    let mesh = state.project.active_mesh()?;
+                    let islands = mesh.uv_islands();
+                    let island = islands.iter().find(|island| island.faces.contains(&face))?;
+                    Some(
+                        island
+                            .faces
+                            .iter()
+                            .filter_map(|&fi| mesh.faces.get(fi).map(|face| face.uv.clone()))
+                            .collect(),
+                    )
+                })
+                .unwrap_or_default(),
+        };
+
+        let active_idx = state.project.active;
+        if let Some(o) = state.project.assets.get_mut(active_idx)
+            && let Some(stack) = o.paint_stack.as_mut()
+            && let Some(layer) = stack.active_mut()
+            && let Some(cv) = layer.canvas_mut()
+        {
+            match scope {
+                petunia_core::FillScope::ConnectedPixels => {
+                    if let Some((x, y)) = seed {
+                        Self::flood_fill(cv, x, y, color, 16);
+                    } else {
+                        cv.fill(color);
+                    }
+                }
+                petunia_core::FillScope::Object => cv.fill(color),
+                _ => {
+                    if polygons.is_empty() {
+                        cv.fill(color);
+                    }
+                    for polygon in &polygons {
+                        Self::fill_uv_polygon(cv, polygon, color);
+                    }
+                }
+            }
+        }
+
+        Self::composite_active(state);
+    }
+
     /// Limpa a camada ativa (alfa zero).
     pub fn canvas_clear(state: &mut AppState) {
         Self::ensure_stack(state);
@@ -853,7 +1002,12 @@ impl PaintModule {
         hit_pos: Vec3,
         settings: BrushSettings,
     ) -> usize {
-        if !Self::lock_allows_face(state, 0) && matches!(state.session.tools.brush_lock, petunia_core::BrushLock::SelectedFaces | petunia_core::BrushLock::FirstFace) {
+        if !Self::lock_allows_face(state, 0)
+            && matches!(
+                state.session.tools.brush_lock,
+                petunia_core::BrushLock::SelectedFaces | petunia_core::BrushLock::FirstFace
+            )
+        {
             // still iterate faces below with per-face lock
         }
         let isolate = state.session.tools.paint_isolate_selection

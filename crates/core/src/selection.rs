@@ -116,6 +116,8 @@ impl Workspace {
 #[derive(Debug, Clone, Default)]
 pub struct Selection {
     pub asset: Option<Uuid>,
+    /// Ordered object selection; `asset` is the active object.
+    pub assets: Vec<Uuid>,
     pub verts: Vec<u32>,
     pub faces: Vec<usize>,
     pub edges: Vec<(u32, u32)>,

@@ -16,6 +16,7 @@ pub mod modal;
 pub mod modal_feedback;
 pub mod module;
 pub mod picking;
+pub mod transform_projection;
 pub mod primitive_session;
 pub mod project_service;
 pub mod proportional;
@@ -49,15 +50,15 @@ pub use schema_contracts::{
 };
 
 pub use command::{
-    AddPrimitiveCmd, BevelCmd, BoxSelectCmd, ClearSelectionCmd, Command, CommandCategory,
-    CommandDispatcher, CommandError, CommandMetadata, CommandPaletteItem, ConnectLoopsCmd,
-    CycleSelectionDomainCmd, DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd,
-    DuplicateSelectionCmd, ExportGlbCmd, ExportObjCmd, ExtrudeIndividualCmd, ExtrudeSelectedCmd,
-    FlipDiagonalCmd, FlipNormalsCmd, FrameSelectionCmd, ImportObjCmd, InsetFacesCmd,
-    InstantiateAssetCmd, InvertSelectionCmd, KnifeToolCmd, LoopCutCmd, MergeCenterCmd,
-    NewProjectCmd, OpenProjectCmd, PrimitiveKind, PushPullToolCmd, RedoCmd, ResetCameraCmd,
-    RevolveCmd, SaveActiveAsAssetCmd, SaveProjectAsCmd, SaveProjectCmd, ScaleSelectionCmd,
-    SelectAllCmd, SelectLinkedCmd, SeparateSelectionCmd, SetAssetCollectionCmd,
+    AddPrimitiveCmd, BevelCmd, BooleanOpCmd, BoxSelectCmd, ClearSelectionCmd, Command,
+    CommandCategory, CommandDispatcher, CommandError, CommandMetadata, CommandPaletteItem,
+    ConnectLoopsCmd, CycleSelectionDomainCmd, DeleteAssetCmd, DeleteSelectionCmd,
+    DuplicateAssetCmd, DuplicateSelectionCmd, ExportGlbCmd, ExportObjCmd, ExtrudeIndividualCmd,
+    ExtrudeSelectedCmd, FlipDiagonalCmd, FlipNormalsCmd, FrameSelectionCmd, ImportObjCmd,
+    InsetFacesCmd, InstantiateAssetCmd, InvertSelectionCmd, JoinObjectsCmd, KnifeToolCmd,
+    LoopCutCmd, MergeCenterCmd, NewProjectCmd, OpenProjectCmd, PrimitiveKind, PushPullToolCmd,
+    RedoCmd, ResetCameraCmd, RevolveCmd, SaveActiveAsAssetCmd, SaveProjectAsCmd, SaveProjectCmd,
+    ScaleSelectionCmd, SelectAllCmd, SelectLinkedCmd, SeparateSelectionCmd, SetAssetCollectionCmd,
     SetSelectionDomainCmd, SubdivideSelectionCmd, SymmetrizeCmd, ToggleCollectionLockCmd,
     ToggleCollectionVisibilityCmd, ToggleCommandPaletteCmd, ToggleHelpCmd, ToggleLockAssetCmd,
     ToggleProjectionCmd, ToggleSettingsCmd, ToggleVisibilityAssetCmd, ToggleWireframeCmd,
@@ -81,11 +82,15 @@ pub use snap::{
     snap_point_to_faces, snap_point_to_grid, snap_point_to_increment, snap_point_to_vertices,
 };
 pub use state::{
-    AnnotationItem, AnnotationStroke, AppState, DirtyReason, DockOrientation, DockSide,
-    DomainState, EditMode, EditorSession, GridSettings, Measurement, MeasurementItem, PivotPoint,
-    ProfileState, ProjectState, RefAxis, ReferenceImage, RenderResources, RenderStats, SceneFilter,
-    SceneObjectState, Shading, ToolState, TransformOrientation, UiDensity, UiState,
-    WorkspaceUiMemory, workspace_index,
+    ASSET_NAME_MAX_LEN, AnnotationItem, AnnotationStroke, AppState, AssetRenameError, DirtyReason,
+    DockOrientation, DockSide, DomainState, EditMode, EditorSession, GridSettings, HoverTarget,
+    Measurement,
+    MeasurementItem, PROPERTIES_DEFAULT_WIDTH, PROPERTIES_MAX_WIDTH, PROPERTIES_MIN_WIDTH,
+    PivotPoint, ProfileState, ProjectState, RefAxis, ReferenceImage, RenderResources, RenderStats,
+    SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT, SHELL_ASSET_LIBRARY_MAX_HEIGHT,
+    SHELL_ASSET_LIBRARY_MIN_HEIGHT, SceneFilter, SceneObjectState, Shading, TOOLBAR_DEFAULT_WIDTH,
+    ToolActivation, ToolState, TransformOrientation, UiDensity, UiState, WorkspaceUiMemory,
+    workspace_index,
 };
 pub use viewport::{
     LogicalRect, PhysicalViewport, unproject_cursor_or_vertex_snap,
@@ -96,6 +101,14 @@ pub use viewport_query::{
 };
 
 pub use modal::{ModalConstraint, ModalError, ModalKind, ModalOp};
+
+/// Malha, reexportada para os shells que manipulam geometria sem depender de `petunia_mesh`.
+pub use petunia_mesh::Mesh;
+/// Ponto de corte de aresta da faca, reexportado para os shells não dependerem
+/// de `petunia_mesh` diretamente.
+pub use petunia_mesh::knife::EdgePoint as CutEdgePoint;
+/// Anel de faces/arestas do loop cut, reexportado pelo mesmo motivo.
+pub use petunia_mesh::loop_cut::{LoopCutError, LoopRing};
 
 #[cfg(test)]
 mod preview_tests;

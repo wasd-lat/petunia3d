@@ -34,7 +34,10 @@ fn unknown_primitive_is_an_error() {
     let mut state = AppState::new("en");
     ProjectService::new_project(&mut state);
     let err = PrimitiveKind::parse("NotAThing").unwrap_err();
-    assert!(matches!(err, petunia_core::CommandError::UnknownPrimitive(_)));
+    assert!(matches!(
+        err,
+        petunia_core::CommandError::UnknownPrimitive(_)
+    ));
     let before = state.project.assets.len();
     let result = state.dispatch_intent(&CommandIntent {
         command: "model.add_primitive".into(),

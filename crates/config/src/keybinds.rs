@@ -254,6 +254,15 @@ impl Keybinds {
             .map(|(a, _)| a.as_str())
     }
 
+    /// Resolve within the active workspace before global/view/window actions.
+    /// Unordered map iteration must not route a Model shortcut to Paint.
+    pub fn find_in_context(&self, key: KeyCode, mods: Mods2, context: &str) -> Option<&str> {
+        self.map.iter().filter(|(action, binding)| binding.key == key && binding.mods == mods
+            && (action.starts_with(&format!("{context}.")) || action.starts_with("global.") || action.starts_with("view.") || action.starts_with("window.")))
+            .min_by(|(a, _), (b, _)| (!a.starts_with(&format!("{context}.")), a.as_str()).cmp(&(!b.starts_with(&format!("{context}.")), b.as_str())))
+            .map(|(action, _)| action.as_str())
+    }
+
     /// Retorna a representação textual do atalho para uma ação (ex: `"model.extrude"` -> `"E"`).
     pub fn shortcut_for(&self, action: &str) -> Option<String> {
         self.map.get(action).map(|b| b.to_shortcut_string())
@@ -373,6 +382,7 @@ impl Keybinds {
             ("global.reset_camera", "Home"),
             ("global.toggle_projection", "O"),
             ("global.cycle_mode", "Tab"),
+            ("global.rename", "F2"),
             ("view.frame_all", "Home"),
             ("view.frame_selection", "F"),
             ("view.reset_camera", "Shift+Home"),
@@ -387,6 +397,7 @@ impl Keybinds {
             ("model.select_object", "0"),
             ("model.transform", "T"),
             ("model.move", "G"),
+            ("model.box_select", "B"),
             ("model.rotate", "R"),
             ("model.scale", "S"),
             ("model.frame_selection", "F"),

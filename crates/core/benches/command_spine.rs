@@ -18,9 +18,7 @@ fn bench_dispatch(c: &mut Criterion) {
         b.iter(|| {
             let mut state = AppState::new("en");
             ProjectService::new_project(&mut state);
-            std::hint::black_box(
-                state.dispatch(&AddPrimitiveCmd::new(PrimitiveKind::Cube)),
-            )
+            std::hint::black_box(state.dispatch(&AddPrimitiveCmd::new(PrimitiveKind::Cube)))
         })
     });
     c.bench_function("command/extrude", |b| {

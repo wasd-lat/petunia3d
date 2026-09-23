@@ -1317,23 +1317,16 @@ impl Mesh {
 
     pub fn triangulate(&mut self) {
         let mut out = Vec::new();
-        for f in &self.faces {
-            let m = f.verts.len();
-            if m > 3 {
-                for i in 1..(m - 1) {
-                    let mut t = Face::with_uv(
-                        vec![f.verts[0], f.verts[i], f.verts[i + 1]],
-                        vec![
-                            f.uv.first().copied().unwrap_or([0.0, 0.0]),
-                            f.uv.get(i).copied().unwrap_or([0.0, 0.0]),
-                            f.uv.get(i + 1).copied().unwrap_or([0.0, 0.0]),
-                        ],
-                    );
-                    t.selected = f.selected;
-                    out.push(t);
-                }
-            } else {
-                out.push(f.clone());
+        for (fi, face) in self.faces.iter().enumerate() {
+            if face.verts.len() <= 3 { out.push(face.clone()); continue; }
+            let corners = self.face_triangle_corners(fi);
+            // Never discard an unsupported polygon silently.
+            if corners.len() != face.verts.len() - 2 { out.push(face.clone()); continue; }
+            for triangle in corners {
+                let mut split = face.clone();
+                split.verts = triangle.map(|i| face.verts[i]).to_vec();
+                split.uv = triangle.map(|i| face.uv.get(i).copied().unwrap_or_default()).to_vec();
+                out.push(split);
             }
         }
         self.faces = out;
@@ -1877,87 +1870,6 @@ impl Mesh {
         for &(a, b) in &other.selected_edges {
             self.selected_edges.insert((a + base_idx, b + base_idx));
         }
-    }
-
-    /// Conecta (bridge) duas faces criando uma faixa perimétrica de quads entre elas
-    /// e removendo as faces originais para produzir um tubo/ponte aberto e contínuo.
-    pub fn connect_loops(&mut self, face_a: usize, face_b: usize) -> Result<(), String> {
-        if face_a >= self.faces.len() || face_b >= self.faces.len() {
-            return Err("Índice de face inválido".into());
-        }
-        if face_a == face_b {
-            return Err("Não é possível conectar uma face a si mesma".into());
-        }
-
-        let m = self.faces[face_a].verts.len();
-        if m != self.faces[face_b].verts.len() {
-            return Err(format!(
-                "Faces incompatíveis para conexão: face A possui {} vértices e face B possui {}",
-                m,
-                self.faces[face_b].verts.len()
-            ));
-        }
-
-        let verts_a = self.faces[face_a].verts.clone();
-        let verts_b = self.faces[face_b].verts.clone();
-
-        // Encontra melhor alinhamento testando ambas orientações (direta e invertida)
-        // e todos os deslocamentos cíclicos para evitar torções (bowtie)
-        let mut best_shift = 0;
-        let mut best_reversed = false;
-        let mut min_dist_sq = f32::MAX;
-
-        for reversed in [false, true] {
-            for shift in 0..m {
-                let mut dist_sq = 0.0f32;
-                for (k, &va) in verts_a.iter().enumerate() {
-                    let pa = self.verts[va as usize].vec();
-                    let kb = if !reversed {
-                        (k + shift) % m
-                    } else {
-                        (m + shift - (k % m)) % m
-                    };
-                    let pb = self.verts[verts_b[kb] as usize].vec();
-                    dist_sq += (pa - pb).length_squared();
-                }
-                if dist_sq < min_dist_sq {
-                    min_dist_sq = dist_sq;
-                    best_shift = shift;
-                    best_reversed = reversed;
-                }
-            }
-        }
-
-        // Gera os quads de conexão
-        for k in 0..m {
-            let k2 = (k + 1) % m;
-            let va1 = verts_a[k];
-            let va2 = verts_a[k2];
-            let kb1 = if !best_reversed {
-                (k + best_shift) % m
-            } else {
-                (m + best_shift - (k % m)) % m
-            };
-            let kb2 = if !best_reversed {
-                (k2 + best_shift) % m
-            } else {
-                (m + best_shift - (k2 % m)) % m
-            };
-            let vb1 = verts_b[kb1];
-            let vb2 = verts_b[kb2];
-
-            let mut quad = Face::new(vec![va1, va2, vb2, vb1]);
-            quad.selected = true;
-            self.push_face(quad);
-        }
-
-        // Remove as duas faces originais para abrir a passagem
-        let first = face_a.max(face_b);
-        let second = face_a.min(face_b);
-        self.faces.remove(first);
-        self.faces.remove(second);
-
-        Ok(())
     }
 
     /// Funde outra malha com esta, soldando vértices coincidentes dentro do raio `eps`.

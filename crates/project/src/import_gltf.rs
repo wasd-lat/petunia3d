@@ -52,13 +52,7 @@ pub fn import_glb_bytes(
     for (mi, mesh) in gltf.meshes().enumerate() {
         let mut out = Mesh::default();
         for primitive in mesh.primitives() {
-            let reader = primitive.reader(|buffer| {
-                if buffer.index() == 0 {
-                    blob
-                } else {
-                    None
-                }
-            });
+            let reader = primitive.reader(|buffer| if buffer.index() == 0 { blob } else { None });
             let Some(positions) = reader.read_positions() else {
                 continue;
             };
@@ -74,11 +68,7 @@ pub fn import_glb_bytes(
                 let idx: Vec<u32> = indices.into_u32().collect();
                 for tri in idx.chunks(3) {
                     if tri.len() == 3 {
-                        out.push_face(Face::new(vec![
-                            base + tri[0],
-                            base + tri[1],
-                            base + tri[2],
-                        ]));
+                        out.push_face(Face::new(vec![base + tri[0], base + tri[1], base + tri[2]]));
                     }
                 }
             }

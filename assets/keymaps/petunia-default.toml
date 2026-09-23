@@ -12,6 +12,7 @@ help = "H"
 reset_camera = "Home"
 toggle_projection = "Numpad 5"
 cycle_mode = "Tab"
+rename = "F2"
 
 [paint]
 paint = "B"
@@ -21,6 +22,7 @@ hardness_decrease = "Shift+["
 hardness_increase = "Shift+]"
 
 [model]
+box_select = "B"
 select_vertex = "1"
 select_edge = "2"
 select_face = "3"

@@ -3,6 +3,22 @@
 Todas as alterações notáveis deste projeto são documentadas neste arquivo.
 O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [Unreleased] — Frontend Declarativo Slint & Modern UI
+
+### Adicionado
+- **Frontend Slint (`petunia_ui_slint`)**: nova crate no workspace implementando o shell declarativo moderno em Slint 1.18 (`crates/ui-slint/`).
+  - Top bar com alternador de domínio de seleção (`Object`, `Point`, `Edge`, `Face`) alinhado ao vocabulário canônico (AGENTS.md §3).
+  - Icon Rail para seleção de workspaces `MODEL`, `PAINT` e `UV`.
+  - Tool Shelf contextual vertical (44px) integrada com ações de edição e pintura.
+  - Viewport central reativo com render off-screen WGPU (`viewport_gpu.rs`) e software viewport fallback (`viewport_soft.rs`) para compatibilidade universal (ex.: GPUs antigas / Ivy Bridge Mesa).
+  - Context Inspector adaptado por workspace (Transform com scrubbing e fine-stepping numérico, contagem de polígonos, paleta de pintura e camadas, UV unwrapping e densidade).
+  - Scene Outliner hierárquico lateral e gaveta inferior expansível para Asset Library.
+  - Command Palette modal com busca difusa e atalhos globais de teclado (`Ctrl+Z`, `Ctrl+Y`, `Ctrl+S`, `Ctrl+O`, `Ctrl+K`, `Shift+D`, `Tab`, `1`/`2`/`3`/`4`).
+  - Diálogos de arquivo assíncronos (`files.rs`) com RFD para salvar e abrir projetos `.petunia`.
+  - Sincronização dinâmica de tokens com o `ThemeRegistry` (`petunia-dark` e `petunia-high-contrast`).
+  - Suporte completo de a11y via AccessKit.
+  - Crate legada `petunia_ui` preservada e acessível via flag `--legacy-egui` ou env `PETUNIA_LEGACY_EGUI=1`.
+
 ## [Unreleased] — Iniciativa Paint (decisões canônicas 2026-09-16)
 
 ### Documentação — emenda canônica no Livro Vivo

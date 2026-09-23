@@ -11,6 +11,37 @@ export struct CommandItem {
     disabled-reason: string,
 }
 
+export struct ThemeEntry {
+    id: string,
+    name: string,
+    active: bool,
+}
+
+export struct PaintEffectParamEntry {
+    key: string,
+    label: string,
+    value: float,
+    minimum: float,
+    maximum: float,
+}
+
+export struct PaintLayerEntry {
+    id: string,
+    name: string,
+    visible: bool,
+    locked: bool,
+    opacity: float,
+    active: bool,
+    is-group: bool,
+    kind-label: string,
+}
+
+export struct MenuEntry {
+    id: string,
+    label: string,
+    shortcut: string,
+}
+
 export struct SceneItem {
     id: string,
     name: string,
@@ -19,6 +50,192 @@ export struct SceneItem {
     selected: bool,
     verts: int,
     tris: int,
+}
+
+/// Divisor vertical: arrasta na horizontal e devolve a largura desejada.
+component SplitterVertical inherits Rectangle {
+    in property <length> value;
+    in property <float> direction: 1.0;
+    callback moved(length);
+
+    width: 6px;
+    height: 100%;
+    background: touch-area.has-hover || touch-area.pressed ? DesignTokens.accent : DesignTokens.border;
+    accessible-role: slider;
+    accessible-label: "Resize panel width";
+    accessible-value: 50;
+
+    touch-area := TouchArea {
+        property <length> start-value;
+        property <length> start-x;
+
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                self.start-value = root.value;
+                self.start-x = self.mouse-x;
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.moved(self.start-value + root.direction * (self.mouse-x - self.start-x));
+            }
+        }
+    }
+}
+
+/// Divisor horizontal: arrasta na vertical e devolve a altura desejada.
+component SplitterHorizontal inherits Rectangle {
+    in property <length> value;
+    in property <float> direction: 1.0;
+    callback moved(length);
+
+    width: 100%;
+    height: 6px;
+    background: touch-area.has-hover || touch-area.pressed ? DesignTokens.accent : DesignTokens.border;
+    accessible-role: slider;
+    accessible-label: "Resize panel height";
+    accessible-value: 50;
+
+    touch-area := TouchArea {
+        property <length> start-value;
+        property <length> start-y;
+
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                self.start-value = root.value;
+                self.start-y = self.mouse-y;
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.moved(self.start-value + root.direction * (self.mouse-y - self.start-y));
+            }
+        }
+    }
+}
+
+/// Botão compacto da barra da viewport (visão e domínio de seleção).
+component ViewportBarButton inherits Rectangle {
+    in property <Icon> icon;
+    in property <string> label;
+    in property <bool> active;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checked: root.active;
+    width: max(26px, bar-icon.width + 12px);
+    height: 26px;
+    border-radius: 5px;
+    background: root.active
+        ? DesignTokens.accent
+        : (bar-touch.has-hover ? DesignTokens.surface-hover : transparent);
+
+    bar-icon := IconDisplay {
+        icon: root.icon;
+        size: 14px;
+        stroke: root.active ? DesignTokens.canvas : DesignTokens.text-secondary;
+    }
+
+    bar-touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Botão da barra de menus do topo.
+component MenuButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> open;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-expanded: root.open;
+    height: 26px;
+    width: max(46px, menu-label.preferred-width + 20px);
+    border-radius: 4px;
+    background: root.open
+        ? DesignTokens.accent
+        : (touch-area.has-hover ? DesignTokens.surface-hover : transparent);
+
+    menu-label := Text {
+        text: root.label;
+        color: root.open ? DesignTokens.canvas : DesignTokens.text-secondary;
+        font-size: 11px;
+        font-weight: root.open ? 700 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch-area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Item do menu de contexto: rótulo, atalho opcional e variante de perigo.
+component ContextMenuItem inherits Rectangle {
+    in property <string> label;
+    in property <string> shortcut;
+    in property <bool> danger: false;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    height: 26px;
+    border-radius: 4px;
+    background: touch-area.has-hover ? DesignTokens.surface-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            color: root.danger ? DesignTokens.danger : DesignTokens.text-primary;
+            font-size: 11px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: root.shortcut;
+            color: DesignTokens.text-muted;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+    }
+
+    touch-area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Dropdown de um menu da barra superior.
+component MenuDropdown inherits Rectangle {
+    in property <[MenuEntry]> entries;
+    callback invoked(string);
+
+    width: 216px;
+    height: menu-items.preferred-height;
+    background: DesignTokens.surface-raised;
+    border-width: 1px;
+    border-color: DesignTokens.border;
+    border-radius: 6px;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000080;
+    drop-shadow-offset-y: 4px;
+
+    menu-items := VerticalLayout {
+        padding: 4px;
+        spacing: 1px;
+
+        for entry in root.entries: ContextMenuItem {
+            label: entry.label;
+            shortcut: entry.shortcut;
+            clicked => { root.invoked(entry.id); }
+        }
+    }
 }
 
 component TopAction inherits Rectangle {
@@ -94,79 +311,148 @@ component ColorSwatch inherits Rectangle {
 component NumericField inherits Rectangle {
     in property <string> label: "X";
     in property <float> value: 0.0;
+    in property <float> step: 0.1;
     in property <color> label-color: DesignTokens.axis-x;
     callback scrubbed(float, bool);
     callback scrub-started;
     callback scrub-finished;
-    callback text-committed(string);
+    callback scrub-cancelled(float);
+    callback text-committed(string) -> bool;
     property <bool> editing: false;
+    property <bool> invalid: false;
+    property <string> draft;
 
     accessible-role: spinbox;
     accessible-label: root.label;
     accessible-value: Math.round(root.value * 100) / 100;
-
+    forward-focus: field-focus;
     height: 24px;
     border-radius: 4px;
     background: touch.pressed ? DesignTokens.surface-hover : DesignTokens.surface-raised;
     border-width: 1px;
-    border-color: touch.pressed ? DesignTokens.accent : DesignTokens.border;
+    border-color: root.invalid ? DesignTokens.danger : (root.editing || touch.is-scrubbing || field-focus.has-focus ? DesignTokens.accent : DesignTokens.border);
 
-    HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 6px;
-        spacing: 4px;
-        alignment: center;
-
-        Text {
-            text: root.label;
-            color: root.label-color;
-            font-size: 10px;
-            font-weight: 700;
-            vertical-alignment: center;
-            width: 10px;
+    field-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape && touch.is-scrubbing {
+                touch.cancel-gesture();
+                return accept;
+            }
+            if !root.editing && (event.text == Key.Return || event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                root.draft = root.value;
+                root.invalid = false;
+                root.editing = true;
+                return accept;
+            }
+            reject
         }
-
-        if !root.editing: Text {
-            text: Math.round(root.value * 100) / 100;
-            color: DesignTokens.text-primary;
-            font-size: 11px;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            horizontal-stretch: 1;
-        }
-
-        if root.editing: TextInput {
-            text: root.value;
-            color: DesignTokens.text-primary;
-            font-size: 11px;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
-            accepted => {
-                root.text-committed(self.text);
-                root.editing = false;
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 6px;
+            spacing: 4px;
+            alignment: center;
+            Text {
+                text: root.label;
+                color: root.label-color;
+                font-size: 10px;
+                font-weight: 700;
+                vertical-alignment: center;
+                width: root.label == "" ? 0px : 10px;
+            }
+            if !root.editing: Text {
+                text: Math.round(root.value * 100) / 100;
+                color: DesignTokens.text-primary;
+                font-size: 11px;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                horizontal-stretch: 1;
+            }
+            if root.editing: TextInput {
+                text <=> root.draft;
+                color: DesignTokens.text-primary;
+                font-size: 11px;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                init => { self.focus(); self.select-all(); }
+                edited => { root.invalid = false; }
+                changed has-focus => {
+                    if !self.has-focus && root.editing {
+                        root.editing = false;
+                        root.invalid = !root.text-committed(self.text);
+                    }
+                }
+                key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        root.editing = false;
+                        root.invalid = false;
+                        field-focus.focus();
+                        return accept;
+                    }
+                    if event.text == Key.UpArrow || event.text == Key.DownArrow {
+                        // Arrow edits stay in the draft until Enter or focus loss.
+                        self.text = self.text.to-float() + (event.text == Key.UpArrow ? 1 : -1) * root.step * (event.modifiers.shift ? 0.1 : 1);
+                        return accept;
+                    }
+                    reject
+                }
+                accepted => {
+                    root.invalid = !root.text-committed(self.text);
+                    if !root.invalid { root.editing = false; field-focus.focus(); }
+                }
             }
         }
-    }
-
-    touch := TouchArea {
-        property <length> start-x;
-        property <bool> is-fine: false;
-        pointer-event(event) => {
-            is-fine = event.modifiers.shift;
-            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                start-x = self.mouse-x;
-                root.scrub-started();
-            } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
-                root.scrub-finished();
+        touch := TouchArea {
+            enabled: !root.editing;
+            property <length> start-x;
+            property <length> last-x;
+            property <float> original-value;
+            property <bool> is-fine: false;
+            property <bool> is-scrubbing: false;
+            property <bool> was-drag: false;
+            property <bool> cancelled: false;
+            function cancel-gesture() {
+                if is-scrubbing { root.scrub-cancelled(original-value); }
+                is-scrubbing = false;
+                cancelled = true;
+                was-drag = true;
+            }
+            pointer-event(event) => {
+                is-fine = event.modifiers.shift;
+                if event.kind == PointerEventKind.cancel || (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                    self.cancel-gesture();
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    field-focus.focus();
+                    start-x = self.mouse-x;
+                    last-x = self.mouse-x;
+                    original-value = root.value;
+                    was-drag = false;
+                    cancelled = false;
+                    root.invalid = false;
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                    if is-scrubbing { root.scrub-finished(); }
+                    is-scrubbing = false;
+                }
+            }
+            moved => {
+                if self.pressed && !cancelled {
+                    if !is-scrubbing && Math.abs(self.mouse-x - start-x) > 3px {
+                        is-scrubbing = true;
+                        was-drag = true;
+                        root.scrub-started();
+                    }
+                    if is-scrubbing {
+                        root.scrubbed((self.mouse-x - last-x) / 1px, is-fine);
+                        last-x = self.mouse-x;
+                    }
+                }
+            }
+            clicked => {
+                if !was-drag {
+                    root.draft = root.value;
+                    root.editing = true;
+                }
             }
         }
-        moved => {
-            if self.pressed {
-                root.scrubbed((self.mouse-x - start-x) / 1px, is-fine);
-                start-x = self.mouse-x;
-            }
-        }
-        clicked => { root.editing = true; }
     }
 }
 
@@ -178,7 +464,9 @@ component Vector3Field inherits HorizontalLayout {
     callback scrubbed(int, float, bool);
     callback scrub-started;
     callback scrub-finished;
-    callback text-committed(int, string);
+    callback text-committed(int, string) -> bool;
+    callback scrub-cancelled;
+    in property <float> step: 0.1;
 
     spacing: 6px;
     alignment: center;
@@ -199,7 +487,9 @@ component Vector3Field inherits HorizontalLayout {
         scrubbed(delta, fine) => { root.scrubbed(0, delta, fine); }
         scrub-started => { root.scrub-started(); }
         scrub-finished => { root.scrub-finished(); }
-        text-committed(text) => { root.text-committed(0, text); }
+        text-committed(text) => { root.text-committed(0, text) }
+        scrub-cancelled(_value) => { root.scrub-cancelled(); }
+        step: root.step;
     }
     NumericField {
         label: "Y";
@@ -209,7 +499,9 @@ component Vector3Field inherits HorizontalLayout {
         scrubbed(delta, fine) => { root.scrubbed(1, delta, fine); }
         scrub-started => { root.scrub-started(); }
         scrub-finished => { root.scrub-finished(); }
-        text-committed(text) => { root.text-committed(1, text); }
+        text-committed(text) => { root.text-committed(1, text) }
+        scrub-cancelled(_value) => { root.scrub-cancelled(); }
+        step: root.step;
     }
     NumericField {
         label: "Z";
@@ -219,7 +511,9 @@ component Vector3Field inherits HorizontalLayout {
         scrubbed(delta, fine) => { root.scrubbed(2, delta, fine); }
         scrub-started => { root.scrub-started(); }
         scrub-finished => { root.scrub-finished(); }
-        text-committed(text) => { root.text-committed(2, text); }
+        text-committed(text) => { root.text-committed(2, text) }
+        scrub-cancelled(_value) => { root.scrub-cancelled(); }
+        step: root.step;
     }
 }
 
@@ -279,6 +573,8 @@ component InspectorSection inherits Rectangle {
 }
 
 export component PetuniaSlintShell inherits Window {
+    out property <float> viewport-region-width: viewport-region.width / 1px;
+    out property <float> viewport-region-height: viewport-region.height / 1px;
     title: "Petunia3D";
     preferred-width: 1280px;
     preferred-height: 800px;
@@ -313,7 +609,10 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> active-object-title: "Default Cube";
     in-out property <string> active-object-details: "Vertices: 8  ·  Faces: 6";
     in-out property <string> active-material-name: "Default Material";
-    in-out property <string> scene-stats: "12 tris  ·  8 verts";
+    in-out property <length> inspector-width: 290px;
+    in-out property <length> asset-library-height: 200px;
+    in-out property <string> scene-stats: "";
+    in-out property <string> uv-stats: "";
     in-out property <string> current-theme: "petunia-dark";
 
     in-out property <string> selection-domain: "OBJECT";
@@ -327,16 +626,125 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> asset-library-visible: false;
     in-out property <bool> is-orthographic: false;
     in-out property <bool> is-wireframe: false;
+    in-out property <string> shading-mode: "solid";
+    in-out property <float> xray-opacity: 0.42;
+    in-out property <bool> shading-popover-open: false;
+    property <bool> tool-properties-collapsed: false;
+    in-out property <string> operation-preview-commands: "";
+    in-out property <bool> operation-hud-active: false;
+    in-out property <bool> transform-instant-active: false;
+    property <bool> precision-mode: false;
+    property <bool> snap-mode: false;
+    in-out property <string> operation-hud-title: "";
+    in-out property <[string]> operation-hud-lines: [];
+    in-out property <string> operation-hud-subject: "";
+    in-out property <string> operation-hud-hint: "";
+    in-out property <string> context-hint: "";
+    in-out property <string> hover-label: "";
+    in-out property <int> gizmo-hover-axis: -1;
+    in-out property <int> gizmo-active-axis: -1;
+    in-out property <bool> show-xray: false;
     in-out property <bool> gizmo-visible: false;
+    in-out property <bool> selection-overlay-visible: false;
+    in-out property <string> selection-outline-commands: "";
+    in-out property <string> selection-unselected-outline-commands: "";
+    in-out property <string> selection-unselected-point-commands: "";
+    in-out property <string> selection-point-commands: "";
+    in-out property <bool> selection-overlay-accent: false;
     in-out property <length> gizmo-origin-x: 0px;
     in-out property <length> gizmo-origin-y: 0px;
-    in-out property <length> gizmo-x-end-x: 0px;
-    in-out property <length> gizmo-x-end-y: 0px;
-    in-out property <length> gizmo-y-end-x: 0px;
-    in-out property <length> gizmo-y-end-y: 0px;
-    in-out property <length> gizmo-z-end-x: 0px;
-    in-out property <length> gizmo-z-end-y: 0px;
+    in-out property <string> gizmo-x-commands: "";
+    in-out property <string> gizmo-y-commands: "";
+    in-out property <string> gizmo-z-commands: "";
+    in-out property <string> gizmo-x-arrow-commands: "";
+    in-out property <string> gizmo-y-arrow-commands: "";
+    in-out property <string> gizmo-z-arrow-commands: "";
+    in-out property <string> view-gizmo-x-commands: "";
+    in-out property <string> view-gizmo-y-commands: "";
+    in-out property <string> view-gizmo-z-commands: "";
+    in-out property <length> view-gizmo-origin-x: 0px;
+    in-out property <length> view-gizmo-origin-y: 0px;
+    in-out property <length> view-gizmo-x-end-x: 54px;
+    in-out property <length> view-gizmo-x-end-y: 54px;
+    in-out property <length> view-gizmo-y-end-x: 54px;
+    in-out property <length> view-gizmo-y-end-y: 54px;
+    in-out property <length> view-gizmo-z-end-x: 54px;
+    in-out property <length> view-gizmo-z-end-y: 54px;
+    callback view-axis-clicked(string);
     in-out property <bool> add-menu-open: false;
+    in-out property <bool> context-menu-open: false;
+    in-out property <length> context-menu-x: 0px;
+    in-out property <length> context-menu-y: 0px;
+    in-out property <string> context-menu-title: "";
+    in-out property <bool> context-menu-visible: true;
+    in-out property <bool> context-menu-locked: false;
+    in-out property <string> boolean-operand-name: "";
+    in-out property <bool> boolean-ready: false;
+    in-out property <bool> boolean-keep-parts: false;
+    in-out property <bool> rename-active: false;
+    in-out property <string> menu-open: "";
+    property <length> menu-anchor-x: 0px;
+    in-out property <string> menu-file-label: "";
+    in-out property <string> menu-edit-label: "";
+    in-out property <string> menu-view-label: "";
+    in-out property <string> menu-window-label: "";
+    in-out property <[MenuEntry]> menu-file-items: [];
+    in-out property <[MenuEntry]> menu-edit-items: [];
+    in-out property <[MenuEntry]> menu-view-items: [];
+    in-out property <[MenuEntry]> menu-window-items: [];
+    in-out property <[ThemeEntry]> themes: [];
+    in-out property <string> label-parts: "";
+    in-out property <string> label-project-asset-library: "";
+    in-out property <string> label-save-active-as-asset: "";
+    in-out property <string> label-status-hint: "";
+    in-out property <string> label-unwrap-mesh: "";
+    in-out property <string> label-pack-islands: "";
+    in-out property <string> label-active-brush-color: "";
+    in-out property <string> label-albedo-base-color: "";
+    in-out property <string> label-apply: "";
+    in-out property <string> label-cancel: "";
+    in-out property <string> label-delete: "";
+    in-out property <string> label-duplicate: "";
+    in-out property <string> label-theme: "";
+    in-out property <string> label-place-in-scene: "";
+    in-out property <bool> recovery-open: false;
+    in-out property <string> recovery-title: "";
+    in-out property <string> recovery-body: "";
+    in-out property <string> recovery-detail: "";
+    in-out property <string> recovery-recover: "";
+    in-out property <string> recovery-keep: "";
+    in-out property <string> recovery-discard: "";
+    in-out property <string> label-asset-library: "";
+    in-out property <string> label-preferences: "";
+    in-out property <string> shell-info: "";
+    in-out property <string> rename-value: "";
+    in-out property <string> uv-layout-commands: "";
+    in-out property <int> uv-island-count: 0;
+    in-out property <int> uv-face-count: 0;
+    in-out property <int> uv-selected-face: -1;
+    in-out property <int> uv-selected-count: 0;
+    in-out property <bool> uv-layout-truncated: false;
+    in-out property <[PaintLayerEntry]> paint-layers: [];
+    in-out property <string> paint-layer-count: "";
+    in-out property <string> paint-effect-kind: "";
+    in-out property <[PaintEffectParamEntry]> paint-effect-params: [];
+    in-out property <string> paint-canvas-size: "";
+    in-out property <int> paint-canvas-revision: 0;
+    in-out property <image> paint-canvas-image;
+    in-out property <string> paint-fill-scope: "ConnectedPixels";
+    in-out property <string> paint-projection: "Surface";
+    in-out property <string> paint-lock: "None";
+    in-out property <bool> loop-cut-active: false;
+    in-out property <float> loop-cut-slide: 0.0;
+    in-out property <int> loop-cut-cuts: 1;
+    in-out property <string> tool-activation: "drag";
+    in-out property <bool> tool-modal-active: false;
+    in-out property <string> tool-modal-title: "";
+    in-out property <string> tool-modal-label: "";
+    in-out property <float> tool-modal-value: 0.0;
+    in-out property <float> tool-modal-step: 0.1;
+    in-out property <float> tool-modal-min: 0.0;
+    in-out property <float> tool-modal-max: 0.0;
 
     callback workspace-changed(string);
     callback save-requested;
@@ -352,21 +760,65 @@ export component PetuniaSlintShell inherits Window {
     callback transform-scrubbed(string, int, float, bool);
     callback transform-scrub-started(string);
     callback transform-scrub-finished;
-    callback transform-text-committed(string, int, string);
+    callback transform-text-committed(string, int, string) -> bool;
+    callback transform-scrub-cancelled;
     callback viewport-orbit(float, float);
     callback viewport-pan(float, float);
     callback viewport-zoom(float);
     callback viewport-resized(float, float);
     callback viewport-select(float, float, bool);
+    callback viewport-box-select(float, float, float, float, bool, bool);
     callback viewport-transform-begin(string, float, float);
-    callback viewport-transform-update(float, float);
+    callback viewport-transform-update(float, float, bool, bool);
     callback viewport-transform-end;
     callback viewport-paint-begin(float, float);
     callback viewport-paint-update(float, float);
-    callback viewport-paint-end;
+    callback viewport-paint-end(float, float);
     callback add-menu-changed(bool);
+    callback tool-modal-scrubbed(float, bool);
+    callback tool-modal-hovered(float);
+    callback tool-modal-text-committed(string) -> bool;
+    callback tool-modal-apply;
+    callback tool-activation-set(string);
+    callback tool-modal-cancel;
+    callback loop-cut-scrubbed(float);
+    callback loop-cut-slide-committed(string) -> bool;
+    callback loop-cut-count-committed(string);
+    callback uv-editor-clicked(float, float, bool);
+    callback uv-moved(float, float);
+    callback uv-scaled(float);
+    callback uv-rotated(float);
+    callback uv-seam-toggled;
+    callback uv-seams-cleared;
+    callback boolean-operand-cleared;
+    callback boolean-keep-parts-set(bool);
+    callback join-requested;
+    callback paint-fill-scope-set(string);
+    callback paint-projection-set(string);
+    callback paint-lock-set(string);
+    callback paint-effect-layer-added(string);
+    callback paint-effect-param-set(string, float);
+    callback paint-layer-added;
+    callback paint-layer-group-added;
+    callback paint-layer-removed(string);
+    callback paint-layer-activated(string);
+    callback paint-layer-visibility-toggled(string);
+    callback paint-layer-lock-toggled(string);
+    callback paint-layer-moved(string, int);
+    callback paint-layer-opacity-set(string, float);
+    callback loop-cut-apply;
+    callback loop-cut-cancel;
+    callback inspector-width-changed(float);
+    callback asset-library-height-changed(float);
+    callback rename-committed(string);
+    callback rename-edited(string);
+    callback rename-cancelled;
+    callback scene-context-requested(string, float, float);
+    callback context-menu-action(string);
+    callback menu-toggled(string);
+    callback menu-item-invoked(string);
     callback open-project-requested;
-    callback scene-select(string);
+    callback scene-select(string, bool);
     callback scene-toggle-visibility(string);
     callback scene-toggle-lock(string);
     callback theme-changed(string);
@@ -381,24 +833,75 @@ export component PetuniaSlintShell inherits Window {
     callback asset-library-requested;
     callback toggle-projection-requested;
     callback toggle-wireframe-requested;
+    callback shading-mode-set(string);
+    callback xray-opacity-set(float);
+    callback shading-popover-toggled(bool);
+    callback gizmo-hover(float, float);
+    callback viewport-hover(float, float);
+    callback viewport-hover-clear;
+    callback gizmo-drag-begin(float, float);
+    callback gizmo-drag-end;
+    callback toggle-xray-requested;
     callback reset-camera-requested;
     callback save-active-as-asset-requested;
+    callback place-asset-requested(string);
+    callback recovery-recover-requested;
+    callback recovery-keep-requested;
+    callback recovery-discard-requested;
     callback paint-color-changed(float, float, float);
     callback brush-size-changed(float);
     callback brush-opacity-changed(float);
     callback shortcut-requested(string, bool, bool, bool);
 
+    // Cor e espessura de um handle do gizmo conforme o estado da interação.
+    function gizmo-handle-color(axis: int, base: color) -> color {
+        if root.gizmo-active-axis == axis {
+            return base;
+        }
+        if root.gizmo-active-axis >= 0 {
+            // Durante o arrasto os outros eixos perdem presença.
+            return base.transparentize(0.72);
+        }
+        if root.gizmo-hover-axis == axis {
+            return base.transparentize(0.18);
+        }
+        return base;
+    }
+
+    function gizmo-handle-width(axis: int) -> length {
+        if root.gizmo-active-axis == axis {
+            return 4px;
+        }
+        if root.gizmo-hover-axis == axis {
+            return 3.5px;
+        }
+        return 2.5px;
+    }
+
     changed command-search-visible => { root.command-selection = 0; }
+    changed tool-modal-active => { if (root.tool-modal-active) { root.tool-properties-collapsed = false; } }
+    changed loop-cut-active => { if (root.loop-cut-active) { root.tool-properties-collapsed = false; } }
     changed width => { root.compact-shell = self.width < 1100px; }
 
     root-focus := FocusScope {
+        init => { self.focus(); }
+        key-released(event) => {
+            root.precision-mode = event.modifiers.shift;
+            root.snap-mode = event.modifiers.control;
+            reject
+        }
         key-pressed(event) => {
+            root.precision-mode = event.modifiers.shift;
+            root.snap-mode = event.modifiers.control;
             if event.text == Key.Escape {
+                viewport-touch.clear-gesture();
                 root.escape-requested();
                 return accept;
             }
             if !root.command-search-visible && !root.settings-visible && event.text != Key.Tab {
-                root.shortcut-requested(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt);
+                root.shortcut-requested(
+                    event.text == Key.Return ? "Enter" : event.text == Key.Backspace ? "Backspace" : event.text == Key.Delete ? "Delete" : event.text == Key.Home ? "Home" : event.text,
+                    event.modifiers.control, event.modifiers.shift, event.modifiers.alt);
                 return accept;
             }
             reject
@@ -424,7 +927,40 @@ export component PetuniaSlintShell inherits Window {
                         color: DesignTokens.text-primary;
                         font-size: 14px;
                         font-weight: 700;
-                        width: 84px;
+                        width: 62px;
+                    }
+
+                    MenuButton {
+                        label: root.menu-file-label;
+                        open: root.menu-open == "file";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("file");
+                        }
+                    }
+                    MenuButton {
+                        label: root.menu-edit-label;
+                        open: root.menu-open == "edit";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("edit");
+                        }
+                    }
+                    MenuButton {
+                        label: root.menu-view-label;
+                        open: root.menu-open == "view";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("view");
+                        }
+                    }
+                    MenuButton {
+                        label: root.menu-window-label;
+                        open: root.menu-open == "window";
+                        clicked => {
+                            root.menu-anchor-x = self.absolute-position.x;
+                            root.menu-toggled("window");
+                        }
                     }
 
                     Rectangle {
@@ -488,59 +1024,6 @@ export component PetuniaSlintShell inherits Window {
 
                     Rectangle { horizontal-stretch: 1; }
 
-                    if active-workspace == "MODEL": HorizontalLayout {
-                        spacing: 3px;
-                        alignment: center;
-
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "OBJECT" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.Box;
-                                size: 15px;
-                                stroke: selection-domain == "OBJECT" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("OBJECT"); } }
-                        }
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "POINT" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.CircleDot;
-                                size: 15px;
-                                stroke: selection-domain == "POINT" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("POINT"); } }
-                        }
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "EDGE" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.Minus;
-                                size: 15px;
-                                stroke: selection-domain == "EDGE" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("EDGE"); } }
-                        }
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: selection-domain == "FACE" ? DesignTokens.accent : DesignTokens.surface-raised;
-                            IconDisplay {
-                                icon: IconSet.Square;
-                                size: 15px;
-                                stroke: selection-domain == "FACE" ? DesignTokens.canvas : DesignTokens.text-secondary;
-                            }
-                            TouchArea { clicked => { root.selection-domain-changed("FACE"); } }
-                        }
-                    }
 
                     if active-workspace == "MODEL": Rectangle { horizontal-stretch: 1; }
 
@@ -648,6 +1131,12 @@ export component PetuniaSlintShell inherits Window {
                                 clicked => { root.active-tool-changed("cut"); }
                             }
                             ToolButton {
+                                icon: IconSet.SquareDashed;
+                                semantic-label: "Box Select";
+                                active: active-tool == "box_select";
+                                clicked => { root.active-tool-changed("box_select"); }
+                            }
+                            ToolButton {
                                 icon: IconSet.Maximize2;
                                 semantic-label: "Frame Selection";
                                 active: false;
@@ -681,6 +1170,18 @@ export component PetuniaSlintShell inherits Window {
                                 active: active-tool == "fill";
                                 clicked => { root.active-tool-changed("fill"); }
                             }
+                            ToolButton {
+                                icon: IconSet.SquareDashed;
+                                semantic-label: "Line";
+                                active: active-tool == "line";
+                                clicked => { root.active-tool-changed("line"); }
+                            }
+                            ToolButton {
+                                icon: IconSet.Square;
+                                semantic-label: "Rectangle";
+                                active: active-tool == "rectangle";
+                                clicked => { root.active-tool-changed("rectangle"); }
+                            }
                         }
 
                         if active-workspace == "UV": VerticalLayout {
@@ -709,6 +1210,7 @@ export component PetuniaSlintShell inherits Window {
 
                 viewport-region := Rectangle {
                     horizontal-stretch: 1;
+                    clip: true;
                     background: DesignTokens.canvas;
                     border-width: 1px;
                     border-color: DesignTokens.border;
@@ -735,16 +1237,75 @@ export component PetuniaSlintShell inherits Window {
                         vertical-alignment: center;
                     }
 
+                    // Coordenadas já projetadas em pixels da viewport. Não
+                    // normalizar os paths à caixa do item (fit padrão).
+                    if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
+                        fill: transparent;
+                        stroke: DesignTokens.text-muted;
+                        stroke-width: 1px;
+                        commands: root.selection-unselected-outline-commands;
+                    }
+                    if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
+                        fill: transparent;
+                        stroke: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
+                        stroke-width: 1.5px;
+                        commands: root.selection-outline-commands;
+                    }
+                    if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
+                        fill: DesignTokens.text-muted;
+                        stroke: transparent;
+                        commands: root.selection-unselected-point-commands;
+                    }
+                    if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
+                        fill: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
+                        stroke: transparent;
+                        commands: root.selection-point-commands;
+                    }
+
+                    Path {
+                        fit: ImageFit.preserve;
+                        commands: root.operation-preview-commands;
+                        fill: transparent;
+                        stroke: DesignTokens.accent;
+                        stroke-width: 2px;
+                    }
+
                     viewport-touch := TouchArea {
                         property <length> last-x;
                         property <length> last-y;
+                        property <bool> is-box-select: false;
+                        property <bool> subtract-selection: false;
                         property <bool> is-orbit: false;
                         property <bool> is-pan: false;
                         property <bool> moved-since-down: false;
                         property <bool> extend-selection: false;
                         property <bool> is-transform: false;
+                        property <bool> pending-transform: false;
                         property <bool> is-painting: false;
+                        property <bool> is-tool-drag: false;
+                        property <bool> is-loop-drag: false;
+                        property <bool> is-slice-drag: false;
+                        property <bool> is-gizmo-drag: false;
+                        property <bool> tool-drag-fine: false;
                         property <string> local-kind: "";
+
+                        function clear-gesture() {
+                            self.is-box-select = false;
+                            self.is-transform = false;
+                            self.pending-transform = false;
+                            self.is-tool-drag = false;
+                            self.is-loop-drag = false;
+                            self.is-slice-drag = false;
+                            self.is-gizmo-drag = false;
+                            self.is-painting = false;
+                            self.is-orbit = false;
+                            self.is-pan = false;
+                            self.moved-since-down = true;
+                        }
 
                         function transform-tool() -> string {
                             if root.active-workspace != "MODEL" {
@@ -763,12 +1324,19 @@ export component PetuniaSlintShell inherits Window {
                         }
 
                         pointer-event(event) => {
-                            if event.kind == PointerEventKind.down {
+                            root.precision-mode = event.modifiers.shift;
+                            root.snap-mode = event.modifiers.control;
+                            if event.kind == PointerEventKind.cancel || (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                                self.clear-gesture();
+                                root.escape-requested();
+                            } else if event.kind == PointerEventKind.down {
+                                root-focus.focus();
                                 last-x = self.mouse-x;
                                 last-y = self.mouse-y;
                                 moved-since-down = false;
                                 extend-selection = event.modifiers.shift;
                                 is-transform = false;
+                                pending-transform = false;
                                 if event.button == PointerEventButton.middle {
                                     if event.modifiers.shift {
                                         is-pan = true;
@@ -780,36 +1348,103 @@ export component PetuniaSlintShell inherits Window {
                                 } else if event.button == PointerEventButton.left && event.modifiers.alt {
                                     is-orbit = true;
                                     is-pan = false;
+                                } else if event.button == PointerEventButton.left && root.active-tool == "box_select" && !event.modifiers.alt {
+                                    is-box-select = true;
+                                    subtract-selection = event.modifiers.control;
                                 } else if event.button == PointerEventButton.left
                                     && !event.modifiers.shift
                                     && !event.modifiers.alt {
-                                    if root.active-workspace == "PAINT" {
+                                    // O gizmo tem picking próprio: clicar num
+                                    // handle restringe a transformação ao eixo.
+                                    if root.gizmo-hover-axis >= 0 {
+                                        is-gizmo-drag = true;
+                                        root.gizmo-drag-begin(self.mouse-x / 1px, self.mouse-y / 1px);
+                                    } else if root.transform-instant-active {
+                                        // The pending keyboard operation consumes the click.
+                                    } else if root.active-workspace == "PAINT" {
                                         is-painting = true;
                                         root.viewport-paint-begin(self.mouse-x / 1px, self.mouse-y / 1px);
+                                    } else if root.active-tool == "slice" {
+                                        is-slice-drag = true;
+                                        root.viewport-transform-begin("slice", self.mouse-x / 1px, self.mouse-y / 1px);
+                                    } else if root.loop-cut-active {
+                                        is-loop-drag = true;
+                                        tool-drag-fine = event.modifiers.shift;
+                                    } else if root.tool-modal-active {
+                                        is-tool-drag = true;
+                                        tool-drag-fine = event.modifiers.shift;
                                     } else {
                                         local-kind = self.transform-tool();
                                         if local-kind != "" {
-                                            is-transform = true;
-                                            root.viewport-transform-begin(local-kind, self.mouse-x / 1px, self.mouse-y / 1px);
+                                            // A ferramenta só inicia uma operação após um
+                                            // arrasto real; um clique continua selecionando.
+                                            pending-transform = true;
                                         }
                                     }
                                 }
                             } else if event.kind == PointerEventKind.up {
+                                if is-box-select {
+                                    if moved-since-down {
+                                        root.viewport-box-select(last-x / self.width, last-y / self.height, self.mouse-x / self.width, self.mouse-y / self.height, extend-selection, subtract-selection);
+                                    }
+                                    is-box-select = false;
+                                }
                                 is-orbit = false;
                                 is-pan = false;
                                 if is-transform {
                                     root.viewport-transform-end();
                                     is-transform = false;
                                 }
+                                pending-transform = false;
                                 if is-painting {
-                                    root.viewport-paint-end();
+                                    root.viewport-paint-end(self.mouse-x / 1px, self.mouse-y / 1px);
                                     is-painting = false;
                                 }
+                                if is-tool-drag {
+                                    if moved-since-down {
+                                        root.tool-modal-apply();
+                                    }
+                                    is-tool-drag = false;
+                                }
+                                if is-loop-drag {
+                                    root.loop-cut-apply();
+                                    is-loop-drag = false;
+                                }
+                                if is-slice-drag {
+                                    root.viewport-transform-end();
+                                    is-slice-drag = false;
+                                }
+                                if is-gizmo-drag {
+                                    root.gizmo-drag-end();
+                                    is-gizmo-drag = false;
+                                }
+                                root.viewport-hover(self.mouse-x / self.width, self.mouse-y / self.height);
                             }
                         }
 
                         moved => {
-                            if is-orbit {
+                            if !self.pressed {
+                                // Preselection: o handle do gizmo e o componente
+                                // sob o cursor destacam antes do clique.
+                                root.gizmo-hover(self.mouse-x / 1px, self.mouse-y / 1px);
+                                if root.gizmo-hover-axis < 0 {
+                                    root.viewport-hover(self.mouse-x / self.width, self.mouse-y / self.height);
+                                } else {
+                                    root.viewport-hover-clear();
+                                }
+                            }
+                            if is-box-select {
+                                if abs(self.mouse-x - last-x) > 4px || abs(self.mouse-y - last-y) > 4px { moved-since-down = true; }
+                            } else if root.transform-instant-active && !self.pressed {
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
+                            } else if is-gizmo-drag {
+                                moved-since-down = true;
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
+                            } else if root.tool-modal-active && root.tool-activation == "instant" && !self.pressed {
+                                root.tool-modal-hovered((self.mouse-y - last-y) / 1px);
+                                last-x = self.mouse-x;
+                                last-y = self.mouse-y;
+                            } else if is-orbit {
                                 moved-since-down = true;
                                 root.viewport-orbit((self.mouse-x - last-x) / 1px, (self.mouse-y - last-y) / 1px);
                                 last-x = self.mouse-x;
@@ -821,10 +1456,31 @@ export component PetuniaSlintShell inherits Window {
                                 last-y = self.mouse-y;
                             } else if is-transform {
                                 moved-since-down = true;
-                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
+                            } else if pending-transform && self.pressed
+                                && (self.mouse-x - last-x > 4px || last-x - self.mouse-x > 4px
+                                    || self.mouse-y - last-y > 4px || last-y - self.mouse-y > 4px) {
+                                pending-transform = false;
+                                is-transform = true;
+                                moved-since-down = true;
+                                root.viewport-transform-begin(local-kind, last-x / 1px, last-y / 1px);
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
                             } else if is-painting {
                                 moved-since-down = true;
                                 root.viewport-paint-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                            } else if is-tool-drag {
+                                moved-since-down = true;
+                                root.tool-modal-scrubbed((self.mouse-y - last-y) / 1px, tool-drag-fine);
+                                last-x = self.mouse-x;
+                                last-y = self.mouse-y;
+                            } else if is-loop-drag {
+                                moved-since-down = true;
+                                root.loop-cut-scrubbed((self.mouse-x - last-x) / 1px);
+                                last-x = self.mouse-x;
+                                last-y = self.mouse-y;
+                            } else if is-slice-drag {
+                                moved-since-down = true;
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
                             }
                         }
 
@@ -836,72 +1492,133 @@ export component PetuniaSlintShell inherits Window {
                         }
 
                         scroll-event(event) => {
-                            root.viewport-zoom(event.delta-y / 1px);
+                            if root.loop-cut-active {
+                                root.loop-cut-count-committed("\{root.loop-cut-cuts + (event.delta-y > 0px ? 1 : -1)}");
+                            } else {
+                                root.viewport-zoom(event.delta-y / 1px);
+                            }
                             accept
                         }
                     }
 
-                    Rectangle {
-                        x: 14px;
+                    if viewport-touch.is-box-select: Rectangle {
+                        x: min(viewport-touch.last-x, viewport-touch.mouse-x);
+                        y: min(viewport-touch.last-y, viewport-touch.mouse-y);
+                        width: abs(viewport-touch.mouse-x - viewport-touch.last-x);
+                        height: abs(viewport-touch.mouse-y - viewport-touch.last-y);
+                        background: DesignTokens.accent.transparentize(0.9);
+                        border-color: DesignTokens.accent;
+                        border-width: 1px;
+                    }
+
+                    // Barra da viewport (P3D-076): visão à esquerda, domínio de
+                    // seleção no centro. Largura adaptativa, teto de 60% da
+                    // viewport para nunca cobrir o modelo.
+                    viewport-bar := Rectangle {
+                        x: (parent.width - self.width) / 2;
                         y: 14px;
-                        height: 28px;
-                        border-radius: 5px;
+                        width: min(max(viewport-bar-row.preferred-width + 20px, 320px), parent.width * 0.6);
+                        height: 34px;
+                        border-radius: 8px;
                         background: DesignTokens.surface-raised;
                         border-width: 1px;
                         border-color: DesignTokens.border;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            spacing: 6px;
-                            alignment: center;
 
+                        viewport-bar-row := HorizontalLayout {
+                            x: 10px;
+                            y: 4px;
+                            width: parent.width - 20px;
+                            height: self.preferred-height;
+                            spacing: 4px;
+                            alignment: start;
+
+                            // --- Visão (esquerda) ---
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
                             Text {
-                                text: active-workspace == "UV" ? "UV Dual View" : (active-workspace == "PAINT" ? "Texture Paint" : (is-orthographic ? "Orthographic" : "Perspective"));
+                                text: is-orthographic ? "Ortho" : "Persp";
                                 color: DesignTokens.text-primary;
                                 font-size: 11px;
                                 font-weight: 600;
                                 vertical-alignment: center;
                             }
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
 
-                            Rectangle { width: 1px; height: 16px; background: DesignTokens.border; }
-
-                            Rectangle {
-                                width: 22px;
-                                height: 22px;
-                                border-radius: 3px;
-                                background: is-orthographic ? DesignTokens.accent : transparent;
-                                IconDisplay {
-                                    icon: IconSet.Camera;
-                                    size: 13px;
-                                    stroke: is-orthographic ? DesignTokens.canvas : DesignTokens.text-secondary;
-                                }
-                                TouchArea { clicked => { root.toggle-projection-requested(); } }
+                            ViewportBarButton {
+                                icon: IconSet.Camera;
+                                label: "Projection";
+                                active: is-orthographic;
+                                clicked => { root.toggle-projection-requested(); }
+                            }
+                            ViewportBarButton {
+                                icon: IconSet.Maximize2;
+                                label: "Frame";
+                                active: false;
+                                clicked => { root.command-executed("view.frame_selection"); }
+                            }
+                            ViewportBarButton {
+                                icon: IconSet.RotateCcw;
+                                label: "Reset view";
+                                active: false;
+                                clicked => { root.reset-camera-requested(); }
+                            }
                             }
 
-                            Rectangle {
-                                width: 22px;
-                                height: 22px;
-                                border-radius: 3px;
-                                background: is-wireframe ? DesignTokens.accent : transparent;
-                                IconDisplay {
-                                    icon: IconSet.Box;
-                                    size: 13px;
-                                    stroke: is-wireframe ? DesignTokens.canvas : DesignTokens.text-secondary;
-                                }
-                                TouchArea { clicked => { root.toggle-wireframe-requested(); } }
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+
+                            // Quatro modos de shading, cada um com pipeline real.
+                            HorizontalLayout {
+                                spacing: 3px;
+                                alignment: start;
+                            for mode in [
+                                { id: "wireframe", icon: IconSet.Box, label: "Wireframe" },
+                                { id: "solid", icon: IconSet.Square, label: "Solid" },
+                                { id: "material", icon: IconSet.Image, label: "Material preview" },
+                                { id: "rendered", icon: IconSet.Sparkles, label: "Rendered" },
+                            ]: ViewportBarButton {
+                                icon: mode.icon;
+                                label: mode.label;
+                                active: root.shading-mode == mode.id;
+                                clicked => { root.shading-mode-set(mode.id); }
+                            }
                             }
 
-                            Rectangle {
-                                width: 22px;
-                                height: 22px;
-                                border-radius: 3px;
-                                IconDisplay {
-                                    icon: IconSet.RotateCcw;
-                                    size: 13px;
-                                    stroke: DesignTokens.text-secondary;
-                                }
-                                TouchArea { clicked => { root.reset-camera-requested(); } }
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+
+                            ViewportBarButton {
+                                icon: IconSet.Eye;
+                                label: "X-Ray";
+                                active: root.show-xray;
+                                clicked => { root.toggle-xray-requested(); }
                             }
+                            ViewportBarButton {
+                                icon: IconSet.Settings2;
+                                label: "Shading options";
+                                active: root.shading-popover-open;
+                                clicked => { root.shading-popover-toggled(!root.shading-popover-open); }
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+
+                            // --- Domínio de seleção (centro) ---
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: center;
+                            for domain in [
+                                { id: "OBJECT", icon: IconSet.Box, label: "Object" },
+                                { id: "POINT", icon: IconSet.CircleDot, label: "Point" },
+                                { id: "EDGE", icon: IconSet.SquareDashed, label: "Edge" },
+                                { id: "FACE", icon: IconSet.Square, label: "Face" },
+                            ]: ViewportBarButton {
+                                icon: domain.icon;
+                                label: domain.label;
+                                active: selection-domain == domain.id;
+                                clicked => { root.selection-domain-changed(domain.id); }
+                            }
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
                         }
                     }
 
@@ -921,7 +1638,9 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
 
-                    // Gizmo 3D projetado: três hastes do pivô da seleção.
+                    // Gizmo de transformação: hastes curtas de tamanho fixo em
+                    // tela, com setas, só com Move/Rotate/Scale. Nunca linhas
+                    // infinitas: o padrão é controle de tamanho aparente constante.
                     if gizmo-visible && active-workspace == "MODEL": Rectangle {
                         x: 0;
                         y: 0;
@@ -929,33 +1648,108 @@ export component PetuniaSlintShell inherits Window {
                         height: parent.height;
                         background: transparent;
 
+                        // Hierarquia do gizmo: o eixo ativo domina, o eixo sob o
+                        // cursor clareia, os demais esmaecem durante o arrasto.
                         Path {
-                            commands: "M \{gizmo-origin-x / 1px} \{gizmo-origin-y / 1px} L \{gizmo-x-end-x / 1px} \{gizmo-x-end-y / 1px}";
-                            stroke: DesignTokens.axis-x;
-                            stroke-width: 3px;
+                            commands: root.gizmo-x-commands;
+                            fit: ImageFit.preserve;
+                            stroke: root.gizmo-handle-color(0, DesignTokens.axis-x);
+                            stroke-width: root.gizmo-handle-width(0);
                             fill: transparent;
                         }
                         Path {
-                            commands: "M \{gizmo-origin-x / 1px} \{gizmo-origin-y / 1px} L \{gizmo-y-end-x / 1px} \{gizmo-y-end-y / 1px}";
-                            stroke: DesignTokens.axis-y;
-                            stroke-width: 3px;
+                            commands: root.gizmo-y-commands;
+                            fit: ImageFit.preserve;
+                            stroke: root.gizmo-handle-color(1, DesignTokens.axis-y);
+                            stroke-width: root.gizmo-handle-width(1);
                             fill: transparent;
                         }
                         Path {
-                            commands: "M \{gizmo-origin-x / 1px} \{gizmo-origin-y / 1px} L \{gizmo-z-end-x / 1px} \{gizmo-z-end-y / 1px}";
-                            stroke: DesignTokens.axis-z;
-                            stroke-width: 3px;
+                            commands: root.gizmo-z-commands;
+                            fit: ImageFit.preserve;
+                            stroke: root.gizmo-handle-color(2, DesignTokens.axis-z);
+                            stroke-width: root.gizmo-handle-width(2);
                             fill: transparent;
+                        }
+                        Path {
+                            commands: root.gizmo-x-arrow-commands;
+                            fit: ImageFit.preserve;
+                            stroke: transparent;
+                            fill: root.gizmo-handle-color(0, DesignTokens.axis-x);
+                        }
+                        Path {
+                            commands: root.gizmo-y-arrow-commands;
+                            fit: ImageFit.preserve;
+                            stroke: transparent;
+                            fill: root.gizmo-handle-color(1, DesignTokens.axis-y);
+                        }
+                        Path {
+                            commands: root.gizmo-z-arrow-commands;
+                            fit: ImageFit.preserve;
+                            stroke: transparent;
+                            fill: root.gizmo-handle-color(2, DesignTokens.axis-z);
                         }
                         Rectangle {
-                            x: gizmo-origin-x - 5px;
-                            y: gizmo-origin-y - 5px;
-                            width: 10px;
-                            height: 10px;
-                            border-radius: 5px;
+                            x: gizmo-origin-x - 4px;
+                            y: gizmo-origin-y - 4px;
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
                             background: DesignTokens.text-primary;
                             border-width: 1px;
                             border-color: DesignTokens.canvas;
+                        }
+                    }
+
+                    // Tripé de navegação no canto inferior esquerdo: mostra a
+                    // orientação da câmera como Blender, C4D e Maya. Clicar num
+                    // eixo alinha a visão a ele.
+                    Rectangle {
+                        x: view-gizmo-origin-x - 54px;
+                        y: view-gizmo-origin-y - 54px;
+                        width: 108px;
+                        height: 108px;
+                        clip: true;
+                        background: transparent;
+
+                        Path {
+                            commands: root.view-gizmo-x-commands;
+                            fit: ImageFit.preserve;
+                            stroke: DesignTokens.axis-x;
+                            stroke-width: 2px;
+                            fill: transparent;
+                        }
+                        Path {
+                            commands: root.view-gizmo-y-commands;
+                            fit: ImageFit.preserve;
+                            stroke: DesignTokens.axis-y;
+                            stroke-width: 2px;
+                            fill: transparent;
+                        }
+                        Path {
+                            commands: root.view-gizmo-z-commands;
+                            fit: ImageFit.preserve;
+                            stroke: DesignTokens.axis-z;
+                            stroke-width: 2px;
+                            fill: transparent;
+                        }
+                        for axis in [
+                            { id: "x", label: "X", x: root.view-gizmo-x-end-x, y: root.view-gizmo-x-end-y, tint: DesignTokens.axis-x },
+                            { id: "y", label: "Y", x: root.view-gizmo-y-end-x, y: root.view-gizmo-y-end-y, tint: DesignTokens.axis-y },
+                            { id: "z", label: "Z", x: root.view-gizmo-z-end-x, y: root.view-gizmo-z-end-y, tint: DesignTokens.axis-z },
+                        ]: Rectangle {
+                            x: axis.x - 10px;
+                            y: axis.y - 10px;
+                            width: 20px;
+                            height: 20px;
+                            border-radius: 10px;
+                            background: DesignTokens.surface-raised;
+                            border-width: 1px;
+                            border-color: axis.tint;
+                            accessible-role: button;
+                            accessible-label: axis.label;
+                            Text { text: axis.label; color: axis.tint; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.view-axis-clicked(axis.id); } }
                         }
                     }
 
@@ -1007,12 +1801,12 @@ export component PetuniaSlintShell inherits Window {
                                 clicked => { root.active-tool-changed("scale"); }
                             }
 
-                            if active-workspace == "MODEL" && selection-domain == "OBJECT": Rectangle {
+                            if active-workspace == "MODEL": Rectangle {
                                 width: 1px;
                                 height: 22px;
                                 background: DesignTokens.border;
                             }
-                            if active-workspace == "MODEL" && selection-domain == "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Plus;
                                 semantic-label: "Add Primitive";
                                 active: root.add-menu-open;
@@ -1021,31 +1815,50 @@ export component PetuniaSlintShell inherits Window {
                                     root.add-menu-changed(root.add-menu-open);
                                 }
                             }
-                            if active-workspace == "MODEL" && selection-domain == "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Copy;
                                 semantic-label: "Duplicate";
                                 clicked => { root.duplicate-requested(); }
                             }
-
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": Rectangle {
-                                width: 1px;
-                                height: 22px;
-                                background: DesignTokens.border;
-                            }
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Move3d;
                                 semantic-label: "Extrude";
                                 clicked => { root.command-executed("model.extrude"); }
                             }
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.SquareDashed;
                                 semantic-label: "Inset";
                                 clicked => { root.command-executed("model.inset"); }
                             }
-                            if active-workspace == "MODEL" && selection-domain != "OBJECT": ToolButton {
+                            if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.CircleDot;
+                                semantic-label: "Bevel";
+                                clicked => { root.command-executed("model.bevel"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Scissors;
+                                semantic-label: "Knife";
+                                clicked => { root.command-executed("model.knife"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Grid2x2;
+                                semantic-label: "Loop Cut";
+                                clicked => { root.command-executed("model.loop_cut"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Square;
+                                semantic-label: "Subdivide";
+                                clicked => { root.command-executed("model.subdivide"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Merge;
                                 semantic-label: "Merge Center";
                                 clicked => { root.command-executed("model.merge"); }
+                            }
+                            if active-workspace == "MODEL": ToolButton {
+                                icon: IconSet.Slice;
+                                semantic-label: "Slice";
+                                clicked => { root.command-executed("model.slice"); }
                             }
 
                             if active-workspace == "PAINT": ToolButton {
@@ -1170,9 +1983,17 @@ export component PetuniaSlintShell inherits Window {
                     }
                 }
 
+                if inspector-visible && !compact-shell: SplitterVertical {
+                    value: root.inspector-width;
+                    direction: -1.0;
+                    moved(width) => { root.inspector-width-changed(width / 1px); }
+                }
+
                 Rectangle {
-                    width: inspector-visible && !compact-shell ? 288px : 0px;
+                    width: inspector-width;
                     visible: inspector-visible && !compact-shell;
+                    y: 0;
+                    height: 100%;
                     background: DesignTokens.surface;
                     border-width: 1px;
                     border-color: DesignTokens.border;
@@ -1200,6 +2021,106 @@ export component PetuniaSlintShell inherits Window {
                         if active-workspace == "MODEL": VerticalLayout {
                             spacing: 10px;
 
+                            if boolean-operand-name != "": InspectorSection {
+                                title: "Boolean";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: "Operand: \{root.boolean-operand-name}";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 11px;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.accent;
+                                            Text { text: "Fuse"; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Fuse with the operand";
+                                            TouchArea { clicked => { root.command-executed("model.fuse"); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Cut"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Cut the operand out of the active object";
+                                            TouchArea { clicked => { root.command-executed("model.cut"); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Intersect"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Intersect with the operand";
+                                            TouchArea { clicked => { root.command-executed("model.intersect"); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Join"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Join the operand into the active object";
+                                            TouchArea { clicked => { root.join-requested(); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.boolean-keep-parts ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: checkbox;
+                                            accessible-label: "Keep Parts";
+                                            accessible-checked: root.boolean-keep-parts;
+                                            Text {
+                                                text: root.boolean-keep-parts ? "Keep Parts: on" : "Keep Parts: off";
+                                                color: root.boolean-keep-parts ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 10px;
+                                                font-weight: 600;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            TouchArea { clicked => { root.boolean-keep-parts-set(!root.boolean-keep-parts); } }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        height: 24px;
+                                        border-radius: 4px;
+                                        background: DesignTokens.surface-raised;
+                                        border-width: 1px;
+                                        border-color: DesignTokens.border;
+                                        Text { text: "Clear operand"; color: DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { clicked => { root.boolean-operand-cleared(); } }
+                                    }
+                                }
+                            }
+
                             if selection-domain == "OBJECT": InspectorSection {
                                 title: "Transform";
                                 toggled => { self.open = !self.open; }
@@ -1215,17 +2136,20 @@ export component PetuniaSlintShell inherits Window {
                                         scrubbed(axis, delta, fine) => { root.transform-scrubbed("pos", axis, delta, fine); }
                                         scrub-started => { root.transform-scrub-started("pos"); }
                                         scrub-finished => { root.transform-scrub-finished(); }
-                                        text-committed(axis, text) => { root.transform-text-committed("pos", axis, text); }
+                                        text-committed(axis, text) => { root.transform-text-committed("pos", axis, text) }
+                                        scrub-cancelled => { root.transform-scrub-cancelled(); }
                                     }
                                     Vector3Field {
                                         row-label: "Rotation";
+                                        step: 1;
                                         x-value: root.rot-x;
                                         y-value: root.rot-y;
                                         z-value: root.rot-z;
                                         scrubbed(axis, delta, fine) => { root.transform-scrubbed("rot", axis, delta, fine); }
                                         scrub-started => { root.transform-scrub-started("rot"); }
                                         scrub-finished => { root.transform-scrub-finished(); }
-                                        text-committed(axis, text) => { root.transform-text-committed("rot", axis, text); }
+                                        text-committed(axis, text) => { root.transform-text-committed("rot", axis, text) }
+                                        scrub-cancelled => { root.transform-scrub-cancelled(); }
                                     }
                                     Vector3Field {
                                         row-label: "Scale";
@@ -1235,7 +2159,8 @@ export component PetuniaSlintShell inherits Window {
                                         scrubbed(axis, delta, fine) => { root.transform-scrubbed("scale", axis, delta, fine); }
                                         scrub-started => { root.transform-scrub-started("scale"); }
                                         scrub-finished => { root.transform-scrub-finished(); }
-                                        text-committed(axis, text) => { root.transform-text-committed("scale", axis, text); }
+                                        text-committed(axis, text) => { root.transform-text-committed("scale", axis, text) }
+                                        scrub-cancelled => { root.transform-scrub-cancelled(); }
                                     }
                                 }
                             }
@@ -1304,18 +2229,12 @@ export component PetuniaSlintShell inherits Window {
                                             stroke: DesignTokens.text-primary;
                                         }
                                         Text {
-                                            text: "Duplicate";
+                                            text: root.label-duplicate;
                                             color: DesignTokens.text-primary;
                                             font-size: 11px;
                                             font-weight: 600;
                                             vertical-alignment: center;
                                         }
-                                    }
-                                    Slider {
-                                        minimum: 0.1;
-                                        maximum: 100;
-                                        value: root.brush-size;
-                                        changed(value) => { root.brush-size-changed(value); }
                                     }
                                     TouchArea {
                                         clicked => { root.duplicate-requested(); }
@@ -1337,18 +2256,12 @@ export component PetuniaSlintShell inherits Window {
                                             stroke: DesignTokens.danger;
                                         }
                                         Text {
-                                            text: "Delete";
+                                            text: root.label-delete;
                                             color: DesignTokens.danger;
                                             font-size: 11px;
                                             font-weight: 600;
                                             vertical-alignment: center;
                                         }
-                                    }
-                                    Slider {
-                                        minimum: 0;
-                                        maximum: 1;
-                                        value: root.brush-opacity;
-                                        changed(value) => { root.brush-opacity-changed(value); }
                                     }
                                     TouchArea {
                                         clicked => { root.delete-requested(); }
@@ -1359,6 +2272,390 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "PAINT": VerticalLayout {
                             spacing: 10px;
+
+                            InspectorSection {
+                                title: "Effects";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: "Add an effect layer";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for effect in ["Pixelate", "Posterize", "Invert"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: button;
+                                            accessible-label: effect;
+                                            Text { text: effect; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                            TouchArea { clicked => { root.paint-effect-layer-added(effect); } }
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for effect in ["Grain", "BrightnessContrast", "HueSaturation"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: button;
+                                            accessible-label: effect;
+                                            Text { text: effect; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                            TouchArea { clicked => { root.paint-effect-layer-added(effect); } }
+                                        }
+                                    }
+
+                                    if paint-effect-kind != "": Text {
+                                        text: "Active effect: \{root.paint-effect-kind}";
+                                        color: DesignTokens.accent;
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                    }
+                                    if paint-effect-kind != "" && paint-effect-params.length == 0: Text {
+                                        text: "This effect has no parameters.";
+                                        color: DesignTokens.text-muted;
+                                        font-size: 10px;
+                                    }
+
+                                    for param in root.paint-effect-params: HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 24px;
+
+                                        Text {
+                                            text: param.label;
+                                            color: DesignTokens.text-secondary;
+                                            font-size: 10px;
+                                            width: 78px;
+                                            vertical-alignment: center;
+                                        }
+                                        Slider {
+                                            horizontal-stretch: 1;
+                                            minimum: param.minimum;
+                                            maximum: param.maximum;
+                                            value: param.value;
+                                            changed(value) => { root.paint-effect-param-set(param.key, value); }
+                                        }
+                                    }
+                                }
+                            }
+
+                            InspectorSection {
+                                title: "Canvas";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: root.paint-canvas-size;
+                                        color: DesignTokens.text-muted;
+                                        font-size: 10px;
+                                    }
+
+                                    // Xadrez de transparência atrás do raster, para
+                                    // que pixels com alfa zero não pareçam preto.
+                                    Rectangle {
+                                        height: 200px;
+                                        background: DesignTokens.canvas;
+                                        border-width: 1px;
+                                        border-color: DesignTokens.border;
+
+                                        Image {
+                                            width: 100%;
+                                            height: 100%;
+                                            image-fit: contain;
+                                            source: root.paint-canvas-image;
+                                        }
+                                    }
+                                }
+                            }
+
+                            InspectorSection {
+                                title: "Fill & Projection";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    Text {
+                                        text: "Fill scope";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for scope in ["ConnectedPixels", "Face", "SelectedFaces", "UvIsland", "Object"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.paint-fill-scope == scope ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: radio-button;
+                                            accessible-label: scope;
+                                            accessible-checked: root.paint-fill-scope == scope;
+                                            Text {
+                                                text: scope;
+                                                color: root.paint-fill-scope == scope ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 9px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                            TouchArea { clicked => { root.paint-fill-scope-set(scope); } }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "Projection";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for projection in ["Surface", "ScreenSpace"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.paint-projection == projection ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: radio-button;
+                                            accessible-label: projection;
+                                            accessible-checked: root.paint-projection == projection;
+                                            Text {
+                                                text: projection;
+                                                color: root.paint-projection == projection ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 10px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            TouchArea { clicked => { root.paint-projection-set(projection); } }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "Brush lock";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        for lock in ["None", "FirstObject", "FirstFace"]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: root.paint-lock == lock ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: radio-button;
+                                            accessible-label: lock;
+                                            accessible-checked: root.paint-lock == lock;
+                                            Text {
+                                                text: lock;
+                                                color: root.paint-lock == lock ? DesignTokens.canvas : DesignTokens.text-secondary;
+                                                font-size: 9px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                            TouchArea { clicked => { root.paint-lock-set(lock); } }
+                                        }
+                                    }
+                                }
+                            }
+
+                            InspectorSection {
+                                title: "Layers";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    padding-top: 4px;
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 24px;
+
+                                        Text {
+                                            text: root.paint-layer-count;
+                                            color: DesignTokens.text-muted;
+                                            font-size: 10px;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 3px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            IconDisplay { icon: IconSet.Plus; size: 12px; stroke: DesignTokens.text-secondary; }
+                                            accessible-role: button;
+                                            accessible-label: "Add layer";
+                                            TouchArea { clicked => { root.paint-layer-added(); } }
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 3px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            IconDisplay { icon: IconSet.FolderOpen; size: 12px; stroke: DesignTokens.text-secondary; }
+                                            accessible-role: button;
+                                            accessible-label: "Add group";
+                                            TouchArea { clicked => { root.paint-layer-group-added(); } }
+                                        }
+                                    }
+
+                                    for layer in root.paint-layers: Rectangle {
+                                        height: 30px;
+                                        border-radius: 4px;
+                                        background: layer.active ? DesignTokens.surface-hover : transparent;
+                                        border-width: layer.active ? 1px : 0px;
+                                        border-color: DesignTokens.accent;
+
+                                        HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            spacing: 4px;
+                                            alignment: center;
+
+                                            TouchArea {
+                                                horizontal-stretch: 1;
+                                                clicked => { root.paint-layer-activated(layer.id); }
+
+                                                HorizontalLayout {
+                                                    spacing: 6px;
+                                                    alignment: center;
+
+                                                    IconDisplay {
+                                                        icon: layer.is-group ? IconSet.FolderOpen : IconSet.Square;
+                                                        size: 12px;
+                                                        stroke: layer.active ? DesignTokens.accent : DesignTokens.text-muted;
+                                                    }
+                                                    Text {
+                                                        text: layer.name;
+                                                        color: layer.active ? DesignTokens.text-primary : DesignTokens.text-secondary;
+                                                        font-size: 11px;
+                                                        font-weight: layer.active ? 600 : 400;
+                                                        vertical-alignment: center;
+                                                        horizontal-stretch: 1;
+                                                        overflow: elide;
+                                                    }
+                                                    Text {
+                                                        text: layer.kind-label;
+                                                        color: DesignTokens.text-muted;
+                                                        font-size: 9px;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay { icon: IconSet.ChevronUp; size: 11px; stroke: DesignTokens.text-muted; }
+                                                accessible-role: button;
+                                                accessible-label: "Move layer up";
+                                                TouchArea { clicked => { root.paint-layer-moved(layer.id, 1); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay { icon: IconSet.ChevronDown; size: 11px; stroke: DesignTokens.text-muted; }
+                                                accessible-role: button;
+                                                accessible-label: "Move layer down";
+                                                TouchArea { clicked => { root.paint-layer-moved(layer.id, -1); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay {
+                                                    icon: layer.visible ? IconSet.Eye : IconSet.EyeOff;
+                                                    size: 12px;
+                                                    stroke: layer.visible ? DesignTokens.text-secondary : DesignTokens.text-muted;
+                                                }
+                                                accessible-role: checkbox;
+                                                accessible-label: "Layer visible";
+                                                accessible-checked: layer.visible;
+                                                TouchArea { clicked => { root.paint-layer-visibility-toggled(layer.id); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay {
+                                                    icon: layer.locked ? IconSet.Lock : IconSet.LockOpen;
+                                                    size: 12px;
+                                                    stroke: layer.locked ? DesignTokens.accent : DesignTokens.text-muted;
+                                                }
+                                                accessible-role: checkbox;
+                                                accessible-label: "Layer locked";
+                                                accessible-checked: layer.locked;
+                                                TouchArea { clicked => { root.paint-layer-lock-toggled(layer.id); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay { icon: IconSet.Trash2; size: 11px; stroke: DesignTokens.danger; }
+                                                accessible-role: button;
+                                                accessible-label: "Remove layer";
+                                                TouchArea { clicked => { root.paint-layer-removed(layer.id); } }
+                                            }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 22px;
+
+                                        Text {
+                                            text: "Opacity";
+                                            color: DesignTokens.text-secondary;
+                                            font-size: 10px;
+                                            width: 52px;
+                                            vertical-alignment: center;
+                                        }
+                                        for layer in root.paint-layers: Rectangle {
+                                            visible: layer.active;
+                                            horizontal-stretch: 1;
+                                            height: 22px;
+
+                                            Slider {
+                                                minimum: 0.0;
+                                                maximum: 1.0;
+                                                value: layer.opacity;
+                                                changed(value) => { root.paint-layer-opacity-set(layer.id, value); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             InspectorSection {
                                 title: "Color Palette";
@@ -1383,7 +2680,7 @@ export component PetuniaSlintShell inherits Window {
                                         }
 
                                         Text {
-                                            text: "Active Brush Color";
+                                            text: root.label-active-brush-color;
                                             color: DesignTokens.text-primary;
                                             font-size: 11px;
                                             font-weight: 600;
@@ -1521,7 +2818,7 @@ export component PetuniaSlintShell inherits Window {
                                             spacing: 6px;
                                             alignment: center;
                                             IconDisplay { icon: IconSet.Layers3; size: 14px; stroke: DesignTokens.accent; }
-                                            Text { text: "Albedo (Base Color)"; color: DesignTokens.text-primary; font-size: 11px; vertical-alignment: center; }
+                                            Text { text: root.label-albedo-base-color; color: DesignTokens.text-primary; font-size: 11px; vertical-alignment: center; }
                                             Rectangle { horizontal-stretch: 1; }
                                             Text { text: "Active"; color: DesignTokens.success; font-size: 10px; font-weight: 700; vertical-alignment: center; }
                                         }
@@ -1550,7 +2847,7 @@ export component PetuniaSlintShell inherits Window {
                                             alignment: center;
                                             spacing: 6px;
                                             IconDisplay { icon: IconSet.Maximize2; size: 14px; stroke: DesignTokens.canvas; }
-                                            Text { text: "Unwrap Mesh"; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                                            Text { text: root.label-unwrap-mesh; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; vertical-alignment: center; }
                                         }
                                         TouchArea { clicked => { root.command-executed("uv.unwrap"); } }
                                     }
@@ -1565,9 +2862,197 @@ export component PetuniaSlintShell inherits Window {
                                             alignment: center;
                                             spacing: 6px;
                                             IconDisplay { icon: IconSet.Grid2x2; size: 14px; stroke: DesignTokens.text-primary; }
-                                            Text { text: "Pack Islands"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                                            Text { text: root.label-pack-islands; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                                         }
                                         TouchArea { clicked => { root.command-executed("uv.pack_islands"); } }
+                                    }
+                                }
+                            }
+
+                            InspectorSection {
+                                title: "UV Editor";
+                                open: true;
+                                toggled => { self.open = !self.open; }
+
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    padding-top: 4px;
+
+                                    // Caixa 0..1 com o layout real das UVs.
+                                    uv-box := Rectangle {
+                                        height: 256px;
+                                        background: DesignTokens.canvas;
+                                        border-width: 1px;
+                                        border-color: DesignTokens.border;
+
+                                        Path {
+                                            fill: transparent;
+                                            stroke: DesignTokens.accent;
+                                            stroke-width: 1px;
+                                            commands: root.uv-layout-commands;
+                                        }
+
+                                        TouchArea {
+                                            property <bool> extend: false;
+                                            pointer-event(event) => {
+                                                extend = event.modifiers.shift;
+                                                if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                                                    // O domínio usa UV com origem embaixo; a caixa desenha
+                                                    // com origem em cima, então o V é invertido aqui.
+                                                    root.uv-editor-clicked(
+                                                        self.mouse-x / self.width,
+                                                        1.0 - self.mouse-y / self.height,
+                                                        extend,
+                                                    );
+                                                }
+                                            }
+                                        }
+
+                                        // Contorno do espaço 0..1.
+                                        Rectangle { x: 0; y: 0; width: 100%; height: 1px; background: DesignTokens.border; }
+                                        Rectangle { x: 0; y: parent.height - 1px; width: 100%; height: 1px; background: DesignTokens.border; }
+                                        Rectangle { x: 0; y: 0; width: 1px; height: 100%; background: DesignTokens.border; }
+                                        Rectangle { x: parent.width - 1px; y: 0; width: 1px; height: 100%; background: DesignTokens.border; }
+                                    }
+
+                                    Text {
+                                        text: "\{root.uv-island-count} island(s)  ·  \{root.uv-face-count} face(s)  ·  selected: \{root.uv-selected-face}  ·  UV set: \{root.uv-selected-count}";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 10px;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "← U"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV left";
+                                            TouchArea { clicked => { root.uv-moved(-0.05, 0.0); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "U →"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV right";
+                                            TouchArea { clicked => { root.uv-moved(0.05, 0.0); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "↓ V"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV down";
+                                            TouchArea { clicked => { root.uv-moved(0.0, -0.05); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "V ↑"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Move UV up";
+                                            TouchArea { clicked => { root.uv-moved(0.0, 0.05); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        height: 26px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Scale −"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Scale UV down";
+                                            TouchArea { clicked => { root.uv-scaled(0.9); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Scale +"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Scale UV up";
+                                            TouchArea { clicked => { root.uv-scaled(1.1); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Rotate −"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Rotate UV counter-clockwise";
+                                            TouchArea { clicked => { root.uv-rotated(-15.0); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Rotate +"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Rotate UV clockwise";
+                                            TouchArea { clicked => { root.uv-rotated(15.0); } }
+                                        }
+                                    }
+                                    if root.uv-layout-truncated: Text {
+                                        text: "Layout truncated: only the first 2000 faces are drawn.";
+                                        color: DesignTokens.text-muted;
+                                        font-size: 10px;
+                                        wrap: word-wrap;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Mark/Unmark Seams"; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Toggle seams on the selected face";
+                                            TouchArea { clicked => { root.uv-seam-toggled(); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Clear Seams"; color: DesignTokens.danger; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Clear all seams";
+                                            TouchArea { clicked => { root.uv-seams-cleared(); } }
+                                        }
                                     }
                                 }
                             }
@@ -1578,7 +3063,7 @@ export component PetuniaSlintShell inherits Window {
                                 toggled => { self.open = !self.open; }
 
                                 Text {
-                                    text: "Algorithm: LSCM / ABF++ Conformal\nTarget: \{root.active-object-title}\nTexel Density: Auto";
+                                    text: root.uv-stats;
                                     color: DesignTokens.text-secondary;
                                     font-size: 11px;
                                 }
@@ -1602,7 +3087,7 @@ export component PetuniaSlintShell inherits Window {
                     alignment: center;
 
                     Text { text: root.status-message; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
-                    Text { text: "LMB select   ·   MMB orbit   ·   Esc cancel"; color: DesignTokens.text-muted; font-size: 11px; vertical-alignment: center; }
+                    Text { text: root.label-status-hint; color: DesignTokens.text-muted; font-size: 11px; vertical-alignment: center; }
 
                     Rectangle { horizontal-stretch: 1; }
 
@@ -1623,7 +3108,7 @@ export component PetuniaSlintShell inherits Window {
                                 stroke: asset-library-visible ? DesignTokens.canvas : DesignTokens.text-primary;
                             }
                             Text {
-                                text: "Asset Library";
+                                text: root.label-asset-library;
                                 color: asset-library-visible ? DesignTokens.canvas : DesignTokens.text-primary;
                                 font-size: 10px;
                                 font-weight: 600;
@@ -1655,7 +3140,7 @@ export component PetuniaSlintShell inherits Window {
 
                 HorizontalLayout {
                     Text {
-                        text: "Parts";
+                        text: root.label-parts;
                         color: DesignTokens.text-primary;
                         font-size: 12px;
                         font-weight: 700;
@@ -1698,8 +3183,20 @@ export component PetuniaSlintShell inherits Window {
                                 alignment: center;
 
                                 TouchArea {
-                                    clicked => { root.scene-select(item.id); }
+                                    property <bool> extend: false;
+                                    pointer-event(event) => { self.extend = event.modifiers.shift; }
+                                    clicked => { root.scene-select(item.id, self.extend); }
                                     horizontal-stretch: 1;
+
+                                    pointer-event(event) => {
+                                        if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                                            root.scene-context-requested(
+                                                item.id,
+                                                (self.absolute-position.x + self.mouse-x) / 1px,
+                                                (self.absolute-position.y + self.mouse-y) / 1px,
+                                            );
+                                        }
+                                    }
 
                                     HorizontalLayout {
                                         spacing: 6px;
@@ -1711,7 +3208,18 @@ export component PetuniaSlintShell inherits Window {
                                             stroke: item.selected ? DesignTokens.accent : DesignTokens.text-muted;
                                         }
 
-                                        Text {
+                                        if root.rename-active && item.selected: TextInput {
+                                            text: root.rename-value;
+                                            horizontal-stretch: 1;
+                                            font-size: 12px;
+                                            color: DesignTokens.text-primary;
+                                            single-line: true;
+                                            init => { self.focus(); }
+                                            edited => { root.rename-edited(self.text); }
+                                            accepted => { root.rename-committed(self.text); }
+                                        }
+
+                                        if !(root.rename-active && item.selected): Text {
                                             text: item.name;
                                             color: item.selected ? DesignTokens.text-primary : DesignTokens.text-secondary;
                                             font-size: 12px;
@@ -1762,12 +3270,567 @@ export component PetuniaSlintShell inherits Window {
             }
         }
 
+        // Painel flutuante de Tool Properties (P3D-083): as configurações da
+        // ferramenta ativa ficam fora do Object Inspector, ancoradas na viewport.
+        if tool-modal-active || loop-cut-active: Rectangle {
+            x: parent.width - self.width - 16px;
+            y: parent.height - self.height - 16px;
+            width: 236px;
+            height: root.tool-properties-collapsed ? 40px : tool-properties-layout.preferred-height + 34px;
+            border-radius: 8px;
+            background: DesignTokens.surface-raised;
+            border-width: 1px;
+            border-color: DesignTokens.border;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000080;
+            drop-shadow-offset-y: 4px;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 20px;
+                    Text {
+                        text: tool-modal-active ? tool-modal-title : "Loop Cut";
+                        color: DesignTokens.text-primary;
+                        font-size: 12px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 20px;
+                        height: 20px;
+                        accessible-role: button;
+                        accessible-label: root.tool-properties-collapsed ? "Expand tool properties" : "Collapse tool properties";
+                        IconDisplay {
+                            icon: root.tool-properties-collapsed ? IconSet.ChevronDown : IconSet.ChevronUp;
+                            size: 13px;
+                            stroke: DesignTokens.text-secondary;
+                        }
+                        TouchArea { clicked => { root.tool-properties-collapsed = !root.tool-properties-collapsed; } }
+                    }
+                }
+
+                tool-properties-layout := VerticalLayout {
+                    visible: !root.tool-properties-collapsed;
+                    spacing: 6px;
+
+                if tool-modal-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Text {
+                        text: root.tool-modal-label;
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        width: 72px;
+                        vertical-alignment: center;
+                    }
+                    NumericField {
+                        label: "";
+                        value: root.tool-modal-value;
+                        horizontal-stretch: 1;
+                        step: root.tool-modal-step;
+                        scrubbed(delta, fine) => { root.tool-modal-text-committed("\{root.tool-modal-value + delta * root.tool-modal-step * (fine ? 0.1 : 1)}"); }
+                        scrub-cancelled(value) => { root.tool-modal-text-committed("\{value}"); }
+                        text-committed(text) => { root.tool-modal-text-committed(text) }
+                    }
+                }
+
+                if tool-modal-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.tool-modal-cancel(); } }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.accent;
+                        Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.tool-modal-apply(); } }
+                    }
+                }
+
+                if loop-cut-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Text {
+                        text: "Slide";
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        width: 72px;
+                        vertical-alignment: center;
+                    }
+                    NumericField {
+                        label: "";
+                        value: root.loop-cut-slide;
+                        horizontal-stretch: 1;
+                        step: 0.01;
+                        scrubbed(delta, fine) => { root.loop-cut-slide-committed("\{root.loop-cut-slide + delta * (fine ? 0.001 : 0.01)}"); }
+                        scrub-cancelled(value) => { root.loop-cut-slide-committed("\{value}"); }
+                        text-committed(text) => { root.loop-cut-slide-committed(text) }
+                    }
+                }
+
+                if loop-cut-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Text {
+                        text: "Cuts";
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        width: 72px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text {
+                            text: "\{root.loop-cut-cuts}";
+                            color: DesignTokens.text-primary;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: "-"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts - 1}"); } }
+                    }
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts + 1}"); } }
+                    }
+                }
+
+                if loop-cut-active: HorizontalLayout {
+                    spacing: 6px;
+                    height: 28px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-cancel(); } }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: DesignTokens.accent;
+                        Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.loop-cut-apply(); } }
+                    }
+                }
+                }
+            }
+        }
+
+        // Overlay: recuperação de autosave (P3D-002 §Recuperação segura).
+        if recovery-open: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            background: DesignTokens.scrim;
+
+            Rectangle {
+                width: 460px;
+                height: recovery-layout.preferred-height;
+                x: (parent.width - self.width) / 2;
+                y: 96px;
+                border-radius: 8px;
+                background: DesignTokens.surface-raised;
+                border-width: 1px;
+                border-color: DesignTokens.border;
+
+                recovery-layout := VerticalLayout {
+                    padding: 18px;
+                    spacing: 10px;
+
+                    Text {
+                        text: root.recovery-title;
+                        color: DesignTokens.text-primary;
+                        font-size: 14px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.recovery-body;
+                        color: DesignTokens.text-secondary;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: root.recovery-detail;
+                        color: DesignTokens.text-muted;
+                        font-size: 10px;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 30px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 4px;
+                            background: DesignTokens.surface;
+                            border-width: 1px;
+                            border-color: DesignTokens.border;
+                            Text { text: root.recovery-discard; color: DesignTokens.danger; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.recovery-discard-requested(); } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 4px;
+                            background: DesignTokens.surface;
+                            border-width: 1px;
+                            border-color: DesignTokens.border;
+                            Text { text: root.recovery-keep; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.recovery-keep-requested(); } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 4px;
+                            background: DesignTokens.accent;
+                            Text { text: root.recovery-recover; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.recovery-recover-requested(); } }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Overlay: dropdown de um menu da barra superior.
+        if root.menu-open != "": Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+
+            TouchArea {
+                clicked => { root.click-away-requested(); }
+            }
+
+            MenuDropdown {
+                x: min(max(8px, root.menu-anchor-x), max(8px, parent.width - self.width - 8px));
+                y: 44px;
+                entries: root.menu-open == "file"
+                    ? root.menu-file-items
+                    : (root.menu-open == "edit"
+                        ? root.menu-edit-items
+                        : (root.menu-open == "view" ? root.menu-view-items : root.menu-window-items));
+                invoked(id) => { root.menu-item-invoked(id); }
+            }
+        }
+
+        // Mini HUD da operação: o que está acontecendo, com que valor, e como
+        // confirmar. Fica acima da status bar e nunca no centro da geometria.
+        if operation-hud-active: Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: parent.height - self.height - 48px;
+            width: max(operation-hud-content.preferred-width + 24px, 220px);
+            height: operation-hud-content.preferred-height + 20px;
+            border-radius: 8px;
+            background: DesignTokens.surface-raised;
+            border-width: 1px;
+            border-color: DesignTokens.accent;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000080;
+            drop-shadow-offset-y: 3px;
+
+            operation-hud-content := VerticalLayout {
+                padding: 10px;
+                spacing: 4px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: center;
+                    Text {
+                        text: root.operation-hud-title;
+                        color: DesignTokens.accent;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.operation-hud-subject;
+                        color: DesignTokens.text-muted;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                for line in root.operation-hud-lines: Text {
+                    text: line;
+                    color: DesignTokens.text-primary;
+                    font-size: 12px;
+                    font-weight: 600;
+                    font-family: "monospace";
+                }
+
+                Text {
+                    text: root.operation-hud-hint;
+                    color: DesignTokens.text-muted;
+                    font-size: 9px;
+                }
+            }
+        }
+
+        // Popover de shading: só opções com backend real.
+        if shading-popover-open: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+
+            TouchArea {
+                clicked => { root.shading-popover-toggled(false); }
+            }
+
+            Rectangle {
+                x: min(max(8px, (parent.width - self.width) / 2), parent.width - self.width - 8px);
+                y: 54px;
+                width: 280px;
+                height: shading-options.preferred-height + 24px;
+                border-radius: 8px;
+                background: DesignTokens.surface-raised;
+                border-width: 1px;
+                border-color: DesignTokens.border;
+                drop-shadow-blur: 14px;
+                drop-shadow-color: #00000090;
+                drop-shadow-offset-y: 4px;
+
+                shading-options := VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "Shading";
+                        color: DesignTokens.text-primary;
+                        font-size: 12px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "Mode: \{root.shading-mode}";
+                        color: DesignTokens.text-muted;
+                        font-size: 10px;
+                    }
+
+                    Rectangle { height: 1px; background: DesignTokens.border; }
+
+                    Text {
+                        text: "X-Ray";
+                        color: DesignTokens.text-primary;
+                        font-size: 11px;
+                        font-weight: 600;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 24px;
+                        alignment: center;
+                        Text {
+                            text: "Opacity";
+                            color: DesignTokens.text-secondary;
+                            font-size: 10px;
+                            width: 56px;
+                            vertical-alignment: center;
+                        }
+                        Slider {
+                            horizontal-stretch: 1;
+                            minimum: 0.1;
+                            maximum: 0.9;
+                            value: root.xray-opacity;
+                            changed(value) => { root.xray-opacity-set(value); }
+                        }
+                        Text {
+                            text: "\{round(root.xray-opacity * 100)}%";
+                            color: DesignTokens.text-muted;
+                            font-size: 10px;
+                            width: 36px;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        height: 26px;
+                        border-radius: 4px;
+                        background: root.show-xray ? DesignTokens.accent : DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        accessible-role: checkbox;
+                        accessible-label: "X-Ray enabled";
+                        accessible-checked: root.show-xray;
+                        Text {
+                            text: root.show-xray ? "X-Ray on" : "X-Ray off";
+                            color: root.show-xray ? DesignTokens.canvas : DesignTokens.text-primary;
+                            font-size: 11px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.toggle-xray-requested(); } }
+                    }
+
+                    Rectangle { height: 1px; background: DesignTokens.border; }
+
+                    Rectangle {
+                        height: 26px;
+                        border-radius: 4px;
+                        background: root.is-wireframe ? DesignTokens.accent : DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        accessible-role: checkbox;
+                        accessible-label: "Wireframe overlay";
+                        accessible-checked: root.is-wireframe;
+                        Text {
+                            text: root.is-wireframe ? "Wireframe overlay on" : "Wireframe overlay off";
+                            color: root.is-wireframe ? DesignTokens.canvas : DesignTokens.text-primary;
+                            font-size: 11px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.toggle-wireframe-requested(); } }
+                    }
+                }
+            }
+        }
+
+        // Overlay: menu de contexto do Outliner (botão direito numa linha).
+        if context-menu-open: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+
+            TouchArea {
+                clicked => { root.click-away-requested(); }
+            }
+
+            context-menu-panel := Rectangle {
+                x: min(root.context-menu-x, max(0px, parent.width - self.width - 8px));
+                y: min(root.context-menu-y, max(0px, parent.height - self.height - 8px));
+                width: 208px;
+                height: context-menu-layout.preferred-height;
+                background: DesignTokens.surface-raised;
+                border-width: 1px;
+                border-color: DesignTokens.border;
+                border-radius: 6px;
+                drop-shadow-blur: 12px;
+                drop-shadow-color: #00000080;
+                drop-shadow-offset-y: 4px;
+
+                context-menu-layout := VerticalLayout {
+                    padding: 4px;
+                    spacing: 1px;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+
+                        Text {
+                            text: root.context-menu-title;
+                            color: DesignTokens.text-muted;
+                            font-size: 10px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                    }
+
+                    ContextMenuItem {
+                        label: "Rename";
+                        shortcut: "F2";
+                        clicked => { root.context-menu-action("rename"); }
+                    }
+                    ContextMenuItem {
+                        label: "Duplicate";
+                        shortcut: "Shift+D";
+                        clicked => { root.context-menu-action("duplicate"); }
+                    }
+                    ContextMenuItem {
+                        label: root.context-menu-visible ? "Hide" : "Show";
+                        shortcut: "";
+                        clicked => { root.context-menu-action("visibility"); }
+                    }
+                    ContextMenuItem {
+                        label: root.context-menu-locked ? "Unlock" : "Lock";
+                        shortcut: "";
+                        clicked => { root.context-menu-action("lock"); }
+                    }
+                    ContextMenuItem {
+                        label: "Frame Selection";
+                        shortcut: "F";
+                        clicked => { root.context-menu-action("frame"); }
+                    }
+                    ContextMenuItem {
+                        label: "Set as Boolean Operand";
+                        shortcut: "";
+                        clicked => { root.context-menu-action("boolean_operand"); }
+                    }
+
+                    Rectangle { height: 1px; background: DesignTokens.border; }
+
+                    ContextMenuItem {
+                        label: "Delete";
+                        shortcut: "Del";
+                        danger: true;
+                        clicked => { root.context-menu-action("delete"); }
+                    }
+                }
+            }
+        }
+
+        // Divisor da Asset Library: arrasta na vertical e devolve a altura.
+        if asset-library-visible: SplitterHorizontal {
+            x: 8px;
+            y: parent.height - 36px - asset-library-height;
+            width: parent.width - 16px - (inspector-visible && !compact-shell ? inspector-width + 8px : 0px);
+            value: root.asset-library-height;
+            direction: -1.0;
+            moved(height) => { root.asset-library-height-changed(height / 1px); }
+        }
+
         // Overlay / Bottom Drawer: Asset Library (AGENTS.md §3: Asset Library-abaixo)
         if asset-library-visible: Rectangle {
             x: 8px;
-            y: parent.height - 230px;
-            width: parent.width - 16px - (inspector-visible && !compact-shell ? 296px : 0px);
-            height: 200px;
+            y: parent.height - 30px - asset-library-height;
+            width: parent.width - 16px - (inspector-visible && !compact-shell ? inspector-width + 8px : 0px);
+            height: asset-library-height;
             background: DesignTokens.surface-raised;
             border-width: 1px;
             border-color: DesignTokens.border;
@@ -1788,7 +3851,7 @@ export component PetuniaSlintShell inherits Window {
                     }
 
                     Text {
-                        text: "Project Asset Library";
+                        text: root.label-project-asset-library;
                         color: DesignTokens.text-primary;
                         font-size: 12px;
                         font-weight: 700;
@@ -1816,7 +3879,7 @@ export component PetuniaSlintShell inherits Window {
                             spacing: 4px;
                             alignment: center;
                             IconDisplay { icon: IconSet.BookmarkPlus; size: 12px; stroke: DesignTokens.text-primary; }
-                            Text { text: "Save Active as Asset"; color: DesignTokens.text-primary; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                            Text { text: root.label-save-active-as-asset; color: DesignTokens.text-primary; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                         }
                         TouchArea { clicked => { root.save-active-as-asset-requested(); } }
                     }
@@ -1886,7 +3949,7 @@ export component PetuniaSlintShell inherits Window {
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
-                                        TouchArea { clicked => { root.scene-select(item.id); } }
+                                        TouchArea { clicked => { root.scene-select(item.id, false); } }
                                     }
 
                                     Rectangle {
@@ -1897,9 +3960,23 @@ export component PetuniaSlintShell inherits Window {
                                         IconDisplay { icon: IconSet.Copy; size: 12px; stroke: DesignTokens.text-secondary; }
                                         TouchArea {
                                             clicked => {
-                                                root.scene-select(item.id);
+                                                root.scene-select(item.id, false);
                                                 root.duplicate-requested();
                                             }
+                                        }
+                                    }
+
+                                    // Coloca uma cópia do asset no cursor 3D (P3D-093).
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 22px;
+                                        border-radius: 3px;
+                                        background: DesignTokens.surface-raised;
+                                        accessible-role: button;
+                                        accessible-label: root.label-place-in-scene;
+                                        IconDisplay { icon: IconSet.Plus; size: 12px; stroke: DesignTokens.text-secondary; }
+                                        TouchArea {
+                                            clicked => { root.place-asset-requested(item.id); }
                                         }
                                     }
                                 }
@@ -2047,8 +4124,8 @@ export component PetuniaSlintShell inherits Window {
             }
 
             Rectangle {
-                width: 420px;
-                height: 260px;
+                width: 440px;
+                height: 330px;
                 x: (parent.width - self.width) / 2;
                 y: 100px;
                 border-radius: 8px;
@@ -2062,7 +4139,7 @@ export component PetuniaSlintShell inherits Window {
 
                     HorizontalLayout {
                         Text {
-                            text: "Preferences";
+                            text: root.label-preferences;
                             color: DesignTokens.text-primary;
                             font-size: 14px;
                             font-weight: 700;
@@ -2079,7 +4156,41 @@ export component PetuniaSlintShell inherits Window {
                     Rectangle { height: 1px; background: DesignTokens.border; }
 
                     Text {
-                        text: "Theme (P3D-085)";
+                        text: root.label-theme;
+                        color: DesignTokens.text-primary;
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+
+                        for theme in root.themes: Rectangle {
+                            width: 140px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: theme.active ? DesignTokens.accent : DesignTokens.surface;
+                            border-width: 1px;
+                            border-color: DesignTokens.border;
+
+                            Text {
+                                text: theme.name;
+                                color: theme.active ? DesignTokens.canvas : DesignTokens.text-primary;
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+                            TouchArea {
+                                clicked => { root.theme-changed(theme.id); }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Tool confirmation";
                         color: DesignTokens.text-primary;
                         font-size: 12px;
                         font-weight: 600;
@@ -2090,50 +4201,70 @@ export component PetuniaSlintShell inherits Window {
                         alignment: start;
 
                         Rectangle {
-                            width: 120px;
-                            height: 28px;
+                            width: 200px;
+                            height: 30px;
                             border-radius: 4px;
-                            background: root.current-theme == "petunia-dark" ? DesignTokens.accent : DesignTokens.surface;
+                            background: root.tool-activation == "drag" ? DesignTokens.accent : DesignTokens.surface;
                             border-width: 1px;
                             border-color: DesignTokens.border;
-
-                            Text {
-                                text: "Petunia Dark";
-                                color: root.current-theme == "petunia-dark" ? DesignTokens.canvas : DesignTokens.text-primary;
-                                font-size: 11px;
-                                font-weight: 600;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
+                            accessible-role: radio-button;
+                            accessible-label: "Click and drag";
+                            accessible-checked: root.tool-activation == "drag";
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                spacing: 6px;
+                                alignment: center;
+                                Text {
+                                    text: "Click + drag";
+                                    color: root.tool-activation == "drag" ? DesignTokens.canvas : DesignTokens.text-primary;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "release confirms";
+                                    color: root.tool-activation == "drag" ? DesignTokens.canvas : DesignTokens.text-muted;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                }
                             }
-                            TouchArea {
-                                clicked => { root.theme-changed("petunia-dark"); }
-                            }
+                            TouchArea { clicked => { root.tool-activation-set("drag"); } }
                         }
 
                         Rectangle {
-                            width: 140px;
-                            height: 28px;
+                            width: 200px;
+                            height: 30px;
                             border-radius: 4px;
-                            background: root.current-theme == "petunia-high-contrast" ? DesignTokens.accent : DesignTokens.surface;
+                            background: root.tool-activation == "instant" ? DesignTokens.accent : DesignTokens.surface;
                             border-width: 1px;
                             border-color: DesignTokens.border;
-
-                            Text {
-                                text: "High Contrast";
-                                color: root.current-theme == "petunia-high-contrast" ? DesignTokens.canvas : DesignTokens.text-primary;
-                                font-size: 11px;
-                                font-weight: 600;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
+                            accessible-role: radio-button;
+                            accessible-label: "Shortcut without clicking";
+                            accessible-checked: root.tool-activation == "instant";
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                spacing: 6px;
+                                alignment: center;
+                                Text {
+                                    text: "Shortcut";
+                                    color: root.tool-activation == "instant" ? DesignTokens.canvas : DesignTokens.text-primary;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "follows pointer, click confirms";
+                                    color: root.tool-activation == "instant" ? DesignTokens.canvas : DesignTokens.text-muted;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                }
                             }
-                            TouchArea {
-                                clicked => { root.theme-changed("petunia-high-contrast"); }
-                            }
+                            TouchArea { clicked => { root.tool-activation-set("instant"); } }
                         }
                     }
 
                     Text {
-                        text: "Keymap: Standard  ·  Language: English\nTheme tokens dynamically synchronized with ThemeRegistry.";
+                        text: root.shell-info;
                         color: DesignTokens.text-muted;
                         font-size: 11px;
                     }

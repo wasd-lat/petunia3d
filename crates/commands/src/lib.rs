@@ -21,6 +21,7 @@ struct HistoryEntry<T> {
     label: String,
     value: T,
     bytes: usize,
+    version: usize,
 }
 
 /// Pilha genérica de undo/redo sobre estado clonável com rastreamento determinístico de estado salvo/dirty.
@@ -34,6 +35,7 @@ pub struct UndoStack<T: Clone> {
     redo_bytes: usize,
     clean_version: Option<usize>,
     current_version: usize,
+    next_version: usize,
 }
 
 impl<T: Clone> Default for UndoStack<T> {
@@ -53,6 +55,7 @@ impl<T: Clone> UndoStack<T> {
             redo_bytes: 0,
             clean_version: Some(0),
             current_version: 0,
+            next_version: 0,
         }
     }
 
@@ -79,9 +82,11 @@ impl<T: Clone> UndoStack<T> {
             label: label.into(),
             value: current.clone(),
             bytes,
+            version: self.current_version,
         });
         self.undo_bytes = self.undo_bytes.saturating_add(bytes);
-        self.current_version = self.current_version.saturating_add(1);
+        self.next_version = self.next_version.saturating_add(1);
+        self.current_version = self.next_version;
         self.redo_bytes = 0;
         self.redo.clear();
         self.evict_to_budget();
@@ -157,31 +162,44 @@ impl<T: Clone> UndoStack<T> {
 
     /// Desfaz: guarda estado atual no redo, retorna estado anterior.
     pub fn undo(&mut self, current: T) -> Option<T> {
+        let bytes = estimate_bytes(&current);
+        self.undo_sized(current, bytes)
+    }
+
+    pub fn undo_sized(&mut self, current: T, bytes: usize) -> Option<T> {
         let prev = self.undo.pop()?;
         self.undo_bytes = self.undo_bytes.saturating_sub(prev.bytes);
-        self.current_version = self.current_version.saturating_sub(1);
-        let current_bytes = estimate_bytes(&current);
+        let current_bytes = bytes.max(1);
         self.redo.push(HistoryEntry {
             label: prev.label,
             value: current,
             bytes: current_bytes,
+            version: self.current_version,
         });
+        self.current_version = prev.version;
         self.redo_bytes = self.redo_bytes.saturating_add(current_bytes);
         Some(prev.value)
     }
 
-    /// Refaz: guarda estado atual no undo, retorna próximo estado.
+    /// Refaz sem reutilizar uma identidade de estado de outra ramificação.
     pub fn redo(&mut self, current: T) -> Option<T> {
+        let bytes = estimate_bytes(&current);
+        self.redo_sized(current, bytes)
+    }
+
+    pub fn redo_sized(&mut self, current: T, bytes: usize) -> Option<T> {
         let next = self.redo.pop()?;
         self.redo_bytes = self.redo_bytes.saturating_sub(next.bytes);
-        self.current_version = self.current_version.saturating_add(1);
-        let current_bytes = estimate_bytes(&current);
+        let current_bytes = bytes.max(1);
         self.undo.push(HistoryEntry {
             label: next.label,
             value: current,
             bytes: current_bytes,
+            version: self.current_version,
         });
+        self.current_version = next.version;
         self.undo_bytes = self.undo_bytes.saturating_add(current_bytes);
+        self.evict_to_budget();
         Some(next.value)
     }
 
@@ -191,6 +209,7 @@ impl<T: Clone> UndoStack<T> {
         self.undo_bytes = 0;
         self.redo_bytes = 0;
         self.current_version = 0;
+        self.next_version = 0;
         self.clean_version = Some(0);
     }
 }

@@ -2,6 +2,7 @@
 //! Garante a execução headless e o ciclo transacional de Undo/Redo sem qualquer dependência de UI.
 #![allow(clippy::field_reassign_with_default)]
 
+use petunia_core::ProjectService;
 use petunia_core::command::{
     AddPrimitiveCmd, BoxSelectCmd, ClearSelectionCmd, CommandDispatcher, CommandError,
     DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd, DuplicateSelectionCmd,
@@ -10,7 +11,7 @@ use petunia_core::command::{
     SubdivideSelectionCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd,
     ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
 };
-use petunia_core::state::{AppState, EditMode};
+use petunia_core::state::{ASSET_NAME_MAX_LEN, AppState, AssetRenameError, EditMode};
 
 #[test]
 fn test_add_primitive_commands_and_undo_redo() {
@@ -772,4 +773,235 @@ fn test_ui_state_defaults_wave_6() {
     let state = AppState::default();
     assert_eq!(state.ui.asset_thumbnail_size, 64.0);
     assert!(!state.ui.inspector_detached);
+}
+
+#[test]
+fn test_rename_active_asset_validates_and_commits_one_undo_entry() {
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    let original = state.project.active().unwrap().name.clone();
+    assert_eq!(original, "Cube");
+
+    // Nome vazio (ou só espaços) é recusado sem tocar no histórico.
+    assert_eq!(
+        state.rename_active_asset("   "),
+        Err(AssetRenameError::EmptyName)
+    );
+    assert_eq!(state.project.undo.depth(), (0, 0));
+
+    // Nome acima do limite canônico também.
+    let long = "x".repeat(ASSET_NAME_MAX_LEN + 1);
+    assert_eq!(
+        state.rename_active_asset(&long),
+        Err(AssetRenameError::NameTooLong)
+    );
+    assert_eq!(state.project.undo.depth(), (0, 0));
+
+    // Espaços nas pontas são removidos e o rename vira uma única entrada.
+    assert_eq!(state.rename_active_asset("  Turret Base  "), Ok(true));
+    assert_eq!(state.project.active().unwrap().name, "Turret Base");
+    assert_eq!(state.project.undo.depth(), (1, 0));
+
+    // Confirmar o mesmo nome é idempotente: sem entrada nova.
+    assert_eq!(state.rename_active_asset("Turret Base"), Ok(false));
+    assert_eq!(state.project.undo.depth(), (1, 0));
+
+    // O limite exato é aceito.
+    let exact = "y".repeat(ASSET_NAME_MAX_LEN);
+    assert_eq!(state.rename_active_asset(&exact), Ok(true));
+    assert_eq!(state.project.active().unwrap().name, exact);
+
+    // Undo volta para o nome anterior, não para o original.
+    assert!(state.undo());
+    assert_eq!(state.project.active().unwrap().name, "Turret Base");
+    assert!(state.undo());
+    assert_eq!(state.project.active().unwrap().name, original);
+}
+
+#[test]
+fn test_alias_does_not_duplicate_command_ids_in_the_catalog() {
+    let dispatcher = petunia_core::command::CommandDispatcher::canonical();
+    let ids: Vec<&str> = dispatcher
+        .all_metadata()
+        .iter()
+        .map(|meta| meta.id.as_str())
+        .collect();
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        ids.len(),
+        unique.len(),
+        "o catálogo publica ids repetidos: {ids:?}"
+    );
+
+    // O alias existe e aponta para o mesmo comando, mas com id próprio.
+    assert!(dispatcher.contains("model.delete"));
+    assert!(dispatcher.contains("edit.delete"));
+    let alias_meta = dispatcher.get_metadata("model.delete").unwrap();
+    assert_eq!(alias_meta.id, "model.delete");
+    let canonical_meta = dispatcher.get_metadata("edit.delete").unwrap();
+    assert_eq!(canonical_meta.id, "edit.delete");
+    assert_eq!(alias_meta.label, canonical_meta.label);
+}
+
+#[test]
+fn test_boolean_fuse_and_cut_between_active_and_operand() {
+    use petunia_core::BooleanOpCmd;
+    use petunia_mesh::boolean::BooleanOp;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    state.project.assets[0].mesh = petunia_mesh::Mesh::cube(2.0);
+    state.project.assets[0].name = "A".to_string();
+    let a_id = state.project.assets[0].id;
+
+    // Sem operando escolhido a operação precisa ser recusada.
+    assert!(
+        state
+            .dispatch(&BooleanOpCmd::new(BooleanOp::Union))
+            .is_err()
+    );
+    assert_eq!(state.project.assets.len(), 1);
+
+    // Cria B deslocado no eixo X para que a união tenha volume maior.
+    let mut b = petunia_mesh::Mesh::cube(2.0);
+    b.select_all();
+    b.translate_selected([1.0, 0.0, 0.0]);
+    b.deselect_all();
+    state.project.add("B", b);
+    let b_id = state.project.assets[1].id;
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+
+    let before = state.project.assets[0].mesh.verts.len();
+    let undo_before = state.project.undo.depth().0;
+    assert!(state.dispatch(&BooleanOpCmd::new(BooleanOp::Union)).is_ok());
+    assert_eq!(
+        state.project.undo.depth().0,
+        undo_before + 1,
+        "Fuse é exatamente uma entrada de undo"
+    );
+    assert_eq!(state.project.assets.len(), 1, "B é consumido");
+    assert!(state.project.assets[0].mesh.verts.len() > before);
+    assert!(state.session.tools.boolean_operand.is_none());
+    assert_eq!(state.project.active, 0);
+    assert_eq!(state.project.assets[0].id, a_id);
+
+    // Undo restaura os dois objetos.
+    assert!(state.undo());
+    assert_eq!(state.project.assets.len(), 2);
+    assert!(state.project.assets.iter().any(|a| a.id == b_id));
+
+    // Cut: o operando precisa existir de novo.
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+    assert!(
+        state
+            .dispatch(&BooleanOpCmd::new(BooleanOp::Difference))
+            .is_ok()
+    );
+    assert_eq!(state.project.assets.len(), 1);
+    assert_eq!(state.project.assets[0].id, a_id);
+}
+
+#[test]
+fn test_boolean_refuses_the_active_asset_as_operand_and_missing_operand() {
+    use petunia_core::BooleanOpCmd;
+    use petunia_mesh::boolean::BooleanOp;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    let active = state.project.assets[0].id;
+
+    state.session.tools.boolean_operand = Some(active);
+    let err = state
+        .dispatch(&BooleanOpCmd::new(BooleanOp::Union))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("active"), "veio: {err}");
+    assert_eq!(state.project.assets.len(), 1);
+
+    state.session.tools.boolean_operand = Some(uuid::Uuid::new_v4());
+    assert!(
+        state
+            .dispatch(&BooleanOpCmd::new(BooleanOp::Difference))
+            .is_err()
+    );
+    assert_eq!(state.project.assets.len(), 1);
+}
+
+#[test]
+fn test_keep_parts_keeps_the_operand_in_the_scene() {
+    use petunia_core::BooleanOpCmd;
+    use petunia_mesh::boolean::BooleanOp;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    state.project.assets[0].mesh = petunia_mesh::Mesh::cube(2.0);
+
+    let mut b = petunia_mesh::Mesh::cube(2.0);
+    b.select_all();
+    b.translate_selected([1.6, 0.0, 0.0]);
+    b.deselect_all();
+    state.project.add("B", b);
+    let b_id = state.project.assets[1].id;
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+    state.session.tools.boolean_keep_parts = true;
+
+    assert!(state.dispatch(&BooleanOpCmd::new(BooleanOp::Union)).is_ok());
+    assert_eq!(
+        state.project.assets.len(),
+        2,
+        "Keep Parts mantém o operando na cena"
+    );
+    assert!(state.project.assets.iter().any(|a| a.id == b_id));
+    assert_eq!(state.project.active, 0, "o ativo continua sendo A");
+    assert!(state.session.tools.boolean_operand.is_none());
+}
+
+#[test]
+fn test_join_merges_both_topologies_without_a_boolean_kernel() {
+    use petunia_core::JoinObjectsCmd;
+
+    let mut state = AppState::new("en");
+    ProjectService::new_project(&mut state);
+    state.project.assets[0].mesh = petunia_mesh::Mesh::cube(2.0);
+    let a_verts = state.project.assets[0].mesh.verts.len();
+    let a_faces = state.project.assets[0].mesh.faces.len();
+
+    let mut b = petunia_mesh::Mesh::cube(2.0);
+    b.select_all();
+    b.translate_selected([5.0, 0.0, 0.0]);
+    b.deselect_all();
+    state.project.add("B", b);
+    let b_id = state.project.assets[1].id;
+    let b_verts = state.project.assets[1].mesh.verts.len();
+    let b_faces = state.project.assets[1].mesh.faces.len();
+    state.project.active = 0;
+    state.session.tools.boolean_operand = Some(b_id);
+
+    let undo_before = state.project.undo.depth().0;
+    assert!(state.dispatch(&JoinObjectsCmd).is_ok());
+    assert_eq!(
+        state.project.undo.depth().0,
+        undo_before + 1,
+        "Join é exatamente uma entrada de undo"
+    );
+    assert_eq!(state.project.assets.len(), 1);
+    let mesh = state.project.active_mesh().unwrap();
+    assert_eq!(
+        mesh.verts.len(),
+        a_verts + b_verts,
+        "Join preserva os vértices das duas malhas"
+    );
+    assert_eq!(mesh.faces.len(), a_faces + b_faces);
+
+    assert!(state.undo());
+    assert_eq!(
+        state.project.assets.len(),
+        2,
+        "undo restaura os dois objetos"
+    );
 }

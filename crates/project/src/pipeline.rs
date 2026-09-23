@@ -421,13 +421,9 @@ impl FormatImporter for GlbImporter {
         name_hint: &str,
         options: &ImportOptions,
     ) -> Result<ImportPayload, PipelineError> {
-        let meshes = import_gltf::import_glb_bytes(
-            data,
-            name_hint,
-            options.triangulate,
-            options.scale,
-        )
-        .map_err(|e| PipelineError::Import(e.to_string()))?;
+        let meshes =
+            import_gltf::import_glb_bytes(data, name_hint, options.triangulate, options.scale)
+                .map_err(|e| PipelineError::Import(e.to_string()))?;
         Ok(ImportPayload {
             meshes,
             materials: Vec::new(),

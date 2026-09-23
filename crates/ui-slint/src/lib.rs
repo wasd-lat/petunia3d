@@ -47,13 +47,21 @@ pub enum ViewportGesture {
     Zoom { delta: f32 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewportRenderState {
     pub shading: petunia_render::Shading,
     pub xray: bool,
     pub show_triangulation: bool,
     pub textured: bool,
     pub show_wireframe_overlay: bool,
+    /// Domínio de seleção: a camada de seleção precisa saber o que desenhar.
+    pub selection_domain: petunia_core::SelectionDomain,
+    /// Opacidade da geometria em X-Ray.
+    pub xray_opacity: f32,
+    /// Overlays: grade e wireframe opcional sobre as faces.
+    pub show_grid: bool,
+    /// Componente sob o cursor (preselection).
+    pub hover: petunia_core::HoverTarget,
 }
 
 impl Default for ViewportRenderState {
@@ -64,6 +72,10 @@ impl Default for ViewportRenderState {
             show_triangulation: false,
             textured: false,
             show_wireframe_overlay: false,
+            selection_domain: petunia_core::SelectionDomain::Object,
+            xray_opacity: 0.42,
+            show_grid: true,
+            hover: petunia_core::HoverTarget::None,
         }
     }
 }
@@ -73,31 +85,104 @@ impl Default for ViewportRenderState {
 /// A projeção acontece no bridge; o Slint só desenha as três hastes a partir
 /// de origem, comprimento e ângulo em pixels. O overlay não conhece câmera,
 /// GPU nem matriz de projeção.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Gizmo de transformação e tripé de navegação, tudo em espaço de tela.
+//
+// O padrão profissional (Blender, C4D, Maya, Plasticity) usa tamanho fixo em
+// pixels, nunca escalado pelo mundo: o controle tem sempre o mesmo tamanho
+// aparente independente do zoom. Hastes têm setas; o tripé do canto mostra a
+// orientação da câmera.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GizmoModel {
     pub visible: bool,
     pub origin_x: f32,
     pub origin_y: f32,
-    pub x_end_x: f32,
-    pub x_end_y: f32,
-    pub y_end_x: f32,
-    pub y_end_y: f32,
-    pub z_end_x: f32,
-    pub z_end_y: f32,
+    /// Hastes como comandos `M x y L x y` prontos para o `Path`.
+    pub x_commands: String,
+    pub y_commands: String,
+    pub z_commands: String,
+    /// Setas como triângulos preenchidos (`M .. L .. L .. Z`).
+    pub x_arrow_commands: String,
+    pub y_arrow_commands: String,
+    pub z_arrow_commands: String,
+    /// Tripé de navegação no canto inferior esquerdo, em comandos prontos.
+    pub view_x_commands: String,
+    pub view_y_commands: String,
+    pub view_z_commands: String,
+    pub view_x_end: [f32; 2],
+    pub view_y_end: [f32; 2],
+    pub view_z_end: [f32; 2],
+    pub view_origin_x: f32,
+    pub view_origin_y: f32,
 }
 
-impl Default for GizmoModel {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            origin_x: 0.0,
-            origin_y: 0.0,
-            x_end_x: 0.0,
-            x_end_y: 0.0,
-            y_end_x: 0.0,
-            y_end_y: 0.0,
-            z_end_x: 0.0,
-            z_end_y: 0.0,
+/// Ferramenta paramétrica com preview modal e Tool Properties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolModalKind {
+    Extrude,
+    ExtrudeIndividual,
+    Inset,
+    Bevel,
+    PushPull,
+    ScaleSelection,
+}
+
+impl ToolModalKind {
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "model.extrude" => Some(Self::Extrude),
+            "model.extrude_individual" => Some(Self::ExtrudeIndividual),
+            "model.inset" => Some(Self::Inset),
+            "model.bevel" => Some(Self::Bevel),
+            "model.push_pull" => Some(Self::PushPull),
+            "model.scale_selection" => Some(Self::ScaleSelection),
+            _ => None,
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Extrude => "Extrude",
+            Self::ExtrudeIndividual => "Extrude Individual",
+            Self::Inset => "Inset",
+            Self::Bevel => "Bevel",
+            Self::PushPull => "Push/Pull",
+            Self::ScaleSelection => "Scale",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Extrude | Self::ExtrudeIndividual | Self::PushPull => "Distance",
+            Self::Inset => "Amount",
+            Self::Bevel => "Width",
+            Self::ScaleSelection => "Factor",
+        }
+    }
+
+    pub const fn modal_kind(self) -> petunia_core::ModalKind {
+        match self {
+            Self::Extrude => petunia_core::ModalKind::Extrude,
+            Self::ExtrudeIndividual => petunia_core::ModalKind::ExtrudeIndividual,
+            Self::Inset => petunia_core::ModalKind::Inset,
+            Self::Bevel => petunia_core::ModalKind::Bevel,
+            Self::PushPull => petunia_core::ModalKind::PushPull,
+            Self::ScaleSelection => petunia_core::ModalKind::Scale,
+        }
+    }
+
+    pub const fn bounds(self) -> (f32, f32) {
+        match self {
+            Self::Inset => (0.0, 0.95),
+            Self::Bevel => (0.0, 100.0),
+            Self::ScaleSelection => (0.01, 100.0),
+            Self::Extrude | Self::ExtrudeIndividual | Self::PushPull => (-100.0, 100.0),
+        }
+    }
+
+    pub const fn step(self) -> f32 {
+        match self {
+            Self::Inset => 0.01,
+            _ => 0.1,
         }
     }
 }
@@ -108,6 +193,10 @@ pub struct ViewportDrag {
     pub kind: TransformKind,
     pub start: [f32; 2],
     pub viewport: [f32; 2],
+    pub last_pointer: [f32; 2],
+    pub virtual_pointer: [f32; 2],
+    pub rotation_angle: f32,
+    pub last_angle: f32,
 }
 
 /// Ação semântica emitida pelo shell Slint.
@@ -190,12 +279,100 @@ pub struct ShellViewModel {
     pub active_object_details: String,
     pub active_material_name: String,
     pub scene_stats: String,
+    pub uv_stats: String,
     pub current_theme: String,
     pub is_orthographic: bool,
     pub is_wireframe: bool,
+    pub shading_mode: String,
+    pub xray_opacity: f32,
+    pub show_xray: bool,
+    pub shading_popover_open: bool,
+    /// HUD da operação: título, linhas de valor e dica de controles.
+    pub operation_hud_active: bool,
+    pub operation_hud_title: String,
+    pub operation_hud_lines: Vec<String>,
+    pub operation_hud_hint: String,
+    /// Feedback curto abaixo da ação ("Moving 3 vertices").
+    pub operation_hud_subject: String,
+    /// Barra de status contextual.
+    pub context_hint: String,
+    pub operation_preview_commands: String,
+    pub hover_label: String,
+    pub transform_instant_active: bool,
+    pub gizmo_hover_axis: i32,
+    pub gizmo_active_axis: i32,
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
+    pub selection_overlay: SelectionOverlayModel,
     pub add_menu_open: bool,
+    pub inspector_width: f32,
+    pub asset_library_height: f32,
+    pub rename_active: bool,
+    pub rename_value: String,
+    pub context_menu_open: bool,
+    pub context_menu_x: f32,
+    pub context_menu_y: f32,
+    pub context_menu_title: String,
+    pub context_menu_visible: bool,
+    pub context_menu_locked: bool,
+    pub boolean_operand_name: String,
+    pub boolean_ready: bool,
+    pub boolean_keep_parts: bool,
+    pub menu_open: String,
+    pub menu_file_label: String,
+    pub menu_edit_label: String,
+    pub menu_view_label: String,
+    pub menu_window_label: String,
+    pub menu_file_items: Vec<MenuEntryModel>,
+    pub menu_edit_items: Vec<MenuEntryModel>,
+    pub menu_view_items: Vec<MenuEntryModel>,
+    pub menu_window_items: Vec<MenuEntryModel>,
+    pub label_parts: String,
+    pub label_project_asset_library: String,
+    pub label_save_active_as_asset: String,
+    pub label_status_hint: String,
+    pub label_unwrap_mesh: String,
+    pub label_pack_islands: String,
+    pub label_active_brush_color: String,
+    pub label_albedo_base_color: String,
+    pub label_theme: String,
+    pub label_place_in_scene: String,
+    pub recovery_open: bool,
+    pub recovery_title: String,
+    pub recovery_body: String,
+    pub recovery_detail: String,
+    pub recovery_recover: String,
+    pub recovery_keep: String,
+    pub recovery_discard: String,
+    pub label_asset_library: String,
+    pub label_preferences: String,
+    pub shell_info: String,
+    pub label_apply: String,
+    pub label_cancel: String,
+    pub label_delete: String,
+    pub label_duplicate: String,
+    pub themes: Vec<ThemeEntryModel>,
+    pub uv_editor: UvEditorModel,
+    pub paint_layers: Vec<PaintLayerModel>,
+    pub paint_layer_count: String,
+    pub paint_effect_kind: String,
+    pub paint_effect_params: Vec<PaintEffectParam>,
+    pub paint_canvas_size: String,
+    pub paint_canvas_revision: i32,
+    pub paint_fill_scope: String,
+    pub paint_projection: String,
+    pub paint_lock: String,
+    pub loop_cut_active: bool,
+    pub loop_cut_slide: f32,
+    pub loop_cut_cuts: i32,
+    pub tool_activation: String,
+    pub tool_modal_active: bool,
+    pub tool_modal_title: String,
+    pub tool_modal_label: String,
+    pub tool_modal_value: f32,
+    pub tool_modal_step: f32,
+    pub tool_modal_min: f32,
+    pub tool_modal_max: f32,
 }
 
 impl ShellViewModel {
@@ -210,7 +387,7 @@ impl ShellViewModel {
                 name: asset.name.clone(),
                 visible: asset.visible,
                 locked: asset.locked,
-                selected: active_id == Some(asset.id),
+                selected: state.session.selection.assets.contains(&asset.id) || active_id == Some(asset.id),
                 verts: asset.mesh.verts.len(),
                 tris: asset.mesh.tri_count(),
             })
@@ -242,6 +419,19 @@ impl ShellViewModel {
             state.scene_tris(),
             state.scene_verts()
         );
+
+        let uv_stats = match petunia_module_uv::UvModule::diagnostics(state) {
+            Some(diagnostics) => format!(
+                "Provider: xatlas-rs-v2 (generic fallback)\nIslands: {}\nOverlaps: {}\nZero-area faces: {}\nOut of range: {}\nStretch: mean {:.1}% / max {:.1}%",
+                diagnostics.island_count,
+                diagnostics.overlapping_islands,
+                diagnostics.zero_area_faces,
+                diagnostics.out_of_range_corners,
+                diagnostics.mean_stretch * 100.0,
+                diagnostics.max_stretch * 100.0,
+            ),
+            None => "No active mesh".to_string(),
+        };
 
         let active_tool = if state.session.tools.active_tool.is_empty() {
             "select".to_string()
@@ -275,12 +465,97 @@ impl ShellViewModel {
             active_object_details,
             active_material_name,
             scene_stats,
+            uv_stats,
             current_theme: state.ui.active_theme_id.clone(),
             is_orthographic: state.session.camera.proj == petunia_core::Projection::Ortho,
             is_wireframe: state.session.show_wireframe_overlay,
+            shading_mode: state.shading.id().to_string(),
+            xray_opacity: state.session.xray_opacity,
+            show_xray: state.session.show_xray,
+            shading_popover_open: false,
+            operation_hud_active: false,
+            operation_hud_title: String::new(),
+            operation_hud_lines: Vec::new(),
+            operation_hud_hint: String::new(),
+            operation_hud_subject: String::new(),
+            context_hint: String::new(),
+            operation_preview_commands: String::new(),
+            hover_label: String::new(),
+            transform_instant_active: false,
+            gizmo_hover_axis: -1,
+            gizmo_active_axis: -1,
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
+            selection_overlay: SelectionOverlayModel::default(),
             add_menu_open: false,
+            inspector_width: state.ui.right_width,
+            asset_library_height: state.ui.shell_asset_library_height,
+            rename_active: false,
+            rename_value: String::new(),
+            context_menu_open: false,
+            context_menu_x: 0.0,
+            context_menu_y: 0.0,
+            context_menu_title: String::new(),
+            context_menu_visible: true,
+            context_menu_locked: false,
+            boolean_operand_name: String::new(),
+            boolean_ready: false,
+            boolean_keep_parts: false,
+            menu_open: String::new(),
+            menu_file_label: String::new(),
+            menu_edit_label: String::new(),
+            menu_view_label: String::new(),
+            menu_window_label: String::new(),
+            menu_file_items: Vec::new(),
+            menu_edit_items: Vec::new(),
+            menu_view_items: Vec::new(),
+            menu_window_items: Vec::new(),
+            label_parts: String::new(),
+            label_project_asset_library: String::new(),
+            label_save_active_as_asset: String::new(),
+            label_status_hint: String::new(),
+            label_unwrap_mesh: String::new(),
+            label_pack_islands: String::new(),
+            label_active_brush_color: String::new(),
+            label_albedo_base_color: String::new(),
+            label_theme: String::new(),
+            label_place_in_scene: String::new(),
+            recovery_open: false,
+            recovery_title: String::new(),
+            recovery_body: String::new(),
+            recovery_detail: String::new(),
+            recovery_recover: String::new(),
+            recovery_keep: String::new(),
+            recovery_discard: String::new(),
+            label_asset_library: String::new(),
+            label_preferences: String::new(),
+            shell_info: String::new(),
+            label_apply: String::new(),
+            label_cancel: String::new(),
+            label_delete: String::new(),
+            label_duplicate: String::new(),
+            themes: Vec::new(),
+            uv_editor: UvEditorModel::default(),
+            paint_layers: Vec::new(),
+            paint_layer_count: String::new(),
+            paint_effect_kind: String::new(),
+            paint_effect_params: Vec::new(),
+            paint_canvas_size: String::new(),
+            paint_canvas_revision: 0,
+            paint_fill_scope: "ConnectedPixels".to_string(),
+            paint_projection: "Surface".to_string(),
+            paint_lock: "None".to_string(),
+            loop_cut_active: false,
+            loop_cut_slide: 0.0,
+            loop_cut_cuts: 1,
+            tool_activation: "drag".to_string(),
+            tool_modal_active: false,
+            tool_modal_title: String::new(),
+            tool_modal_label: String::new(),
+            tool_modal_value: 0.0,
+            tool_modal_step: 0.1,
+            tool_modal_min: 0.0,
+            tool_modal_max: 0.0,
         }
     }
 
@@ -301,6 +576,10 @@ pub trait PetuniaViewport: Send {
     fn update(&mut self, dt_seconds: f32);
     fn set_workspace(&mut self, workspace: Workspace);
     fn set_selection_domain(&mut self, domain: SelectionDomain);
+    /// O backend desenha alvos não selecionados com depth test próprio.
+    fn draws_component_guides(&self) -> bool {
+        false
+    }
     fn render_frame(
         &mut self,
         _project: &Project,
@@ -357,6 +636,10 @@ impl PetuniaViewport for Box<dyn PetuniaViewport> {
         (**self).set_selection_domain(domain);
     }
 
+    fn draws_component_guides(&self) -> bool {
+        (**self).draws_component_guides()
+    }
+
     fn render_frame(
         &mut self,
         project: &Project,
@@ -386,6 +669,207 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub paint_last: Option<[f32; 2]>,
     /// Menu de primitivas aberto (apresentação).
     pub add_menu_open: bool,
+    /// Ferramenta paramétrica modal ativa (Extrude, Inset, Bevel, Push/Pull).
+    pub tool_modal: Option<ToolModalKind>,
+    pub tool_modal_value: f32,
+    /// Renomeação inline do ativo selecionado (Outliner): `Some(nome em edição)`.
+    pub rename_draft: Option<String>,
+    /// Menu de contexto do Outliner: posição em px lógicos e ativo alvo.
+    pub context_menu: Option<ContextMenuState>,
+    /// Menu da barra superior aberto, se houver.
+    pub menu_open: Option<MenuKind>,
+    /// Popover de opções de shading aberto.
+    pub shading_popover_open: bool,
+    pub pointer_position: [f32; 2],
+    pub modal_text: String,
+    pub instant_transform: bool,
+    pub gizmo_hover: Option<GizmoHandle>,
+    /// Handle do gizmo sendo arrastado, se houver.
+    pub gizmo_drag: Option<GizmoHandle>,
+    /// Forma ancorada (Line/Rectangle) em curso: canto inicial em pixels do canvas.
+    pub shape_anchor: Option<(u32, u32)>,
+    /// Plano de corte (Slice) ativo: âncora em pixels lógicos da viewport.
+    pub slice_anchor: Option<[f32; 2]>,
+    /// Sessão de loop cut com slide interativo (P3D-131).
+    pub loop_cut: Option<LoopCutSessionState>,
+    /// Autosave rotativo do shell (P3D-002). Nunca sobrescreve o arquivo oficial.
+    pub autosave: petunia_core::AutosaveService,
+    /// Snapshot de recuperação detectado no arranque, aguardando decisão.
+    pub pending_recovery: Option<petunia_core::RecoveryInfo>,
+}
+
+/// Menu de contexto do Outliner aberto sobre uma linha do painel Parts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContextMenuState {
+    pub x: f32,
+    pub y: f32,
+    pub asset: uuid::Uuid,
+}
+
+/// Menus da barra superior do shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuKind {
+    File,
+    Edit,
+    View,
+    Window,
+}
+
+impl MenuKind {
+    pub const ALL: [MenuKind; 4] = [Self::File, Self::Edit, Self::View, Self::Window];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Edit => "edit",
+            Self::View => "view",
+            Self::Window => "window",
+        }
+    }
+
+    pub const fn title(self) -> petunia_config::TextId {
+        use petunia_config::text_id as T;
+        match self {
+            Self::File => T::MENU_FILE,
+            Self::Edit => T::MENU_EDIT,
+            Self::View => T::MENU_VIEW,
+            Self::Window => T::MENU_WINDOW,
+        }
+    }
+
+    /// Itens publicados pelo menu, na ordem de exibição.
+    ///
+    /// Cada id é um comando canônico real ou uma ação de shell que já existe no
+    /// roteador — nenhum item decorativo.
+    pub const fn items(self) -> &'static [(&'static str, petunia_config::TextId, &'static str)] {
+        use petunia_config::text_id as T;
+        match self {
+            Self::File => &[
+                ("file.new", T::FILE_NEW, "Ctrl+N"),
+                ("file.open", T::FILE_OPEN_PROJECT, "Ctrl+O"),
+                ("file.save", T::FILE_SAVE, "Ctrl+S"),
+                ("file.save_as", T::FILE_SAVE_AS, "Ctrl+Shift+S"),
+                ("file.import_obj", T::FILE_IMPORT_OBJ, ""),
+            ],
+            Self::Edit => &[
+                ("edit.undo", T::EDIT_UNDO, "Ctrl+Z"),
+                ("edit.redo", T::EDIT_REDO, "Ctrl+Shift+Z"),
+                ("edit.duplicate", T::UI_DUPLICATE, "Shift+D"),
+            ],
+            Self::View => &[
+                ("view.frame_selection", T::VIEW_FRAME, "F"),
+                ("view.frame_all", T::VIEW_FRAME_ALL, "Home"),
+                ("view.toggle_projection", T::VIEW_TOGGLE_PROJECTION, "O"),
+                ("view.toggle_wireframe", T::VIEW_TOGGLE_WIREFRAME, "Z"),
+                ("view.reset_camera", T::VIEW_RESET_CAMERA, "Shift+Home"),
+            ],
+            Self::Window => &[
+                ("window.command_palette", T::MENU_COMMAND_PALETTE, "Ctrl+P"),
+                ("window.settings", T::MENU_PREFERENCES, ""),
+            ],
+        }
+    }
+}
+
+/// Editor UV 2D: geometria do layout pronta para o `Path` do Slint.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UvEditorModel {
+    /// Comandos SVG-like do `Path` do Slint (`M x y L x y ...`).
+    pub layout_commands: String,
+    pub island_count: usize,
+    pub face_count: usize,
+    pub selected_face: i32,
+    /// Faces marcadas em `uv_selected` (seleção de UV, distinta da seleção 3D).
+    pub uv_selected_count: usize,
+    /// `true` quando a malha tem mais faces do que o editor desenha.
+    pub truncated: bool,
+}
+
+/// Feedback visual da seleção na viewport, projetado para `Path` do Slint.
+///
+/// O renderer WGPU não desenha seleção, então o shell desenha o contorno por
+/// cima da imagem: sem isso o usuário clica e nada muda na tela.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SelectionOverlayModel {
+    pub visible: bool,
+    /// Arestas do contorno (caixa do objeto, arestas ou faces selecionadas).
+    pub outline_commands: String,
+    /// Marcadores preenchidos dos vértices selecionados.
+    pub point_commands: String,
+    /// Elementos não selecionados do domínio atual, para o usuário ver o que
+    /// pode clicar. Sem isso a viewport mostra um sólido sem alvos visíveis.
+    pub unselected_outline_commands: String,
+    pub unselected_point_commands: String,
+    /// Cor semântica: seleção normal ou ativo em modo componente.
+    pub accent: bool,
+}
+
+/// Parâmetro numérico de um efeito de camada, já com rótulo e faixa.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaintEffectParam {
+    pub key: String,
+    pub label: String,
+    pub value: f32,
+    pub min: f32,
+    pub max: f32,
+}
+
+/// Camada de pintura publicada para o painel de camadas do shell.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaintLayerModel {
+    pub id: String,
+    pub name: String,
+    pub visible: bool,
+    pub locked: bool,
+    pub opacity: f32,
+    pub active: bool,
+    pub is_group: bool,
+    pub kind_label: String,
+}
+
+/// Handle do gizmo sob o cursor ou em arrasto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GizmoHandle {
+    X,
+    Y,
+    Z,
+}
+
+impl GizmoHandle {
+    /// Índice do eixo para `ModalConstraint::Axis`.
+    pub const fn axis(self) -> usize {
+        match self {
+            Self::X => 0,
+            Self::Y => 1,
+            Self::Z => 2,
+        }
+    }
+}
+
+/// Estado da sessão de loop cut ativa no shell.
+#[derive(Debug, Clone)]
+pub struct LoopCutSessionState {
+    pub ring: petunia_core::LoopRing,
+    pub cuts: usize,
+    pub slide: f32,
+    /// Malha anterior ao preview: toda reconstrução parte daqui, nunca do preview.
+    pub source: petunia_core::Mesh,
+}
+
+/// Tema disponível no registry, já marcado como ativo ou não.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThemeEntryModel {
+    pub id: String,
+    pub name: String,
+    pub active: bool,
+}
+
+/// Item de menu já traduzido para o shell.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuEntryModel {
+    pub id: String,
+    pub label: String,
+    pub shortcut: String,
 }
 
 impl<V: PetuniaViewport> SlintUiBridge<V> {
@@ -402,6 +886,22 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             viewport_size: [1024.0, 768.0],
             paint_last: None,
             add_menu_open: false,
+            tool_modal: None,
+            tool_modal_value: 0.0,
+            rename_draft: None,
+            context_menu: None,
+            menu_open: None,
+            shape_anchor: None,
+            slice_anchor: None,
+            loop_cut: None,
+            shading_popover_open: false,
+            pointer_position: [512.0, 384.0],
+            modal_text: String::new(),
+            instant_transform: false,
+            gizmo_hover: None,
+            gizmo_drag: None,
+            autosave: petunia_core::AutosaveService::default(),
+            pending_recovery: None,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -413,9 +913,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 NumericFieldState::new(0.0, None, None).with_steps(1.0, 0.1),
             ],
             scale: [
-                NumericFieldState::new(1.0, Some(0.001), None).with_steps(0.1, 0.01),
-                NumericFieldState::new(1.0, Some(0.001), None).with_steps(0.1, 0.01),
-                NumericFieldState::new(1.0, Some(0.001), None).with_steps(0.1, 0.01),
+                NumericFieldState::new(1.0, None, None).with_steps(0.1, 0.01),
+                NumericFieldState::new(1.0, None, None).with_steps(0.1, 0.01),
+                NumericFieldState::new(1.0, None, None).with_steps(0.1, 0.01),
             ],
         };
         bridge.sync_viewport_context();
@@ -423,6 +923,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn apply(&mut self, intent: UiIntent) {
+        if matches!(&intent, UiIntent::SetWorkspace(_) | UiIntent::SetSelectionDomain(_) | UiIntent::SetActiveTool(_) | UiIntent::OpenProjectFrom(_) | UiIntent::SelectSceneAsset(_)) {
+            self.cancel_active_operation();
+        }
         match intent {
             UiIntent::SetWorkspace(workspace) => self.state.switch_workspace(workspace),
             UiIntent::SaveProject => {
@@ -539,11 +1042,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
             UiIntent::Undo => {
+                if self.cancel_active_operation() { return; }
                 if self.state.undo() {
                     self.state.set_status("Desfazer executado.");
                 }
             }
             UiIntent::Redo => {
+                if self.cancel_active_operation() { return; }
                 if self.state.redo() {
                     self.state.set_status("Refazer executado.");
                 }
@@ -602,6 +1107,26 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                             petunia_module_paint::PaintModule::fill_selection(&mut self.state);
                         self.state.set_status(format!("Filled {count} points"));
                     }
+                    // Formas e pincéis do workspace PAINT compartilham o mesmo
+                    // índice de tipo de pincel que o resto do domínio.
+                    "line" | "rectangle" => {
+                        self.state.session.tools.paint_brush_kind =
+                            petunia_core::kind_from_brush_type(if tool == "line" {
+                                petunia_core::BrushType::Line
+                            } else {
+                                petunia_core::BrushType::Rectangle
+                            });
+                        self.state
+                            .set_status("Shape: press on the surface to anchor, release to commit");
+                    }
+                    "brush" | "eraser" | "picker" => {
+                        self.state.session.tools.paint_brush_kind =
+                            petunia_core::kind_from_brush_type(match tool.as_str() {
+                                "eraser" => petunia_core::BrushType::Eraser,
+                                "picker" => petunia_core::BrushType::Eyedropper,
+                                _ => petunia_core::BrushType::Soft,
+                            });
+                    }
                     _ => {}
                 }
             }
@@ -610,10 +1135,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     .ok()
                     .and_then(|id| self.state.project.assets.iter().position(|a| a.id == id))
                 {
-                    let id = self.state.project.assets[idx].id;
-                    self.state.project.active = idx;
-                    self.state.session.selection.asset = Some(id);
-                    self.state.sync_selection();
+                    self.state.select_object(Some(idx), false);
                     self.state.mark_dirty();
                     self.reset_transform_fields();
                 }
@@ -723,12 +1245,126 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             show_triangulation: self.state.session.show_triangulation,
             textured: self.state.session.textured,
             show_wireframe_overlay: self.state.session.show_wireframe_overlay,
+            selection_domain: self.state.selection_domain(),
+            xray_opacity: self.state.session.xray_opacity,
+            show_grid: self.state.session.show_grid,
+            hover: self.state.session.tools.hover,
         };
         self.viewport.render_frame(
             &self.state.project,
             &self.state.session.camera,
             render_state,
         )
+    }
+
+    /// Cria uma camada de efeito com parâmetros padrão para o tipo pedido.
+    pub fn add_paint_effect_layer(&mut self, kind: &str) -> bool {
+        use petunia_project::paint_layers::{PaintEffect, PaintLayer};
+        let effect = match kind {
+            "Pixelate" => PaintEffect::Pixelate { cell_size: 4 },
+            "Posterize" => PaintEffect::Posterize { levels: 6 },
+            "Invert" => PaintEffect::Invert,
+            "Grain" => PaintEffect::Grain {
+                intensity: 0.15,
+                seed: 1,
+            },
+            "BrightnessContrast" => PaintEffect::BrightnessContrast {
+                brightness: 0.0,
+                contrast: 0.0,
+            },
+            "HueSaturation" => PaintEffect::HueSaturation {
+                hue_shift_deg: 0.0,
+                saturation: 0.0,
+            },
+            _ => return false,
+        };
+        self.mutate_paint_stack("add effect layer", |stack| {
+            stack.add_layer(PaintLayer::new_effect(kind.to_string(), effect));
+            true
+        })
+    }
+
+    /// Ajusta um parâmetro do efeito da camada ativa.
+    pub fn set_paint_effect_param(&mut self, key: &str, value: f32) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        self.mutate_paint_stack("effect parameter", |stack| {
+            let Some(layer) = stack.active_mut() else {
+                return false;
+            };
+            let petunia_project::paint_layers::LayerKind::Effect(effect) = &mut layer.kind else {
+                return false;
+            };
+            use petunia_project::paint_layers::PaintEffect;
+            match (effect, key) {
+                (PaintEffect::Pixelate { cell_size }, "cell_size") => {
+                    *cell_size = (value.round() as u32).clamp(1, 64);
+                }
+                (PaintEffect::Posterize { levels }, "levels") => {
+                    *levels = (value.round() as u8).clamp(2, 32);
+                }
+                (PaintEffect::Grain { intensity, .. }, "intensity") => {
+                    *intensity = value.clamp(0.0, 1.0);
+                }
+                (PaintEffect::Grain { seed, .. }, "seed") => {
+                    *seed = value.max(0.0).round() as u32;
+                }
+                (PaintEffect::BrightnessContrast { brightness, .. }, "brightness") => {
+                    *brightness = value.clamp(-1.0, 1.0);
+                }
+                (PaintEffect::BrightnessContrast { contrast, .. }, "contrast") => {
+                    *contrast = value.clamp(-1.0, 1.0);
+                }
+                (PaintEffect::HueSaturation { hue_shift_deg, .. }, "hue_shift_deg") => {
+                    *hue_shift_deg = value.clamp(-180.0, 180.0);
+                }
+                (PaintEffect::HueSaturation { saturation, .. }, "saturation") => {
+                    *saturation = value.clamp(-1.0, 1.0);
+                }
+                _ => return false,
+            }
+            true
+        })
+    }
+
+    /// Dimensões do canvas composto do ativo, quando existe.
+    pub fn paint_canvas_dimensions(&self) -> Option<(u32, u32)> {
+        let asset = self.state.project.assets.get(self.state.project.active)?;
+        if let Some(texture) = asset.texture.as_ref() {
+            return Some((texture.w, texture.h));
+        }
+        let stack = asset.paint_stack.as_ref()?;
+        let layer = stack.active()?;
+        let canvas = layer.canvas()?;
+        Some((canvas.w, canvas.h))
+    }
+
+    /// Publica a imagem do canvas 2D na janela, quando houver camada.
+    pub fn publish_canvas_image(&mut self, window: &PetuniaSlintShell) {
+        if let Some(image) = self.render_paint_canvas() {
+            window.set_paint_canvas_image(image);
+        }
+    }
+
+    /// Converte a camada ativa em imagem Slint para o editor 2D.
+    ///
+    /// A camada ativa é a superfície que o pincel realmente altera; o composto
+    /// (`Asset.texture`) é o que vai para o material.
+    pub fn render_paint_canvas(&mut self) -> Option<slint::Image> {
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let asset = self.state.project.assets.get(self.state.project.active)?;
+        let canvas = asset
+            .paint_stack
+            .as_ref()
+            .and_then(|stack| stack.active())
+            .and_then(|layer| layer.canvas())?;
+        let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(canvas.w, canvas.h);
+        let pixels = buffer.make_mut_bytes();
+        let source = &canvas.pixels;
+        let length = pixels.len().min(source.len());
+        pixels[..length].copy_from_slice(&source[..length]);
+        Some(slint::Image::from_rgba8(buffer))
     }
 
     pub fn resize_viewport(&mut self, width: u32, height: u32) {
@@ -740,8 +1376,412 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.mark_dirty();
     }
 
+    /// Preenche o HUD da operação e a barra de status contextual.
+    ///
+    /// O HUD diz *o que está acontecendo e com que valor*; a barra diz *como
+    /// controlar*. Os dois nunca repetem a mesma informação.
+    fn fill_operation_hud(&self, vm: &mut ShellViewModel) {
+        let axis_name = |index: usize| ["X", "Y", "Z"][index.min(2)];
+
+        // Ferramenta paramétrica modal.
+        if let Some(kind) = self.tool_modal {
+            let (minimum, maximum) = kind.bounds();
+            let _ = (minimum, maximum);
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = kind.title().to_string();
+            vm.operation_hud_lines =
+                vec![format!("{}   {:.3}", kind.label(), self.tool_modal_value)];
+            vm.operation_hud_subject = self
+                .state
+                .project
+                .active_mesh()
+                .map(|mesh| {
+                    let faces = mesh.faces.iter().filter(|face| face.selected).count();
+                    let verts = mesh.verts.iter().filter(|vert| vert.selected).count();
+                    if faces > 0 {
+                        format!("{faces} face(s)")
+                    } else {
+                        format!("{verts} point(s)")
+                    }
+                })
+                .unwrap_or_default();
+            vm.operation_hud_hint = format!(
+                "{} Confirm   Esc Cancel   Shift Precision",
+                if self.is_instant_tool_mode() {
+                    "Click"
+                } else {
+                    "Release"
+                }
+            );
+            vm.context_hint = format!("{} · {}", kind.title(), vm.operation_hud_hint);
+            return;
+        }
+
+        // Loop Cut.
+        if let Some(session) = &self.loop_cut {
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = "Loop Cut".to_string();
+            vm.operation_hud_lines = vec![
+                format!("Cuts    {}", session.cuts),
+                format!("Slide   {:.3}", session.slide),
+            ];
+            vm.operation_hud_subject = format!("{} cut(s)", session.cuts);
+            vm.operation_hud_hint = "Enter Confirm   Esc Cancel   Drag to slide".to_string();
+            vm.context_hint = format!("Loop Cut · {}", vm.operation_hud_hint);
+            return;
+        }
+
+        if self.state.session.tools.active_tool == "cut" && let Some(session) = &self.state.session.tools.cut_session {
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = "Cut".into();
+            vm.operation_hud_lines = vec![format!("{} segment(s)", session.segments)];
+            vm.operation_hud_hint = "Click edge points · Enter Apply · Esc Cancel".into();
+            vm.context_hint = vm.operation_hud_hint.clone();
+            if let Some(point) = session.edge_start {
+                let clip = self.state.session.camera.view_proj() * point.position.extend(1.0);
+                if clip.w > 0.0 {
+                    let x = (clip.x / clip.w * 0.5 + 0.5) * self.viewport_size[0];
+                    let y = (0.5 - clip.y / clip.w * 0.5) * self.viewport_size[1];
+                    vm.operation_preview_commands = format!("M {x:.2} {y:.2} L {:.2} {:.2}", self.pointer_position[0], self.pointer_position[1]);
+                }
+            }
+            return;
+        }
+
+        // Transformação por arrasto (gizmo ou ferramenta ativa).
+        if let Some(modal) = self.state.session.tools.modal.as_ref() {
+            let title = match modal.kind {
+                petunia_core::ModalKind::Move => "Move",
+                petunia_core::ModalKind::Rotate => "Rotate",
+                petunia_core::ModalKind::Scale => "Scale",
+                petunia_core::ModalKind::Extrude => "Extrude",
+                petunia_core::ModalKind::ExtrudeIndividual => "Extrude Individual",
+                petunia_core::ModalKind::Inset => "Inset",
+                petunia_core::ModalKind::Bevel => "Bevel",
+                petunia_core::ModalKind::PushPull => "Push/Pull",
+            };
+            let mut lines = Vec::new();
+            match modal.constraint {
+                petunia_core::ModalConstraint::Axis(i) => {
+                    lines.push(format!("{}   {:.3}", axis_name(i), modal.value));
+                }
+                petunia_core::ModalConstraint::Plane(i) => {
+                    lines.push(format!(
+                        "Plane {}{}   {:.3}",
+                        axis_name((i + 1) % 3),
+                        axis_name((i + 2) % 3),
+                        modal.value
+                    ));
+                }
+                petunia_core::ModalConstraint::Free => {
+                    let components = modal.components;
+                    if modal.kind == petunia_core::ModalKind::Move {
+                        lines.push(format!("X   {:.3}", components.x));
+                        lines.push(format!("Y   {:.3}", components.y));
+                        lines.push(format!("Z   {:.3}", components.z));
+                    } else {
+                        lines.push(format!("Value   {:.3}", modal.value));
+                    }
+                }
+            }
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = title.to_string();
+            if !self.modal_text.is_empty() { lines.push(format!("Input   {}", self.modal_text)); }
+            vm.operation_hud_lines = lines;
+            vm.operation_hud_subject = format!(
+                "{} · {}",
+                if self.state.selection_domain() == petunia_core::SelectionDomain::Object {
+                    "object"
+                } else {
+                    "selection"
+                },
+                match modal.constraint {
+                    petunia_core::ModalConstraint::Axis(i) => format!("{} axis", axis_name(i)),
+                    petunia_core::ModalConstraint::Plane(i) => {
+                        format!("{}{} plane", axis_name((i + 1) % 3), axis_name((i + 2) % 3))
+                    }
+                    petunia_core::ModalConstraint::Free => "free".to_string(),
+                }
+            );
+            vm.operation_hud_hint = "Enter Confirm   Esc Cancel   Shift Precision".to_string();
+            vm.context_hint = format!("{title} · {}", vm.operation_hud_hint);
+            return;
+        }
+
+        // Em repouso: a barra informa o domínio e a navegação.
+        vm.operation_hud_active = false;
+        vm.context_hint = match self.state.selection_domain() {
+            petunia_core::SelectionDomain::Object => {
+                "Selection: Object   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+            petunia_core::SelectionDomain::Vertex => {
+                "Selection: Point   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+            petunia_core::SelectionDomain::Edge => {
+                "Selection: Edge   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+            petunia_core::SelectionDomain::Face => {
+                "Selection: Face   ·   LMB Select   ·   MMB Orbit   ·   Shift+MMB Pan".to_string()
+            }
+        };
+    }
+
+    /// Orbita a câmera, usando a seleção como pivô quando existe.
+    ///
+    /// É o comportamento de Blender/C4D: o usuário orbita em torno do que
+    /// está trabalhando, não de um ponto fixo da cena.
+    pub fn orbit_viewport(&mut self, dx: f32, dy: f32) -> bool {
+        if !dx.is_finite() || !dy.is_finite() {
+            return false;
+        }
+        if let Some(center) = self.selection_pivot() {
+            self.state.session.camera.target = center;
+        }
+        self.state.session.camera.orbit(dx, dy);
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Distância em mundo que um arrasto de tela representa ao longo de um eixo.
+    ///
+    /// Projeta a direção do eixo em espaço de tela e mede quanto do movimento
+    /// do ponteiro caiu nela, convertendo por `visible_height`.
+    fn screen_delta_on_axis(
+        &self,
+        axis: usize,
+        total_x: f32,
+        total_y: f32,
+        viewport: [f32; 2],
+    ) -> f32 {
+        let world_axis = match axis {
+            0 => glam::Vec3::X,
+            1 => glam::Vec3::Y,
+            _ => glam::Vec3::Z,
+        };
+        let view_proj = self.state.session.camera.view_proj();
+        let project = |point: glam::Vec3| -> Option<[f32; 2]> {
+            let clip = view_proj * glam::Vec4::new(point.x, point.y, point.z, 1.0);
+            if clip.w <= 0.05 {
+                return None;
+            }
+            let inv_w = 1.0 / clip.w;
+            Some([
+                (clip.x * inv_w * 0.5 + 0.5) * viewport[0],
+                (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * viewport[1],
+            ])
+        };
+        let origin = self.state.session.tools.modal.as_ref().map_or_else(|| self.state.calculate_pivot(self.state.session.pivot_point), |modal| modal.pivot);
+        let Some(a) = project(origin) else {
+            return 0.0;
+        };
+        let Some(b) = project(origin + world_axis) else {
+            return 0.0;
+        };
+        let direction = [b[0] - a[0], b[1] - a[1]];
+        let length_squared = direction[0] * direction[0] + direction[1] * direction[1];
+        if length_squared <= 1.0e-6 {
+            return 0.0;
+        }
+        // Fração do movimento do ponteiro na direção do eixo, em unidades de
+        // mundo (a direção projetada corresponde a 1 unidade do eixo).
+        let along = (total_x * direction[0] + total_y * direction[1]) / length_squared;
+        along
+    }
+
+    /// Centro da seleção do ativo, quando há algo selecionado.
+    fn selection_pivot(&self) -> Option<glam::Vec3> {
+        let mesh = self.state.project.active_mesh()?;
+        if self.state.selection_domain() == SelectionDomain::Object {
+            return Some(self.state.calculate_pivot(self.state.session.pivot_point));
+        }
+        if !mesh.has_selection() { return None; }
+        let center = mesh.selection_center();
+        if center.iter().all(|value| value.is_finite()) {
+            Some(glam::Vec3::from_array(center))
+        } else {
+            None
+        }
+    }
+
+    /// Atualiza a preselection de componente sob o cursor.
+    ///
+    /// Sem X-Ray um componente atrás da geometria não é selecionável, então
+    /// também não pode ser destacado: o hover valida profundidade contra a
+    /// face frontal antes de aceitar o alvo.
+    pub fn hover_component(&mut self, normalized_x: f32, normalized_y: f32) -> bool {
+        if normalized_x.is_finite() && normalized_y.is_finite() {
+            self.pointer_position = [normalized_x * self.viewport_size[0], normalized_y * self.viewport_size[1]];
+        }
+        if self.state.workspace == Workspace::Paint {
+            return false;
+        }
+        let next = self.pick_viewport_target(normalized_x, normalized_y);
+
+        if next == self.state.session.tools.hover {
+            return self.state.session.tools.active_tool == "cut";
+        }
+        self.state.session.tools.hover = next;
+        true
+    }
+
+    /// A preselection e o clique usam exatamente o mesmo hit test. Ponto e
+    /// aresta usam alvos em pixels lógicos, independentes da distância da
+    /// câmera; objetos e faces usam a superfície real, nunca uma esfera de
+    /// bounding que seleciona no vazio.
+    fn pick_viewport_target(&self, x: f32, y: f32) -> petunia_core::HoverTarget {
+        self.pick_target_for_domain(self.state.selection_domain(), x, y)
+    }
+
+    fn pick_target_for_domain(&self, domain: SelectionDomain, x: f32, y: f32) -> petunia_core::HoverTarget {
+        use petunia_core::HoverTarget as Target;
+
+        if !x.is_finite()
+            || !y.is_finite()
+            || !(0.0..=1.0).contains(&x)
+            || !(0.0..=1.0).contains(&y)
+        {
+            return Target::None;
+        }
+        let (width, height) = (self.viewport_size[0], self.viewport_size[1]);
+        if width <= 1.0 || height <= 1.0 {
+            return Target::None;
+        }
+        let camera = &self.state.session.camera;
+        let scene = petunia_core::viewport_query::ViewportSceneQuery::new(&self.state.project.project);
+        let ndc = [x * 2.0 - 1.0, 1.0 - y * 2.0];
+        if domain == SelectionDomain::Object {
+            return scene.nearest_object(camera, ndc).map_or(Target::None, Target::Object);
+        }
+        let Some(asset) = self.state.project.active().filter(|asset| asset.visible && !asset.locked) else {
+            return Target::None;
+        };
+        let mode = match domain {
+            SelectionDomain::Vertex => petunia_core::SelectMode::Vertex,
+            SelectionDomain::Edge => petunia_core::SelectMode::Edge,
+            SelectionDomain::Face => petunia_core::SelectMode::Face,
+            SelectionDomain::Object => return Target::None,
+        };
+        let through = self.state.session.show_xray || self.state.session.shading == petunia_core::Shading::Wireframe;
+        petunia_core::picking::pick_mesh_filtered(
+            &asset.mesh, camera, glam::Vec2::new(width, height), glam::Vec2::from_array(ndc),
+            mode, through, |point| scene.point_visible(camera, point),
+        ).map_or(Target::None, |hit| match hit.component {
+            petunia_core::picking::PickComponent::Vertex(i) => Target::Vertex(i as u32),
+            petunia_core::picking::PickComponent::Edge(a, b) => Target::Edge(a, b),
+            petunia_core::picking::PickComponent::Face(i) => Target::Face(i),
+        })
+    }
+
+    /// Limpa a preselection (ponteiro saiu da viewport).
+    pub fn clear_hover(&mut self) -> bool {
+        if !self.state.session.tools.hover.is_some() {
+            return false;
+        }
+        self.state.session.tools.hover = petunia_core::HoverTarget::None;
+        true
+    }
+
+    /// Handle do gizmo sob o cursor (preselection, sem clique).
+    /// Handle do gizmo sob um ponto de tela, dentro de um raio de tolerância.
+    ///
+    /// O teste é em espaço de tela porque o gizmo tem tamanho fixo em pixels:
+    /// o alvo do mouse precisa ser generoso (12 px) mesmo com a haste fina.
+    pub fn gizmo_handle_at(&self, x: f32, y: f32) -> Option<GizmoHandle> {
+        const HIT_RADIUS: f32 = 12.0;
+        let gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        if !gizmo.visible {
+            return None;
+        }
+        let mut best: Option<(GizmoHandle, f32)> = None;
+        for (handle, commands) in [
+            (GizmoHandle::X, &gizmo.x_commands),
+            (GizmoHandle::Y, &gizmo.y_commands),
+            (GizmoHandle::Z, &gizmo.z_commands),
+        ] {
+            let numbers: Vec<f32> = commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            for segment in numbers.chunks_exact(2).collect::<Vec<_>>().windows(2) {
+                let a = [segment[0][0], segment[0][1]];
+                let b = [segment[1][0], segment[1][1]];
+                if (a[0] - b[0]).hypot(a[1] - b[1]) < 0.25 { continue; }
+                let distance = point_segment_distance([x, y], a, b);
+                if distance <= HIT_RADIUS && best.is_none_or(|(_, current)| distance < current) { best = Some((handle, distance)); }
+            }
+        }
+        best.map(|(handle, _)| handle)
+    }
+
+    /// Atualiza o handle do gizmo sob o cursor (preselection).
+    pub fn hover_gizmo(&mut self, x: f32, y: f32) -> bool {
+        if self.gizmo_drag.is_some() {
+            return false;
+        }
+        let next = self.gizmo_handle_at(x, y);
+        if next == self.gizmo_hover {
+            return false;
+        }
+        self.gizmo_hover = next;
+        true
+    }
+
+    /// Inicia o arrasto no handle do gizmo, restringindo a transformação ao eixo.
+    pub fn begin_gizmo_drag(&mut self, x: f32, y: f32) -> bool {
+        let Some(handle) = self.gizmo_handle_at(x, y) else {
+            return false;
+        };
+        let kind = match self.state.session.tools.active_tool.as_str() {
+            "rotate" => TransformKind::Rotation,
+            "scale" => TransformKind::Scale,
+            _ => TransformKind::Position,
+        };
+        if !self.begin_viewport_transform(kind, x, y) {
+            return false;
+        }
+        // A restrição de eixo é do domínio: o preview já sai no eixo certo.
+        let _ = self
+            .state
+            .set_modal_constraint(petunia_core::ModalConstraint::Axis(handle.axis()));
+        self.gizmo_drag = Some(handle);
+        self.state.set_status(format!(
+            "{} · {} axis",
+            match kind {
+                TransformKind::Position => "Move",
+                TransformKind::Rotation => "Rotate",
+                TransformKind::Scale => "Scale",
+            },
+            match handle {
+                GizmoHandle::X => "X",
+                GizmoHandle::Y => "Y",
+                GizmoHandle::Z => "Z",
+            }
+        ));
+        true
+    }
+
+    /// Encerra o arrasto do gizmo.
+    pub fn end_gizmo_drag(&mut self) -> bool {
+        if self.gizmo_drag.take().is_none() {
+            return false;
+        }
+        self.end_viewport_transform();
+        self.gizmo_hover = None;
+        true
+    }
+
+    /// Atualiza o plano de corte enquanto o ponteiro se move.
+    pub fn update_viewport_slice(&mut self, x: f32, y: f32) -> bool {
+        if self.slice_anchor.is_none() {
+            return false;
+        }
+        self.update_slice(x, y)
+    }
+
     /// Inicia uma transformação modal por arrasto na viewport.
     pub fn begin_viewport_transform(&mut self, kind: TransformKind, x: f32, y: f32) -> bool {
+        self.modal_text.clear();
+        self.instant_transform = false;
         let modal_kind = match kind {
             TransformKind::Position => petunia_core::ModalKind::Move,
             TransformKind::Rotation => petunia_core::ModalKind::Rotate,
@@ -754,6 +1794,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     kind,
                     start: [x, y],
                     viewport: self.viewport_size,
+                    last_pointer: [x, y],
+                    virtual_pointer: [x, y],
+                    rotation_angle: 0.0,
+                    last_angle: 0.0,
                 });
                 true
             }
@@ -766,26 +1810,66 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     /// Atualiza a transformação a partir do deslocamento absoluto do ponteiro.
     pub fn update_viewport_transform(&mut self, x: f32, y: f32) -> bool {
-        let Some(drag) = self.drag else {
-            return false;
-        };
-        let total_x = x - drag.start[0];
-        let total_y = y - drag.start[1];
-        let world_per_pixel =
-            self.state.session.camera.visible_height() / drag.viewport[1].max(1.0);
+        self.update_viewport_transform_modified(x, y, false, false)
+    }
+
+    pub fn update_viewport_transform_modified(&mut self, x: f32, y: f32, fine: bool, snap: bool) -> bool {
+        self.pointer_position = [x, y];
+        if !self.modal_text.is_empty() { return false; }
+        if !x.is_finite() || !y.is_finite() { return false; }
+        let Some(mut drag) = self.drag else { return false; };
+        let precision = if fine { 0.1 } else { 1.0 };
+        for (axis, pointer) in [x, y].into_iter().enumerate() {
+            drag.virtual_pointer[axis] += (pointer - drag.last_pointer[axis]) * precision;
+            drag.last_pointer[axis] = pointer;
+        }
+        let Some(modal) = self.state.session.tools.modal.as_ref() else { return false; };
+        let (constraint, pivot, normal) = (modal.constraint, modal.pivot, modal.normal);
+        let camera = &self.state.session.camera;
+        let viewport = glam::Vec2::from_array(drag.viewport);
+        let start = glam::Vec2::from_array(drag.start);
+        let current = glam::Vec2::from_array(drag.virtual_pointer);
+        let delta = current - start;
+        let axis = |index| match index { 0 => glam::Vec3::X, 1 => glam::Vec3::Y, _ => glam::Vec3::Z };
+        use petunia_core::{ModalConstraint, transform_projection as projection};
         let result = match drag.kind {
             TransformKind::Position => {
-                let right = self.state.session.camera.right();
-                let up = self.state.session.camera.up();
-                let delta = right * (total_x * world_per_pixel) + up * (-total_y * world_per_pixel);
-                self.state.update_modal(delta, 0.0)
+                let (mut translation, mut scalar) = match constraint {
+                    ModalConstraint::Axis(index) => {
+                        let value = projection::axis_delta(camera, viewport, start, current, pivot, axis(index))
+                            .unwrap_or_else(|| self.screen_delta_on_axis(index, delta.x, delta.y, drag.viewport));
+                        (axis(index) * value, value)
+                    }
+                    ModalConstraint::Plane(index) => (projection::plane_delta(camera, viewport, start, current, pivot, axis(index)).unwrap_or(glam::Vec3::ZERO), 0.0),
+                    ModalConstraint::Free => (projection::plane_delta(camera, viewport, start, current, pivot, camera.forward()).unwrap_or(glam::Vec3::ZERO), 0.0),
+                };
+                if snap {
+                    let step = self.state.session.snap_settings.grid_spacing.max(0.001);
+                    translation = (translation / step).round() * step;
+                    scalar = (scalar / step).round() * step;
+                }
+                self.state.update_modal(translation, scalar)
             }
-            TransformKind::Rotation => self.state.update_modal(glam::Vec3::ZERO, total_x * 0.5),
+            TransformKind::Rotation => {
+                let normal = match constraint { ModalConstraint::Axis(i) | ModalConstraint::Plane(i) => axis(i), ModalConstraint::Free => normal };
+                let angle = projection::rotation_angle(camera, viewport, start, current, pivot, normal).unwrap_or(delta.x * 0.5);
+                let change = (angle - drag.last_angle + 180.0).rem_euclid(360.0) - 180.0;
+                drag.rotation_angle += change;
+                drag.last_angle = angle;
+                let angle = if snap { (drag.rotation_angle / 15.0).round() * 15.0 } else { drag.rotation_angle };
+                self.state.update_modal(glam::Vec3::ZERO, angle)
+            }
             TransformKind::Scale => {
-                let factor = (1.0 + total_x * 0.005).max(0.001);
+                let origin = projection::project_pixel(camera, viewport, pivot).unwrap_or(start);
+                let a = start - origin;
+                let b = current - origin;
+                let mut factor = if a.length() >= 8.0 { b.dot(a) / a.length_squared() } else { 1.0 + delta.x * 0.005 };
+                if snap { factor = (factor * 10.0).round() / 10.0; }
+                if factor.abs() < 0.001 { factor = if factor < 0.0 { -0.001 } else { 0.001 }; }
                 self.state.update_modal(glam::Vec3::ZERO, factor)
             }
         };
+        self.drag = Some(drag);
         match result {
             Ok(()) => {
                 let components = self
@@ -841,11 +1925,99 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.state.set_status("No active mesh to paint");
             return false;
         }
+        if self.is_shape_tool() {
+            return self.begin_paint_shape_at(x, y);
+        }
         self.state.begin_paint_stroke();
         self.paint_dab_at(x, y);
         self.paint_last = Some([x, y]);
         self.state.mark_dirty();
         true
+    }
+
+    /// Ferramentas de forma ancoram no press e confirmam no release.
+    pub fn is_shape_tool(&self) -> bool {
+        matches!(
+            petunia_core::brush_type_from_kind(self.state.session.tools.paint_brush_kind),
+            petunia_core::BrushType::Line | petunia_core::BrushType::Rectangle
+        )
+    }
+
+    /// Inicia uma forma (Line/Rectangle) no pixel do canvas sob o cursor.
+    pub fn begin_paint_shape_at(&mut self, x: f32, y: f32) -> bool {
+        if self.state.workspace != Workspace::Paint {
+            return false;
+        }
+        // A forma precisa de canvas para converter UV em pixel.
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let Some((px, py)) = self.canvas_pixel_at(x, y) else {
+            self.state
+                .set_status("Shape: point at the surface to anchor the shape");
+            return false;
+        };
+        self.shape_anchor = Some((px, py));
+        self.state.set_status("Shape anchored: release to commit");
+        true
+    }
+
+    /// Confirma a forma como uma única operação de undo.
+    pub fn end_paint_shape_at(&mut self, x: f32, y: f32) -> bool {
+        let Some((x0, y0)) = self.shape_anchor.take() else {
+            return false;
+        };
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let Some((x1, y1)) = self.canvas_pixel_at(x, y) else {
+            self.state
+                .set_status("Shape: release point is off the surface, discarded");
+            return false;
+        };
+        let brush = petunia_core::brush_type_from_kind(self.state.session.tools.paint_brush_kind);
+        let color = [
+            (self.state.paint_color[0] * 255.0).clamp(0.0, 255.0) as u8,
+            (self.state.paint_color[1] * 255.0).clamp(0.0, 255.0) as u8,
+            (self.state.paint_color[2] * 255.0).clamp(0.0, 255.0) as u8,
+            255,
+        ];
+        let strength = self.state.session.tools.paint_strength;
+        self.state.checkpoint("paint shape");
+        petunia_module_paint::PaintModule::commit_shape(
+            &mut self.state,
+            petunia_module_paint::ShapeStroke {
+                x0,
+                y0,
+                x1,
+                y1,
+                brush,
+                color,
+                strength,
+            },
+        );
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        self.state
+            .set_status(format!("Shape committed ({brush:?})"));
+        true
+    }
+
+    /// Cancela a forma ancorada sem tocar no documento.
+    pub fn cancel_paint_shape(&mut self) -> bool {
+        if self.shape_anchor.take().is_none() {
+            return false;
+        }
+        self.state.set_status("Shape cancelled");
+        true
+    }
+
+    fn canvas_pixel_at(&self, x: f32, y: f32) -> Option<(u32, u32)> {
+        let width = self.viewport_size[0].max(1.0);
+        let height = self.viewport_size[1].max(1.0);
+        let ndc_x = (x / width).clamp(0.0, 1.0) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (y / height).clamp(0.0, 1.0) * 2.0;
+        let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
+        let (face, hit) = pick_face_hit(&self.state, origin, direction)?;
+        let isolate = self.state.session.tools.paint_isolate_selection;
+        let uv = petunia_module_paint::PaintModule::face_hit_uv(&self.state, face, hit, isolate)?;
+        petunia_module_paint::PaintModule::uv_to_px(&self.state, uv)
     }
 
     /// Estende o traço interpolando em espaço de tela e pintando cada dab.
@@ -868,7 +2040,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     /// Confirma o traço como uma única entrada de undo.
-    pub fn end_paint_stroke_at(&mut self) -> bool {
+    pub fn end_paint_stroke_at(&mut self, x: f32, y: f32) -> bool {
+        if self.shape_anchor.is_some() {
+            return self.end_paint_shape_at(x, y);
+        }
         if self.paint_last.take().is_none() {
             return false;
         }
@@ -877,10 +2052,1182 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn cancel_paint_stroke(&mut self) -> bool {
+        if self.cancel_paint_shape() {
+            return true;
+        }
         if self.paint_last.take().is_none() {
             return false;
         }
         self.state.finish_paint_stroke(true);
+        true
+    }
+
+    /// Define o modo de sombreamento da viewport pelo id estável.
+    ///
+    /// Cada modo corresponde a um pipeline real: Wireframe não preenche,
+    /// Solid usa o estúdio da viewport, MaterialPreview amostra a textura e
+    /// Rendered usa a luz da cena.
+    pub fn set_shading_mode(&mut self, id: &str) -> bool {
+        let Some(mode) = petunia_core::Shading::from_id(id) else {
+            return false;
+        };
+        if self.state.shading == mode {
+            return false;
+        }
+        self.state.shading = mode;
+        // Material/Rendered dependem de amostrar o material.
+        if mode.samples_material() {
+            self.state.session.textured = true;
+        }
+        self.state.set_status(format!("Shading: {}", mode.id()));
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Opacidade da geometria em X-Ray.
+    pub fn set_xray_opacity(&mut self, opacity: f32) -> bool {
+        if !opacity.is_finite() {
+            return false;
+        }
+        let clamped = opacity.clamp(0.1, 0.9);
+        if (clamped - self.state.session.xray_opacity).abs() < f32::EPSILON {
+            return false;
+        }
+        self.state.session.xray_opacity = clamped;
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Define o modo de confirmação das ferramentas paramétricas.
+    pub fn set_tool_activation(&mut self, id: &str) -> bool {
+        let Some(mode) = petunia_core::ToolActivation::from_id(id) else {
+            return false;
+        };
+        if self.state.session.tools.tool_activation == mode {
+            return false;
+        }
+        self.state.session.tools.tool_activation = mode;
+        self.state.set_status(match mode {
+            petunia_core::ToolActivation::Drag => "Tools confirm on pointer release (click + drag)",
+            petunia_core::ToolActivation::Instant => {
+                "Tools follow the pointer; click or Enter confirms, Esc cancels"
+            }
+        });
+        self.state.mark_dirty();
+        true
+    }
+
+    /// O modo Instant está ativo?
+    pub fn is_instant_tool_mode(&self) -> bool {
+        self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
+    }
+
+    /// Alinha a câmera a um eixo a partir do tripé de navegação.
+    pub fn snap_view_to_axis(&mut self, axis: &str) -> bool {
+        use petunia_core::ViewPreset;
+        let preset = match axis {
+            "x" => ViewPreset::Right,
+            "y" => ViewPreset::Top,
+            "z" => ViewPreset::Front,
+            _ => return false,
+        };
+        self.state.session.camera.set_preset(preset);
+        self.state.set_status(format!("View: {}", preset.title()));
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Redimensiona o dock de contexto pelo divisor vertical.
+    ///
+    /// Layout é estado de apresentação: não marca o documento como alterado.
+    pub fn set_inspector_width(&mut self, width: f32) -> bool {
+        self.state.ui.set_right_width(width)
+    }
+
+    /// Redimensiona a Asset Library pelo divisor horizontal.
+    pub fn set_asset_library_height(&mut self, height: f32) -> bool {
+        self.state.ui.set_shell_asset_library_height(height)
+    }
+
+    /// Abre, troca ou fecha um menu da barra superior.
+    pub fn toggle_menu(&mut self, id: &str) -> bool {
+        let next = MenuKind::ALL.into_iter().find(|kind| kind.id() == id);
+        self.menu_open = match (self.menu_open, next) {
+            (Some(current), Some(next)) if current == next => None,
+            (_, next) => next,
+        };
+        match self.menu_open {
+            Some(_) => self.overlays.push(OverlayEntry {
+                id: OverlayId::MenuBar,
+                kind: OverlayKind::Popover,
+                pinned: false,
+                dismiss_on_escape: true,
+                dismiss_on_click_away: true,
+            }),
+            None => {
+                self.overlays.remove(OverlayId::MenuBar);
+            }
+        }
+        self.state.mark_dirty();
+        self.menu_open.is_some()
+    }
+
+    pub fn close_menu(&mut self) -> bool {
+        self.overlays.remove(OverlayId::MenuBar);
+        self.menu_open.take().is_some()
+    }
+
+    /// Executa um item de menu pelo id canônico que ele publica.
+    pub fn menu_item_invoked(&mut self, id: &str) -> bool {
+        self.close_menu();
+        match id {
+            // Itens de arquivo que abrem diálogo são despachados pelo mesmo
+            // caminho assíncrono do `command-file-action`; aqui só o que resolve
+            // de imediato.
+            "file.new" => self.execute_core_command("file.new").is_ok(),
+            "edit.undo" => {
+                self.apply(UiIntent::Undo);
+                true
+            }
+            "edit.redo" => {
+                self.apply(UiIntent::Redo);
+                true
+            }
+            "edit.duplicate" => {
+                self.apply(UiIntent::DuplicateActiveAsset);
+                true
+            }
+            "window.command_palette" => {
+                self.apply(UiIntent::OpenCommandSearch);
+                true
+            }
+            "window.settings" => {
+                self.apply(UiIntent::OpenSettings);
+                true
+            }
+            other => self.execute_core_command(other).is_ok(),
+        }
+    }
+
+    /// Um passo de autosave, respeitando intervalo e dirty state do domínio.
+    ///
+    /// Retorna `true` quando um snapshot foi gravado. Autosave nunca limpa o
+    /// dirty state nem toca no arquivo oficial.
+    pub fn autosave_tick(&mut self) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let dirty = self.state.is_document_dirty();
+        let path = self.state.project.project_path.clone();
+        let path_ref = path.as_deref().map(std::path::Path::new);
+        matches!(
+            self.autosave
+                .tick(now, dirty, &self.state.project.project, path_ref),
+            Some(Ok(_))
+        )
+    }
+
+    /// Carrega o snapshot de recuperação detectado no arranque.
+    pub fn recover_pending(&mut self) -> bool {
+        let Some(info) = self.pending_recovery.take() else {
+            return false;
+        };
+        self.apply(UiIntent::OpenProjectFrom(info.snapshot_path));
+        self.state
+            .set_status(format!("Recovered snapshot of '{}'", info.project_name));
+        true
+    }
+
+    /// Mantém o projeto oficial e encerra o aviso de recuperação.
+    pub fn keep_saved_project(&mut self) -> bool {
+        self.pending_recovery.take().is_some()
+    }
+
+    /// Descarta os snapshots de recuperação e o marcador de sessão.
+    pub fn discard_pending_recovery(&mut self) -> bool {
+        if self.pending_recovery.take().is_none() {
+            return false;
+        }
+        let path = self.state.project.project_path.clone();
+        let path_ref = path.as_deref().map(std::path::Path::new);
+        match petunia_core::AutosaveService::discard_recovery(path_ref) {
+            Ok(()) => self.state.set_status("Recovery snapshots discarded"),
+            Err(error) => self
+                .state
+                .set_status(format!("Failed to discard snapshots: {error}")),
+        }
+        true
+    }
+
+    /// Define o escopo de preenchimento do pincel.
+    pub fn set_fill_scope(&mut self, scope: &str) -> bool {
+        let parsed = match scope {
+            "ConnectedPixels" => petunia_core::FillScope::ConnectedPixels,
+            "Face" => petunia_core::FillScope::Face,
+            "SelectedFaces" => petunia_core::FillScope::SelectedFaces,
+            "UvIsland" => petunia_core::FillScope::UvIsland,
+            "Object" => petunia_core::FillScope::Object,
+            _ => return false,
+        };
+        self.state.session.tools.fill_scope = parsed;
+        self.state.set_status(format!("Fill scope: {scope}"));
+        true
+    }
+
+    /// Define o modo de projeção do pincel.
+    pub fn set_brush_projection(&mut self, projection: &str) -> bool {
+        let parsed = match projection {
+            "Surface" => petunia_core::BrushProjectionMode::Surface,
+            "ScreenSpace" => petunia_core::BrushProjectionMode::ScreenSpace,
+            _ => return false,
+        };
+        self.state.session.tools.brush_projection = parsed;
+        self.state.set_status(format!("Projection: {projection}"));
+        true
+    }
+
+    /// Define a trava de pincel.
+    pub fn set_brush_lock(&mut self, lock: &str) -> bool {
+        let parsed = match lock {
+            "None" => petunia_core::BrushLock::None,
+            "FirstObject" => petunia_core::BrushLock::FirstObject,
+            "FirstFace" => petunia_core::BrushLock::FirstFace,
+            "SelectedFaces" => petunia_core::BrushLock::SelectedFaces,
+            _ => return false,
+        };
+        self.state.session.tools.brush_lock = parsed;
+        self.state.session.tools.paint_lock_face = None;
+        self.state.set_status(format!("Brush lock: {lock}"));
+        true
+    }
+
+    /// Constrói a geometria 2D do editor UV a partir das UVs reais da malha.
+    ///
+    /// O quadrado 0..1 vira uma caixa de 256 px; cada face contribui um contorno
+    /// fechado. Malhas grandes são truncadas e o editor avisa, em vez de
+    /// construir uma string gigante em silêncio.
+    fn build_uv_editor(&self) -> UvEditorModel {
+        const BOX: f32 = 256.0;
+        const MAX_FACES: usize = 2_000;
+        let Some(mesh) = self.state.project.active_mesh() else {
+            return UvEditorModel::default();
+        };
+        let face_count = mesh.faces.len();
+        let mut commands = String::new();
+        for face in mesh.faces.iter().take(MAX_FACES) {
+            if face.uv.len() < 3 {
+                continue;
+            }
+            for (index, uv) in face.uv.iter().enumerate() {
+                if !uv[0].is_finite() || !uv[1].is_finite() {
+                    continue;
+                }
+                let x = uv[0] * BOX;
+                let y = (1.0 - uv[1]) * BOX;
+                if index == 0 {
+                    commands.push_str(&format!("M {x:.2} {y:.2} "));
+                } else {
+                    commands.push_str(&format!("L {x:.2} {y:.2} "));
+                }
+            }
+            commands.push_str("Z ");
+        }
+        let islands = mesh.uv_islands();
+        UvEditorModel {
+            layout_commands: commands,
+            island_count: islands.len(),
+            face_count,
+            selected_face: mesh
+                .faces
+                .iter()
+                .position(|face| face.selected)
+                .map(|index| index as i32)
+                .unwrap_or(-1),
+            uv_selected_count: self.state.session.uv_selected.len(),
+            truncated: face_count > MAX_FACES,
+        }
+    }
+
+    /// Clique no editor UV 2D: seleciona a face cuja ilha contém o ponto.
+    ///
+    /// `u`/`v` chegam normalizados em 0..1 com origem embaixo, que é a
+    /// convenção do domínio; o editor desenha com origem em cima e converte
+    /// antes de chamar.
+    pub fn uv_editor_click(&mut self, u: f32, v: f32, extend: bool) -> bool {
+        if !u.is_finite() || !v.is_finite() {
+            return false;
+        }
+        let Some(face) = petunia_module_uv::UvModule::uv_hit(&self.state, u, v) else {
+            if !extend {
+                self.state.session.uv_selected.clear();
+                self.state.mark_dirty();
+            }
+            self.state.set_status("UV: no face under the cursor");
+            return false;
+        };
+        if extend {
+            // Com Shift a seleção acumula e alterna; sem Shift ela é substituída,
+            // que é o comportamento previsível de um clique simples.
+            if !self.state.session.uv_selected.insert(face) {
+                self.state.session.uv_selected.remove(&face);
+            }
+        } else {
+            self.state.session.uv_selected.clear();
+            self.state.session.uv_selected.insert(face);
+        }
+        if let Some(mesh) = self.state.project.active_mesh_mut() {
+            if !extend {
+                for current in &mut mesh.faces {
+                    current.selected = false;
+                }
+            }
+            if let Some(target) = mesh.faces.get_mut(face) {
+                target.selected = true;
+            }
+        }
+        self.state.sync_selection();
+        self.state.mark_dirty();
+        self.state.set_status(format!(
+            "UV: face {face} selected ({} total)",
+            self.state.session.uv_selected.len()
+        ));
+        true
+    }
+
+    /// Move as UVs selecionadas (ou todas, quando nada está marcado).
+    pub fn uv_move_selected(&mut self, du: f32, dv: f32) -> bool {
+        if !du.is_finite() || !dv.is_finite() {
+            return false;
+        }
+        if du == 0.0 && dv == 0.0 {
+            return false;
+        }
+        self.state.checkpoint("move uv");
+        petunia_module_uv::UvModule::move_selected(&mut self.state, du, dv);
+        self.state.emit_mesh_changed();
+        self.state
+            .set_status(format!("UV moved by ({du:.3}, {dv:.3})"));
+        true
+    }
+
+    /// Escala as UVs selecionadas em torno do centroide.
+    pub fn uv_scale_selected(&mut self, factor: f32) -> bool {
+        if !factor.is_finite() || factor <= 0.0 {
+            return false;
+        }
+        self.state.checkpoint("scale uv");
+        petunia_module_uv::UvModule::scale_selected(&mut self.state, factor);
+        self.state.emit_mesh_changed();
+        self.state.set_status(format!("UV scaled ×{factor:.3}"));
+        true
+    }
+
+    /// Rotaciona as UVs selecionadas em torno do centroide.
+    pub fn uv_rotate_selected(&mut self, degrees: f32) -> bool {
+        if !degrees.is_finite() || degrees == 0.0 {
+            return false;
+        }
+        self.state.checkpoint("rotate uv");
+        petunia_module_uv::UvModule::rotate_selected(&mut self.state, degrees.to_radians());
+        self.state.emit_mesh_changed();
+        self.state.set_status(format!("UV rotated {degrees:.1}°"));
+        true
+    }
+
+    /// Marca ou desmarca como costura todas as arestas da face UV selecionada.
+    pub fn toggle_selected_uv_seams(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh_mut() else {
+            return false;
+        };
+        let Some(face) = mesh.faces.iter().find(|face| face.selected) else {
+            self.state
+                .set_status("UV: select a face in the viewport first");
+            return false;
+        };
+        let verts = face.verts.clone();
+        if verts.len() < 3 {
+            return false;
+        }
+        self.state.checkpoint("toggle uv seams");
+        let Some(mesh) = self.state.project.active_mesh_mut() else {
+            return false;
+        };
+        for index in 0..verts.len() {
+            let a = verts[index];
+            let b = verts[(index + 1) % verts.len()];
+            mesh.toggle_seam(a, b);
+        }
+        let count = self
+            .state
+            .project
+            .active_mesh()
+            .map(|mesh| mesh.uv_seams.len())
+            .unwrap_or(0);
+        self.state.set_status(format!(
+            "UV seams on the selected face toggled ({count} total)"
+        ));
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Limpa todas as costuras da malha ativa.
+    pub fn clear_all_uv_seams(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh() else {
+            return false;
+        };
+        if mesh.uv_seams.is_empty() {
+            self.state.set_status("UV: there are no seams to clear");
+            return false;
+        }
+        self.state.checkpoint("clear uv seams");
+        if let Some(mesh) = self.state.project.active_mesh_mut() {
+            mesh.uv_seams.clear();
+        }
+        self.state.set_status("UV: all seams cleared");
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Mutações do stack de camadas do workspace PAINT.
+    ///
+    /// Todas passam por `ensure_stack` + checkpoint + recomposição: o raster
+    /// canônico é `Asset.paint_stack` e `Asset.texture` é só o cache composto.
+    fn mutate_paint_stack(
+        &mut self,
+        label: &str,
+        mutate: impl FnOnce(&mut petunia_project::paint_layers::PaintLayerStack) -> bool,
+    ) -> bool {
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let active = self.state.project.active;
+        let Some(asset) = self.state.project.assets.get_mut(active) else {
+            return false;
+        };
+        let Some(stack) = asset.paint_stack.as_mut() else {
+            return false;
+        };
+        if !mutate(stack) {
+            return false;
+        }
+        self.state.checkpoint(label);
+        petunia_module_paint::PaintModule::composite_active(&mut self.state);
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn add_paint_layer(&mut self) -> bool {
+        let (w, h) = self.paint_canvas_dimensions().unwrap_or((256, 256));
+        self.mutate_paint_stack("add paint layer", |stack| {
+            stack.add_layer(petunia_project::paint_layers::PaintLayer::new(
+                format!("Layer {}", stack.layers.len() + 1),
+                w,
+                h,
+                [0, 0, 0, 0],
+            ));
+            true
+        })
+    }
+
+    pub fn add_paint_group(&mut self) -> bool {
+        self.mutate_paint_stack("add paint group", |stack| {
+            stack.add_group(format!("Group {}", stack.layers.len() + 1));
+            true
+        })
+    }
+
+    pub fn set_paint_layer_active(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("activate paint layer", |stack| stack.set_active(id))
+    }
+
+    pub fn toggle_paint_layer_visibility(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("toggle paint layer visibility", |stack| {
+            let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) else {
+                return false;
+            };
+            layer.visible = !layer.visible;
+            true
+        })
+    }
+
+    pub fn toggle_paint_layer_lock(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("toggle paint layer lock", |stack| {
+            let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) else {
+                return false;
+            };
+            layer.locked = !layer.locked;
+            true
+        })
+    }
+
+    pub fn remove_paint_layer(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("remove paint layer", |stack| {
+            // A última camada é a base do raster: removê-la deixaria o asset sem
+            // superfície de pintura.
+            if stack.layers.len() <= 1 {
+                return false;
+            }
+            stack.remove_layer(id)
+        })
+    }
+
+    /// Move a camada em `delta` posições na ordem de composição.
+    pub fn move_paint_layer(&mut self, id: &str, delta: i32) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("reorder paint layer", |stack| {
+            let Some(from) = stack.layers.iter().position(|layer| layer.id == id) else {
+                return false;
+            };
+            let to = from as i32 + delta;
+            if to < 0 || to as usize >= stack.layers.len() {
+                return false;
+            }
+            stack.move_layer(from, to as usize)
+        })
+    }
+
+    pub fn set_paint_layer_opacity(&mut self, id: &str, opacity: f32) -> bool {
+        if !opacity.is_finite() {
+            return false;
+        }
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let opacity = opacity.clamp(0.0, 1.0);
+        self.mutate_paint_stack("paint layer opacity", |stack| {
+            let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) else {
+                return false;
+            };
+            if (layer.opacity - opacity).abs() < f32::EPSILON {
+                return false;
+            }
+            layer.opacity = opacity;
+            true
+        })
+    }
+
+    /// Abre a sessão de loop cut a partir da aresta selecionada.
+    pub fn begin_loop_cut(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh().cloned() else {
+            self.state.set_status("Loop Cut: no active mesh");
+            return false;
+        };
+        let Some(seed) = mesh.selected_edges.iter().copied().next() else {
+            self.state
+                .set_status("Loop Cut: select an edge on a quad ring first");
+            return false;
+        };
+        let Ok(ring) = petunia_core::LoopRing::discover(&mesh, seed) else {
+            self.state
+                .set_status("Loop Cut: the selected edge is not on a quad ring");
+            return false;
+        };
+        self.loop_cut = Some(LoopCutSessionState {
+            ring,
+            cuts: 1,
+            slide: 0.0,
+            source: mesh,
+        });
+        self.state.session.tools.active_tool = "loop_cut".to_string();
+        if !self.apply_loop_cut_preview() {
+            self.loop_cut = None;
+            return false;
+        }
+        self.state
+            .set_status("Loop Cut: drag to slide, Enter confirms, Esc cancels");
+        true
+    }
+
+    /// Ajusta o slide do loop cut e reconstrói a pré-visualização.
+    pub fn scrub_loop_cut(&mut self, delta_x: f32, fine: bool) -> bool {
+        let step = if fine { 0.0025 } else { 0.01 };
+        let Some(session) = self.loop_cut.as_mut() else {
+            return false;
+        };
+        session.slide = (session.slide + delta_x * step).clamp(-1.0, 1.0);
+        self.apply_loop_cut_preview()
+    }
+
+    /// Campo numérico do Slide: não altera a quantidade de cortes.
+    pub fn set_loop_cut_slide(&mut self, slide: f32) -> bool {
+        if !slide.is_finite() || !(-1.0..=1.0).contains(&slide) {
+            self.state
+                .set_status("Loop Cut: slide must be between -1 and 1");
+            return false;
+        }
+        let Some(session) = self.loop_cut.as_mut() else {
+            return false;
+        };
+        if (session.slide - slide).abs() <= f32::EPSILON {
+            return false;
+        }
+        let previous = session.slide;
+        session.slide = slide;
+        if self.apply_loop_cut_preview() {
+            true
+        } else {
+            if let Some(session) = self.loop_cut.as_mut() {
+                session.slide = previous;
+            }
+            false
+        }
+    }
+
+    /// Ajusta a quantidade de cortes paralelos (1..=32).
+    pub fn set_loop_cut_count(&mut self, cuts: usize) -> bool {
+        let Some(session) = self.loop_cut.as_mut() else {
+            return false;
+        };
+        let clamped = cuts.clamp(1, 32);
+        if session.cuts == clamped {
+            return false;
+        }
+        session.cuts = clamped;
+        self.apply_loop_cut_preview()
+    }
+
+    /// Reconstrói a malha a partir do snapshot da sessão, nunca do preview.
+    fn apply_loop_cut_preview(&mut self) -> bool {
+        let Some(session) = self.loop_cut.as_ref() else {
+            return false;
+        };
+        match session
+            .ring
+            .apply(&session.source, session.cuts, session.slide)
+        {
+            Ok(mesh) => {
+                if let Some(active) = self.state.project.active_mesh_mut() {
+                    *active = mesh;
+                }
+                self.state.emit_mesh_changed();
+                self.state.mark_dirty();
+                true
+            }
+            Err(error) => {
+                self.state.set_status(format!("Loop Cut: {error}"));
+                false
+            }
+        }
+    }
+
+    /// Confirma o loop cut como uma única operação de undo.
+    pub fn commit_loop_cut(&mut self) -> bool {
+        let Some(session) = self.loop_cut.take() else {
+            return false;
+        };
+        self.state.session.tools.active_tool = "select".to_string();
+        // O checkpoint precisa capturar a malha ANTES do corte, então o preview
+        // é desfeito primeiro e o resultado final é reaplicado depois.
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source.clone();
+        }
+        let Ok(cut) = session
+            .ring
+            .apply(&session.source, session.cuts, session.slide)
+        else {
+            self.state
+                .set_status("Loop Cut: topology refused at commit");
+            self.state.emit_mesh_changed();
+            return false;
+        };
+        self.state.checkpoint("loop cut");
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = cut;
+        }
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state
+            .set_status(format!("Loop cut ({})", session.cuts));
+        true
+    }
+
+    /// Abandona a sessão restaurando a malha original.
+    pub fn cancel_loop_cut(&mut self) -> bool {
+        let Some(session) = self.loop_cut.take() else {
+            return false;
+        };
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source;
+        }
+        self.state.session.tools.active_tool = "select".to_string();
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Loop Cut cancelled");
+        true
+    }
+
+    /// Abre o plano de corte (Slice) ancorado no ponto pressionado.
+    pub fn begin_slice(&mut self, x: f32, y: f32) -> bool {
+        let Some(mesh) = self.state.project.active_mesh().cloned() else {
+            self.state.set_status("Slice: no active mesh");
+            return false;
+        };
+        self.state.session.tools.cut_session = Some(petunia_core::CutSession::new(mesh));
+        self.state.session.tools.active_tool = "slice".to_string();
+        self.slice_anchor = Some([x, y]);
+        self.state
+            .set_status("Slice: drag to orient the plane, release to cut");
+        true
+    }
+
+    /// Atualiza a pré-visualização do plano de corte.
+    pub fn update_slice(&mut self, x: f32, y: f32) -> bool {
+        let Some(anchor) = self.slice_anchor else {
+            return false;
+        };
+        let viewport = petunia_core::LogicalRect::from_min_max(
+            [0.0, 0.0],
+            [self.viewport_size[0], self.viewport_size[1]],
+        );
+        let Some(session) = self.state.session.tools.cut_session.as_ref() else {
+            return false;
+        };
+        let Some(sliced) =
+            session.compute_slice(&self.state.session.camera, anchor, [x, y], viewport)
+        else {
+            return false;
+        };
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = sliced;
+        }
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Confirma o corte como uma única operação de undo.
+    pub fn commit_slice(&mut self) -> bool {
+        // A faca compartilha `cut_session`, então o Slice só age quando é ele que
+        // está armado — senão um release cancelaria o corte da faca.
+        if self.slice_anchor.is_none() && self.state.session.tools.active_tool != "slice" {
+            return false;
+        }
+        let Some(session) = self.state.session.tools.cut_session.take() else {
+            self.slice_anchor = None;
+            return false;
+        };
+        self.slice_anchor = None;
+        self.state.session.tools.active_tool = "select".to_string();
+        // A pré-visualização já está na malha: restaurar o snapshot, capturar e
+        // reaplicar o corte garante que o undo volte ao estado anterior.
+        let Some(current) = self.state.project.active_mesh().cloned() else {
+            return false;
+        };
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source.clone();
+        }
+        self.state.checkpoint("slice");
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = current;
+        }
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Slice applied");
+        true
+    }
+
+    /// Abandona o plano de corte restaurando a malha original.
+    pub fn cancel_slice(&mut self) -> bool {
+        if self.slice_anchor.is_none() && self.state.session.tools.active_tool != "slice" {
+            return false;
+        }
+        let Some(session) = self.state.session.tools.cut_session.take() else {
+            self.slice_anchor = None;
+            return false;
+        };
+        self.slice_anchor = None;
+        self.state.session.tools.active_tool = "select".to_string();
+        if let Some(active) = self.state.project.active_mesh_mut() {
+            *active = session.source;
+        }
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Slice cancelled");
+        true
+    }
+
+    /// Um clique de faca na viewport: primeiro ponto ancora, segundo corta.
+    ///
+    /// O ponto vem de `AppState::pick_edge`, então a faca corta a aresta que o
+    /// usuário realmente apontou. O corte é aplicado como uma única transação.
+    pub fn knife_click(&mut self, normalized_x: f32, normalized_y: f32) -> bool {
+        if self.state.session.tools.cut_session.is_none() {
+            return false;
+        }
+        if !normalized_x.is_finite() || !normalized_y.is_finite() {
+            return false;
+        }
+        let petunia_core::HoverTarget::Edge(a, b) = self.pick_target_for_domain(SelectionDomain::Edge, normalized_x, normalized_y) else {
+            self.state.set_status("Cut: point at a visible edge");
+            return false;
+        };
+        let Some(mesh) = self.state.project.active_mesh() else { return false; };
+        let vp = self.state.session.camera.view_proj();
+        let va = mesh.verts[a as usize].vec(); let vb = mesh.verts[b as usize].vec();
+        let ca = vp * va.extend(1.0); let cb = vp * vb.extend(1.0);
+        let screen = |p: glam::Vec4| [(p.x / p.w * 0.5 + 0.5) * self.viewport_size[0], (0.5 - p.y / p.w * 0.5) * self.viewport_size[1]];
+        let pa = screen(ca); let pb = screen(cb);
+        let mouse = [normalized_x * self.viewport_size[0], normalized_y * self.viewport_size[1]];
+        let delta = [pb[0] - pa[0], pb[1] - pa[1]];
+        let length = delta[0] * delta[0] + delta[1] * delta[1];
+        if length <= 1.0e-6 { return false; }
+        let t = (((mouse[0]-pa[0])*delta[0] + (mouse[1]-pa[1])*delta[1]) / length).clamp(0.0, 1.0);
+        let t = (t / cb.w) / ((1.0-t) / ca.w + t / cb.w);
+        let edge = (a, b);
+        let position = va.lerp(vb, t);
+        let point = petunia_core::CutEdgePoint { edge, position };
+
+        let Some(session) = self.state.session.tools.cut_session.as_mut() else {
+            return false;
+        };
+        let Some(start) = session.edge_start else {
+            session.edge_start = Some(point);
+            session.anchor = Some([normalized_x, normalized_y]);
+            self.state.set_status("Knife: pick the second edge point");
+            self.state.mark_dirty();
+            return true;
+        };
+
+        let Some(mesh) = self.state.project.active_mesh().cloned() else {
+            return false;
+        };
+        match session.cut_knife_segment(start, point, &mesh) {
+            Ok(cut) => {
+                session.segments += 1;
+                session.edge_start = None;
+                session.anchor = None;
+                if let Some(active) = self.state.project.active_mesh_mut() { *active = cut; }
+                self.state.session.tools.hover = petunia_core::HoverTarget::None;
+                self.state.sync_selection();
+                self.state.emit_mesh_changed();
+                self.state.set_status("Cut preview: choose another segment, Enter applies, Esc restores");
+                true
+            }
+            Err(error) => { self.state.set_status(format!("Cut: {error}")); false }
+        }
+    }
+
+    /// Commit all knife segments as one undo record.
+    pub fn commit_knife(&mut self) -> bool {
+        if self.state.session.tools.active_tool != "cut" { return false; }
+        let Some(session) = self.state.session.tools.cut_session.take() else { return false; };
+        self.state.session.tools.active_tool = "select".into();
+        if session.segments > 0 {
+            let Some(result) = self.state.project.active_mesh().cloned() else { return false; };
+            if let Some(mesh) = self.state.project.active_mesh_mut() { *mesh = session.source; }
+            self.state.checkpoint("cut segments");
+            if let Some(mesh) = self.state.project.active_mesh_mut() { *mesh = result; }
+        }
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Cut applied");
+        true
+    }
+
+    pub fn cancel_knife(&mut self) -> bool {
+        let Some(session) = self.state.session.tools.cut_session.take() else { return false; };
+        if let Some(mesh) = self.state.project.active_mesh_mut() { *mesh = session.source; }
+        self.state.session.tools.active_tool = "select".into();
+        self.state.sync_selection();
+        self.state.emit_mesh_changed();
+        self.state.set_status("Cut cancelled");
+        true
+    }
+
+    /// Instancia uma cópia do asset da biblioteca no cursor 3D.
+    ///
+    /// É o caminho que o comando canônico `model.instantiate_asset` não tinha:
+    /// ele exige um `asset_id`, então a palette não consegue disparar sozinha.
+    pub fn place_asset(&mut self, id: &str) -> bool {
+        let Ok(asset) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        if !self.state.instantiate_asset_by_id(asset, None) {
+            self.state.set_status("Asset not found in project library");
+            return false;
+        }
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Define o operando B das operações booleanas.
+    pub fn set_boolean_operand(&mut self, id: &str) -> bool {
+        let Ok(asset) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        if !self.state.project.assets.iter().any(|a| a.id == asset) {
+            return false;
+        }
+        self.state.session.tools.boolean_operand = Some(asset);
+        self.state
+            .set_status("Boolean operand set: Fuse, Cut or Intersect now applies");
+        true
+    }
+
+    /// Liga/desliga o modificador **Keep Parts**.
+    pub fn set_boolean_keep_parts(&mut self, keep: bool) -> bool {
+        if self.state.session.tools.boolean_keep_parts == keep {
+            return false;
+        }
+        self.state.session.tools.boolean_keep_parts = keep;
+        self.state.set_status(if keep {
+            "Keep Parts on: the operand stays in the scene"
+        } else {
+            "Keep Parts off: the operand is consumed"
+        });
+        true
+    }
+
+    /// **Join** pelo id canônico.
+    pub fn join_operand(&mut self) -> bool {
+        match self.execute_core_command("model.join") {
+            Ok(()) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    pub fn clear_boolean_operand(&mut self) -> bool {
+        if self.state.session.tools.boolean_operand.take().is_none() {
+            return false;
+        }
+        self.state.set_status("Boolean operand cleared");
+        true
+    }
+
+    /// Executa Fuse/Cut/Intersect pelo id canônico do comando.
+    pub fn boolean_op(&mut self, id: &str) -> bool {
+        match self.execute_core_command(id) {
+            Ok(()) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Abre o menu de contexto do Outliner sobre a linha de `id`.
+    ///
+    /// O alvo é selecionado antes de abrir: as ações do menu operam sobre ele e
+    /// um clique-direito em linha não selecionada precisa agir no que o usuário
+    /// apontou, não no que estava ativo.
+    pub fn open_context_menu(&mut self, id: &str, x: f32, y: f32) -> bool {
+        let Ok(asset) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        if !self.state.project.assets.iter().any(|a| a.id == asset) {
+            return false;
+        }
+        self.select_asset_by_id(asset);
+        self.context_menu = Some(ContextMenuState { x, y, asset });
+        self.overlays.push(OverlayEntry {
+            id: OverlayId::OutlinerContextMenu,
+            kind: OverlayKind::ContextMenu,
+            pinned: false,
+            dismiss_on_escape: true,
+            dismiss_on_click_away: true,
+        });
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn close_context_menu(&mut self) -> bool {
+        self.overlays.remove(OverlayId::OutlinerContextMenu);
+        self.context_menu.take().is_some()
+    }
+
+    /// Executa uma ação do menu de contexto sobre o alvo apontado.
+    pub fn context_menu_action(&mut self, action: &str) -> bool {
+        let Some(menu) = self.context_menu else {
+            return false;
+        };
+        let id = menu.asset.to_string();
+        self.close_context_menu();
+        match action {
+            "rename" => self.begin_rename(),
+            "duplicate" => {
+                self.select_asset_by_id(menu.asset);
+                self.apply(UiIntent::DuplicateActiveAsset);
+                true
+            }
+            "visibility" => {
+                self.toggle_asset_visibility(&id);
+                true
+            }
+            "lock" => {
+                self.toggle_asset_lock(&id);
+                true
+            }
+            "frame" => {
+                self.select_asset_by_id(menu.asset);
+                let _ = self.state.dispatch_command("view.frame_selection");
+                true
+            }
+            "boolean_operand" => self.set_boolean_operand(&id),
+            "delete" => {
+                self.select_asset_by_id(menu.asset);
+                self.apply(UiIntent::DeleteActiveAsset);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn select_asset_by_id(&mut self, asset: uuid::Uuid) {
+        if let Some(index) = self
+            .state
+            .project
+            .assets
+            .iter()
+            .position(|candidate| candidate.id == asset)
+        {
+            self.cancel_active_operation();
+            self.state.select_object(Some(index), false);
+        }
+    }
+
+    fn toggle_asset_visibility(&mut self, id: &str) {
+        self.apply(UiIntent::ToggleSceneAssetVisibility(id.to_string()));
+    }
+
+    fn toggle_asset_lock(&mut self, id: &str) {
+        self.apply(UiIntent::ToggleSceneAssetLock(id.to_string()));
+    }
+
+    /// Abre a edição inline do nome do ativo selecionado.
+    pub fn begin_rename(&mut self) -> bool {
+        if self.rename_draft.is_some() {
+            return true;
+        }
+        let Some(asset) = self.state.project.active() else {
+            self.state
+                .set_status(petunia_core::AssetRenameError::NoActiveAsset.to_string());
+            return false;
+        };
+        self.rename_draft = Some(asset.name.clone());
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Confirma o nome em edição. O domínio decide validade e histórico.
+    pub fn commit_rename(&mut self, name: &str) -> bool {
+        if self.rename_draft.take().is_none() {
+            return false;
+        }
+        match self.state.rename_active_asset(name) {
+            Ok(_) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Abandona a edição sem tocar no documento.
+    pub fn cancel_rename(&mut self) -> bool {
+        if self.rename_draft.take().is_none() {
+            return false;
+        }
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Abre a sessão modal de uma ferramenta paramétrica com preview próprio.
+    pub fn begin_tool_modal(&mut self, kind: ToolModalKind) -> bool {
+        match self.state.begin_modal(kind.modal_kind()) {
+            Ok(()) => {
+                self.tool_modal = Some(kind);
+                let initial = match kind {
+                    ToolModalKind::Inset => 0.2,
+                    ToolModalKind::Bevel => 0.05,
+                    ToolModalKind::ScaleSelection => 1.0,
+                    _ => 0.0,
+                };
+                self.tool_modal_value = initial;
+                if initial != 0.0 {
+                    let _ = self.state.update_modal(glam::Vec3::ZERO, initial);
+                }
+                self.state.mark_dirty();
+                true
+            }
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Ajusta o preview pelo arrasto vertical na viewport.
+    pub fn scrub_tool_modal(&mut self, delta_y: f32, fine: bool) -> bool {
+        let Some(kind) = self.tool_modal else {
+            return false;
+        };
+        let step = kind.step();
+        let delta_y = delta_y * if fine { 0.1 } else { 1.0 };
+        let world_per_pixel =
+            self.state.session.camera.visible_height() / self.viewport_size[1].max(1.0);
+        let delta = match kind {
+            ToolModalKind::Inset => -delta_y * step * 0.5,
+            ToolModalKind::Bevel => -delta_y * world_per_pixel * 0.5,
+            ToolModalKind::ScaleSelection => -delta_y * step * 0.5,
+            _ => -delta_y * world_per_pixel * 0.5,
+        };
+        self.set_tool_modal_value(self.tool_modal_value + delta)
+    }
+
+    /// Define o valor absoluto do preview (arrasto e campo numérico).
+    pub fn set_tool_modal_value(&mut self, value: f32) -> bool {
+        let Some(kind) = self.tool_modal else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
+        }
+        let (minimum, maximum) = kind.bounds();
+        let value = value.clamp(minimum, maximum);
+        if self.state.update_modal(glam::Vec3::ZERO, value).is_err() {
+            // Topologia recusada (ex.: bevel inválido): mantém o último preview.
+            return false;
+        }
+        self.tool_modal_value = value;
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Confirma a ferramenta paramétrica como uma única operação de undo.
+    pub fn commit_tool_modal(&mut self) -> bool {
+        if self.tool_modal.take().is_none() {
+            return false;
+        }
+        self.state.commit_modal();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn cancel_tool_modal(&mut self) -> bool {
+        if self.tool_modal.take().is_none() {
+            return false;
+        }
+        self.state.cancel_modal();
+        self.state.mark_dirty();
         true
     }
 
@@ -894,10 +3241,26 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return;
         };
         let tool = self.state.session.tools.active_tool.clone();
+        if tool == "picker" {
+            return;
+        }
+        if tool == "fill" {
+            let scope = self.state.session.tools.fill_scope;
+            let isolate = self.state.session.tools.paint_isolate_selection;
+            let seed =
+                petunia_module_paint::PaintModule::face_hit_uv(&self.state, face, hit, isolate)
+                    .and_then(|uv| petunia_module_paint::PaintModule::uv_to_px(&self.state, uv));
+            petunia_module_paint::PaintModule::canvas_fill_scoped(
+                &mut self.state,
+                Some(face),
+                seed,
+                scope,
+            );
+            self.state.set_status(format!("Filled ({scope:?})"));
+            return;
+        }
         let brush = match tool.as_str() {
             "eraser" => petunia_core::BrushType::Eraser,
-            "fill" => petunia_core::BrushType::Fill,
-            "picker" => return,
             _ => petunia_core::BrushType::Soft,
         };
         let radius = (self.state.session.tools.paint_radius * 8.0).max(1.0) as u32;
@@ -915,6 +3278,27 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
+        if !normalized_x.is_finite() || !normalized_y.is_finite() {
+            return;
+        }
+        if self.instant_transform && self.state.session.tools.modal.is_some() {
+            self.end_viewport_transform();
+            return;
+        }
+        // No modo Instant um clique confirma a sessão paramétrica em vez de
+        // trocar a seleção — é o equivalente ao Enter com o mouse.
+        if self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
+            && self.tool_modal.is_some()
+        {
+            self.commit_tool_modal();
+            return;
+        }
+        // A faca consome o clique antes da seleção: com uma sessão de corte
+        // aberta, clicar é escolher ponto de aresta, não selecionar.
+        if self.state.session.tools.cut_session.is_some() {
+            self.knife_click(normalized_x, normalized_y);
+            return;
+        }
         let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
         let ndc_y = 1.0 - normalized_y.clamp(0.0, 1.0) * 2.0;
         let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
@@ -956,76 +3340,74 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return;
         }
 
-        match self.state.selection_domain() {
-            SelectionDomain::Object => {
-                let mut best = None;
-                for (index, asset) in self.state.project.assets.iter().enumerate() {
-                    if !asset.visible || asset.locked || asset.mesh.verts.is_empty() {
-                        continue;
-                    }
-                    let center = glam::Vec3::from_array(asset.mesh.selection_center());
-                    let along = (center - origin).dot(direction);
-                    if along < 0.0 {
-                        continue;
-                    }
-                    let distance = (center - (origin + direction * along)).length();
-                    let radius = asset
-                        .mesh
-                        .verts
-                        .iter()
-                        .map(|vertex| (vertex.vec() - center).length())
-                        .fold(0.0_f32, f32::max)
-                        .max(0.15);
-                    if distance <= radius && best.is_none_or(|(_, depth)| along < depth) {
-                        best = Some((index, along));
-                    }
-                }
-                if let Some((index, _)) = best {
-                    self.state.project.active = index;
-                    self.state.session.selection.asset = Some(self.state.project.assets[index].id);
-                }
+        use petunia_core::HoverTarget as Target;
+        match self.pick_viewport_target(normalized_x, normalized_y) {
+            Target::Object(index) => {
+                self.state.select_object(Some(index), extend);
+                let name = self.state.project.assets[index].name.clone();
+                self.state.set_status(format!("Selected '{name}'"));
             }
-            SelectionDomain::Vertex => {
-                if let Some((index, _)) = self.state.pick_vertex(origin, direction)
-                    && let Some(mesh) = self.state.project.active_mesh_mut()
-                {
+            Target::Vertex(index) => {
+                if let Some(mesh) = self.state.project.active_mesh_mut() {
                     if !extend {
                         mesh.deselect_all();
                     }
-                    if let Some(vertex) = mesh.verts.get_mut(index) {
+                    if let Some(vertex) = mesh.verts.get_mut(index as usize) {
                         vertex.selected = !extend || !vertex.selected;
                     }
                 }
+                self.state.set_status(format!("Point {index} selected"));
             }
-            SelectionDomain::Face => {
-                if let Some((face, _)) = pick_face_hit(&self.state, origin, direction)
-                    && let Some(mesh) = self.state.project.active_mesh_mut()
-                {
+            Target::Edge(a, b) => {
+                if let Some(mesh) = self.state.project.active_mesh_mut() {
                     if !extend {
-                        for current in &mut mesh.faces {
-                            current.selected = false;
-                        }
-                    }
-                    if let Some(current) = mesh.faces.get_mut(face) {
-                        current.selected = true;
-                    }
-                }
-            }
-            SelectionDomain::Edge => {
-                if let Some((edge, _)) = self.state.pick_edge(origin, direction)
-                    && let Some(mesh) = self.state.project.active_mesh_mut()
-                {
-                    if !extend {
-                        mesh.selected_edges.clear();
                         mesh.deselect_all();
                     }
-                    mesh.selected_edges.insert(edge);
-                    for vertex in [edge.0, edge.1] {
-                        if let Some(vertex) = mesh.verts.get_mut(vertex as usize) {
+                    if extend && mesh.selected_edges.contains(&(a, b)) {
+                        mesh.selected_edges.remove(&(a, b));
+                    } else {
+                        mesh.selected_edges.insert((a, b));
+                    }
+                    // Operações de malha usam os vértices das arestas selecionadas.
+                    // Recalcular impede que um Shift-click para desmarcar deixe
+                    // vértices invisivelmente selecionados.
+                    for vertex in &mut mesh.verts {
+                        vertex.selected = false;
+                    }
+                    for &(start, end) in &mesh.selected_edges {
+                        if let Some(vertex) = mesh.verts.get_mut(start as usize) {
+                            vertex.selected = true;
+                        }
+                        if let Some(vertex) = mesh.verts.get_mut(end as usize) {
                             vertex.selected = true;
                         }
                     }
                 }
+                self.state.set_status(format!("Edge {a}-{b} selected"));
+            }
+            Target::Face(face) => {
+                if let Some(mesh) = self.state.project.active_mesh_mut() {
+                    if !extend {
+                        mesh.deselect_all();
+                    }
+                    if let Some(current) = mesh.faces.get_mut(face) {
+                        current.selected = !extend || !current.selected;
+                    }
+                    mesh.sync_vert_selection_from_faces();
+                }
+                self.state.set_status(format!("Face {face} selected"));
+            }
+            Target::None => {
+                if self.state.selection_domain() == SelectionDomain::Object {
+                    self.state.select_object(None, extend);
+                }
+                if !extend
+                    && self.state.selection_domain().is_component()
+                    && let Some(mesh) = self.state.project.active_mesh_mut()
+                {
+                    mesh.deselect_all();
+                }
+                self.state.set_status("Nothing under the cursor");
             }
         }
         self.state.sync_selection();
@@ -1033,16 +3415,47 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.reset_transform_fields();
     }
 
+    fn cancel_active_operation(&mut self) -> bool {
+        let mut cancelled = self.cancel_paint_stroke();
+        cancelled |= self.cancel_tool_modal();
+        cancelled |= self.cancel_loop_cut();
+        cancelled |= self.cancel_slice();
+        cancelled |= self.cancel_knife();
+        cancelled |= self.cancel_transform();
+        self.drag = None;
+        self.gizmo_drag = None;
+        self.modal_text.clear();
+        self.instant_transform = false;
+        cancelled
+    }
+
     pub fn handle_escape(&mut self) -> bool {
+        if self.close_menu() {
+            return true;
+        }
+        if self.close_context_menu() {
+            return true;
+        }
+        if self.cancel_rename() {
+            return true;
+        }
         if self.cancel_paint_stroke() {
+            return true;
+        }
+        if self.cancel_tool_modal() {
             return true;
         }
         if self.drag.take().is_some() {
             self.cancel_transform();
             return true;
         }
-        if self.state.session.tools.cut_session.take().is_some() {
-            self.state.set_status("Cut cancelled");
+        if self.cancel_loop_cut() {
+            return true;
+        }
+        if self.cancel_slice() {
+            return true;
+        }
+        if self.cancel_knife() {
             return true;
         }
         if self.cancel_transform() {
@@ -1141,6 +3554,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     pub fn execute_core_command(&mut self, id: &str) -> Result<(), petunia_core::CommandError> {
         self.command_search_visible = false;
         self.overlays.remove(OverlayId::CommandPalette);
+        // Ferramentas paramétricas abrem uma sessão modal com Tool Properties
+        // próprias em vez de rodar como one-shot de valor fixo.
+        if let Some(kind) = ToolModalKind::from_id(id) {
+            self.begin_tool_modal(kind);
+            return Ok(());
+        }
+        if id == "model.loop_cut" {
+            self.begin_loop_cut();
+            return Ok(());
+        }
         match id {
             "uv.unwrap" => self.state.dispatch_command("uv.unwrap_auto"),
             "uv.pack_islands" => self.state.dispatch_command("uv.pack_islands"),
@@ -1150,11 +3573,36 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn route_shortcut(&mut self, text: &str, ctrl: bool, shift: bool, alt: bool) -> bool {
+        if text == "Enter" && !ctrl && !alt { return self.confirm_active_operation(); }
+        if self.state.session.tools.modal.is_some() && !ctrl && !alt {
+            if let Some(axis) = ["x", "y", "z"].iter().position(|axis| text.eq_ignore_ascii_case(axis)) {
+                let requested = if shift { petunia_core::ModalConstraint::Plane(axis) } else { petunia_core::ModalConstraint::Axis(axis) };
+                let current = self.state.session.tools.modal.as_ref().map(|op| op.constraint);
+                let constraint = if current == Some(requested) { petunia_core::ModalConstraint::Free } else { requested };
+                let _ = self.state.set_modal_constraint(constraint);
+                if let Some(drag) = self.drag.as_mut() { drag.rotation_angle = 0.0; drag.last_angle = 0.0; }
+                if !self.modal_text.is_empty() { self.preview_modal_text(); }
+                else { let [x, y] = self.pointer_position; self.update_viewport_transform(x, y); }
+                return true;
+            }
+            if text == "Backspace" {
+                self.modal_text.pop();
+                if self.modal_text.is_empty() { let [x, y] = self.pointer_position; self.update_viewport_transform(x, y); }
+                else { self.preview_modal_text(); }
+                return true;
+            }
+            if text.len() == 1 && text.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+')) {
+                self.modal_text.push_str(&text.replace(',', "."));
+                self.preview_modal_text();
+                return true;
+            }
+        }
         let Some(key) = input::key_code_from_slint(text) else {
             return false;
         };
         let mods = Mods2 { ctrl, shift, alt };
-        let Some(action) = self.state.ui.keybinds.find(key, mods).map(str::to_owned) else {
+        let context = match self.state.workspace { Workspace::Model => "model", Workspace::Paint => "paint", Workspace::Uv => "uv", #[cfg(feature = "animation-workspace")] Workspace::Animate => "animate" };
+        let Some(action) = self.state.ui.keybinds.find_in_context(key, mods, context).map(str::to_owned) else {
             return false;
         };
         match action.as_str() {
@@ -1170,9 +3618,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             "model.select_edge" => self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge)),
             "model.select_face" => self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face)),
-            "model.move" => self.apply(UiIntent::SetActiveTool("move".into())),
-            "model.rotate" => self.apply(UiIntent::SetActiveTool("rotate".into())),
-            "model.scale" => self.apply(UiIntent::SetActiveTool("scale".into())),
+            "model.box_select" => self.apply(UiIntent::SetActiveTool("box_select".into())),
+            "model.move" | "model.transform" => self.begin_keyboard_transform(TransformKind::Position),
+            "model.rotate" => self.begin_keyboard_transform(TransformKind::Rotation),
+            "model.scale" => self.begin_keyboard_transform(TransformKind::Scale),
             "model.frame_selection" => {
                 let _ = self.execute_core_command("view.frame_selection");
             }
@@ -1186,7 +3635,6 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 let _ = self.execute_core_command("model.bevel");
             }
             "model.delete" => self.apply(UiIntent::DeleteActiveAsset),
-            "model.transform" => self.apply(UiIntent::SetActiveTool("move".into())),
             "model.push_pull" => {
                 let _ = self.execute_core_command("model.push_pull");
             }
@@ -1216,13 +3664,57 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             "global.cycle_mode" => {
                 let _ = self.execute_core_command("select.cycle_domain");
             }
+            "global.rename" => {
+                self.begin_rename();
+            }
+            "model.slice" => {
+                // A ação do keymap só arma a ferramenta; a âncora nasce no
+                // pointer-down da viewport.
+                self.state.session.tools.active_tool = "slice".to_string();
+                self.state
+                    .set_status("Slice: press and drag in the viewport");
+            }
             "global.save_project" => self.apply(UiIntent::SaveProject),
             "global.help" => {
                 let _ = self.execute_core_command("help.documentation");
             }
+            other if other.starts_with("view.") || other.starts_with("model.") || other.starts_with("uv.") => {
+                if let Err(error) = self.execute_core_command(other) { self.state.set_status(error.to_string()); }
+            }
+            "window.command_palette" => self.apply(UiIntent::OpenCommandSearch),
             _ => return false,
         }
         true
+    }
+
+    fn begin_keyboard_transform(&mut self, kind: TransformKind) {
+        let tool = match kind { TransformKind::Position => "move", TransformKind::Rotation => "rotate", TransformKind::Scale => "scale" };
+        self.apply(UiIntent::SetActiveTool(tool.into()));
+        let [x, y] = self.pointer_position;
+        if self.begin_viewport_transform(kind, x, y) { self.instant_transform = true; }
+    }
+
+    fn preview_modal_text(&mut self) {
+        let Ok(value) = numeric::parse_numeric(&self.modal_text) else { return; };
+        if self.tool_modal.is_some() { self.set_tool_modal_value(value); return; }
+        let Some(modal) = self.state.session.tools.modal.as_ref() else { return; };
+        let direction = match modal.constraint {
+            petunia_core::ModalConstraint::Axis(index) => { let mut axis = glam::Vec3::ZERO; axis[index] = 1.0; axis }
+            petunia_core::ModalConstraint::Plane(index) => {
+                let mut direction = self.state.session.camera.right(); direction[index] = 0.0; direction.normalize_or_zero()
+            }
+            petunia_core::ModalConstraint::Free => self.state.session.camera.right(),
+        };
+        if let Err(error) = self.state.update_modal(direction * value, value) { self.state.set_status(error.to_string()); }
+    }
+
+    fn confirm_active_operation(&mut self) -> bool {
+        if self.tool_modal.is_some() { return self.commit_tool_modal(); }
+        if self.loop_cut.is_some() { return self.commit_loop_cut(); }
+        if self.slice_anchor.is_some() { return self.commit_slice(); }
+        if self.state.session.tools.active_tool == "cut" { return self.commit_knife(); }
+        if self.drag.is_some() { return self.end_viewport_transform(); }
+        self.commit_transform()
     }
 
     fn adjust_brush_size(&mut self, steps: f32) {
@@ -1273,13 +3765,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn begin_transform(&mut self, kind: TransformKind) -> Result<(), petunia_core::ModalError> {
-        self.reset_transform_fields();
         let modal_kind = match kind {
             TransformKind::Position => petunia_core::ModalKind::Move,
             TransformKind::Rotation => petunia_core::ModalKind::Rotate,
             TransformKind::Scale => petunia_core::ModalKind::Scale,
         };
-        self.state.begin_modal(modal_kind)
+        self.state.begin_modal(modal_kind)?;
+        self.reset_transform_fields();
+        Ok(())
     }
 
     pub fn commit_transform(&mut self) -> bool {
@@ -1292,32 +3785,39 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         axis: usize,
         text: &str,
     ) -> Result<f32, numeric::NumericInputError> {
-        let axis = axis.min(2);
-        if self.state.session.tools.modal.is_none()
-            && let Err(error) = self.begin_transform(kind)
-        {
+        // Reject malformed text before opening a transaction.
+        let value = numeric::parse_numeric(text)?;
+        let kind_modal = match kind {
+            TransformKind::Position => petunia_core::ModalKind::Move,
+            TransformKind::Rotation => petunia_core::ModalKind::Rotate,
+            TransformKind::Scale => petunia_core::ModalKind::Scale,
+        };
+        if self.state.session.tools.modal.as_ref().is_some_and(|modal| modal.kind != kind_modal) {
+            return Err(numeric::NumericInputError::Invalid);
+        }
+        let started = self.state.session.tools.modal.is_none();
+        if started && let Err(error) = self.begin_transform(kind) {
             self.state.set_status(error.to_string());
             return Err(numeric::NumericInputError::Invalid);
         }
-        let field = match kind {
-            TransformKind::Position => &mut self.position[axis],
-            TransformKind::Rotation => &mut self.rotation[axis],
-            TransformKind::Scale => &mut self.scale[axis],
-        };
-        field.begin_edit();
-        let value = field.commit_text(text)?;
-        let components = match kind {
+        let mut components = match kind {
             TransformKind::Position => self.position.map(|field| field.value()),
             TransformKind::Rotation => self.rotation.map(|field| field.value()),
             TransformKind::Scale => self.scale.map(|field| field.value()),
         };
-        if self
-            .state
-            .update_modal_components(glam::Vec3::from_array(components))
-            .is_ok()
-        {
-            self.state.commit_modal();
+        components[axis.min(2)] = value;
+        if let Err(error) = self.state.update_modal_components(glam::Vec3::from_array(components)) {
+            self.state.set_status(error.to_string());
+            if started { self.cancel_transform(); }
+            return Err(numeric::NumericInputError::Invalid);
         }
+        let fields = match kind {
+            TransformKind::Position => &mut self.position,
+            TransformKind::Rotation => &mut self.rotation,
+            TransformKind::Scale => &mut self.scale,
+        };
+        for (field, value) in fields.iter_mut().zip(components) { field.set_value(value); }
+        self.state.commit_modal();
         Ok(value)
     }
 
@@ -1350,7 +3850,237 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.is_wireframe = self.state.session.show_wireframe_overlay;
         vm.asset_library_visible = self.asset_library_visible;
         vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.selection_overlay = compute_selection_overlay(
+            &self.state,
+            self.viewport_size[0],
+            self.viewport_size[1],
+            self.viewport.draws_component_guides(),
+        );
         vm.add_menu_open = self.add_menu_open;
+        if let Some(draft) = &self.rename_draft {
+            vm.rename_active = true;
+            vm.rename_value = draft.clone();
+        }
+        vm.shading_popover_open = self.shading_popover_open;
+        vm.transform_instant_active = self.instant_transform && self.state.session.tools.modal.is_some();
+        vm.gizmo_hover_axis = self.gizmo_hover.map_or(-1, |h| h.axis() as i32);
+        vm.gizmo_active_axis = self.gizmo_drag.map_or(-1, |h| h.axis() as i32);
+        vm.hover_label = self.state.session.tools.hover.label();
+        self.fill_operation_hud(&mut vm);
+        if let Some(menu) = self.context_menu {
+            vm.context_menu_open = true;
+            vm.context_menu_x = menu.x;
+            vm.context_menu_y = menu.y;
+            if let Some(asset) = self
+                .state
+                .project
+                .assets
+                .iter()
+                .find(|asset| asset.id == menu.asset)
+            {
+                vm.context_menu_title = asset.name.clone();
+                vm.context_menu_visible = asset.visible;
+                vm.context_menu_locked = asset.locked;
+            }
+        }
+        if let Some(operand) = self.state.session.tools.boolean_operand {
+            if let Some(asset) = self
+                .state
+                .project
+                .assets
+                .iter()
+                .find(|asset| asset.id == operand)
+            {
+                vm.boolean_operand_name = asset.name.clone();
+            } else {
+                vm.boolean_operand_name = "missing".to_string();
+            }
+        }
+        vm.boolean_keep_parts = self.state.session.tools.boolean_keep_parts;
+        vm.boolean_ready = self.state.session.tools.boolean_operand.is_some()
+            && self.state.project.active_mesh().is_some();
+        if let Some(kind) = self.menu_open {
+            vm.menu_open = kind.id().to_string();
+        }
+        let translated = |id: petunia_config::TextId| self.state.t_id(id);
+        vm.label_parts = translated(petunia_config::text_id::UI_PARTS);
+        vm.label_project_asset_library =
+            translated(petunia_config::text_id::UI_PROJECT_ASSET_LIBRARY);
+        vm.label_save_active_as_asset =
+            translated(petunia_config::text_id::UI_SAVE_ACTIVE_AS_ASSET);
+        vm.label_status_hint = translated(petunia_config::text_id::UI_STATUS_HINT);
+        vm.label_unwrap_mesh = translated(petunia_config::text_id::UI_UNWRAP_MESH);
+        vm.label_pack_islands = translated(petunia_config::text_id::UI_PACK_ISLANDS);
+        vm.label_active_brush_color = translated(petunia_config::text_id::UI_ACTIVE_BRUSH_COLOR);
+        vm.label_albedo_base_color = translated(petunia_config::text_id::UI_ALBEDO_BASE_COLOR);
+        vm.label_theme = translated(petunia_config::text_id::UI_THEME);
+        vm.label_place_in_scene = translated(petunia_config::text_id::UI_PLACE_IN_SCENE);
+        if let Some(info) = &self.pending_recovery {
+            vm.recovery_open = true;
+            vm.recovery_title = translated(petunia_config::text_id::UI_RECOVERY_TITLE);
+            vm.recovery_body = translated(petunia_config::text_id::UI_RECOVERY_BODY);
+            vm.recovery_detail = format!(
+                "{}  ·  snapshot {}  ·  {}",
+                info.project_name,
+                info.snapshot_time,
+                info.snapshot_path.display()
+            );
+            vm.recovery_recover = translated(petunia_config::text_id::UI_RECOVERY_RECOVER);
+            vm.recovery_keep = translated(petunia_config::text_id::UI_RECOVERY_KEEP);
+            vm.recovery_discard = translated(petunia_config::text_id::UI_RECOVERY_DISCARD);
+        }
+        vm.label_asset_library = translated(petunia_config::text_id::UI_ASSETS);
+        vm.label_preferences = translated(petunia_config::text_id::MENU_PREFERENCES);
+        // A linha de rodapé das preferências informa o keymap e o idioma REAIS em uso.
+        vm.shell_info = format!(
+            "{}: {}  ·  {}: {}",
+            translated(petunia_config::text_id::UI_THEME),
+            self.state.ui.active_theme_id,
+            "Keymap",
+            self.state.ui.active_keymap_id,
+        );
+        vm.label_apply = translated(petunia_config::text_id::ACTIONS_APPLY);
+        vm.label_cancel = translated(petunia_config::text_id::ACTIONS_CANCEL);
+        vm.label_delete = translated(petunia_config::text_id::ACTIONS_DELETE);
+        vm.label_duplicate = translated(petunia_config::text_id::ACTIONS_DUPLICATE);
+        vm.themes = petunia_config::theme::ThemeRegistry::global()
+            .available()
+            .iter()
+            .map(|manifest| ThemeEntryModel {
+                id: manifest.id.clone(),
+                name: manifest.name.clone(),
+                active: manifest.id == self.state.ui.active_theme_id,
+            })
+            .collect();
+        for kind in MenuKind::ALL {
+            let entries: Vec<MenuEntryModel> = kind
+                .items()
+                .iter()
+                .map(|(id, label, shortcut)| MenuEntryModel {
+                    id: (*id).to_string(),
+                    label: translated(*label),
+                    shortcut: (*shortcut).to_string(),
+                })
+                .collect();
+            match kind {
+                MenuKind::File => {
+                    vm.menu_file_label = translated(kind.title());
+                    vm.menu_file_items = entries;
+                }
+                MenuKind::Edit => {
+                    vm.menu_edit_label = translated(kind.title());
+                    vm.menu_edit_items = entries;
+                }
+                MenuKind::View => {
+                    vm.menu_view_label = translated(kind.title());
+                    vm.menu_view_items = entries;
+                }
+                MenuKind::Window => {
+                    vm.menu_window_label = translated(kind.title());
+                    vm.menu_window_items = entries;
+                }
+            }
+        }
+        if let Some(effect) = self
+            .state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active())
+            .and_then(|layer| match &layer.kind {
+                petunia_project::paint_layers::LayerKind::Effect(effect) => Some(effect.clone()),
+                _ => None,
+            })
+        {
+            use petunia_project::paint_layers::PaintEffect;
+            vm.paint_effect_kind = match &effect {
+                PaintEffect::Pixelate { .. } => "Pixelate",
+                PaintEffect::Posterize { .. } => "Posterize",
+                PaintEffect::Invert => "Invert",
+                PaintEffect::Grain { .. } => "Grain",
+                PaintEffect::Levels { .. } => "Levels",
+                PaintEffect::BrightnessContrast { .. } => "BrightnessContrast",
+                PaintEffect::HueSaturation { .. } => "HueSaturation",
+            }
+            .to_string();
+            vm.paint_effect_params = effect_params(&effect);
+        }
+        if let Some((width, height)) = self.paint_canvas_dimensions() {
+            vm.paint_canvas_size = format!("{width} × {height}");
+            vm.paint_canvas_revision = self.state.project.assets[self.state.project.active]
+                .paint_stack
+                .as_ref()
+                .map(|stack| {
+                    stack
+                        .layers
+                        .iter()
+                        .filter_map(|layer| layer.canvas())
+                        .map(|canvas| canvas.w as i32 * canvas.h as i32)
+                        .sum::<i32>()
+                        + stack.layers.len() as i32
+                })
+                .unwrap_or(0);
+        }
+        vm.paint_fill_scope = format!("{:?}", self.state.session.tools.fill_scope);
+        vm.paint_projection = format!("{:?}", self.state.session.tools.brush_projection);
+        vm.paint_lock = format!("{:?}", self.state.session.tools.brush_lock);
+        vm.uv_editor = self.build_uv_editor();
+        if let Some(stack) = self
+            .state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+        {
+            vm.paint_layers = stack
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(index, layer)| PaintLayerModel {
+                    id: layer.id.to_string(),
+                    name: layer.name.clone(),
+                    visible: layer.visible,
+                    locked: layer.locked,
+                    opacity: layer.opacity,
+                    active: index == stack.active_layer,
+                    is_group: layer.is_group,
+                    kind_label: match layer.kind {
+                        petunia_project::paint_layers::LayerKind::Raster(_) => "Raster",
+                        petunia_project::paint_layers::LayerKind::Decal(_) => "Decal",
+                        petunia_project::paint_layers::LayerKind::Effect(_) => "Effect",
+                    }
+                    .to_string(),
+                })
+                .collect();
+            let (width, height) = self
+                .state
+                .project
+                .assets
+                .get(self.state.project.active)
+                .and_then(|asset| asset.paint_stack.as_ref())
+                .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
+                .map(|canvas| (canvas.w, canvas.h))
+                .unwrap_or((0, 0));
+            vm.paint_layer_count =
+                format!("{} layer(s)  ·  {width} × {height}", stack.layers.len());
+        }
+        if let Some(session) = &self.loop_cut {
+            vm.loop_cut_active = true;
+            vm.loop_cut_slide = session.slide;
+            vm.loop_cut_cuts = session.cuts as i32;
+        }
+        vm.tool_activation = self.state.session.tools.tool_activation.id().to_string();
+        if let Some(kind) = self.tool_modal {
+            let (minimum, maximum) = kind.bounds();
+            vm.tool_modal_active = true;
+            vm.tool_modal_title = kind.title().to_string();
+            vm.tool_modal_label = kind.label().to_string();
+            vm.tool_modal_value = self.tool_modal_value;
+            vm.tool_modal_step = kind.step();
+            vm.tool_modal_min = minimum;
+            vm.tool_modal_max = maximum;
+        }
         vm
     }
 
@@ -1361,6 +4091,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     fn reset_transform_fields(&mut self) {
+        self.modal_text.clear();
+        self.instant_transform = false;
+        self.gizmo_drag = None;
         for field in &mut self.position {
             field.set_value(0.0);
         }
@@ -1386,36 +4119,40 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             OverlayId::Settings => self.settings_visible = false,
             OverlayId::SceneDrawer => self.scene_drawer_visible = false,
             OverlayId::AssetLibrary => self.asset_library_visible = false,
+            OverlayId::OutlinerContextMenu => self.context_menu = None,
+            OverlayId::MenuBar => self.menu_open = None,
         }
     }
 }
 
 /// Projeta o pivô da seleção e os três eixos do mundo para o overlay Slint.
+/// Distância de um ponto a um segmento, em espaço de tela.
+pub fn point_segment_distance(point: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ap = [point[0] - a[0], point[1] - a[1]];
+    let length_squared = ab[0] * ab[0] + ab[1] * ab[1];
+    if length_squared <= 1.0e-6 {
+        return (ap[0] * ap[0] + ap[1] * ap[1]).sqrt();
+    }
+    let t = ((ap[0] * ab[0] + ap[1] * ab[1]) / length_squared).clamp(0.0, 1.0);
+    let closest = [a[0] + ab[0] * t, a[1] + ab[1] * t];
+    ((point[0] - closest[0]).powi(2) + (point[1] - closest[1]).powi(2)).sqrt()
+}
+
 fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
-    if state.workspace != Workspace::Model {
+    /// Comprimento das hastes do gizmo de transformação, em px lógicos.
+    const ROD_LENGTH: f32 = 72.0;
+    /// Tamanho da seta: recuo da ponta e meia-largura da base.
+    const ARROW_BACK: f32 = 13.0;
+    const ARROW_HALF: f32 = 5.5;
+    /// Tripé de navegação: margem do canto e comprimento das hastes.
+    const VIEW_MARGIN: f32 = 54.0;
+    const VIEW_LENGTH: f32 = 38.0;
+
+    if width <= 1.0 || height <= 1.0 {
         return GizmoModel::default();
     }
-    let Some(asset) = state.project.active() else {
-        return GizmoModel::default();
-    };
-    if asset.mesh.verts.is_empty() {
-        return GizmoModel::default();
-    }
-    let pivot = if asset.mesh.has_selection() {
-        glam::Vec3::from_array(asset.mesh.selection_center())
-    } else {
-        let mut min = glam::Vec3::splat(f32::MAX);
-        let mut max = glam::Vec3::splat(f32::MIN);
-        for vertex in &asset.mesh.verts {
-            let point = vertex.vec();
-            min = min.min(point);
-            max = max.max(point);
-        }
-        if !min.is_finite() || !max.is_finite() {
-            return GizmoModel::default();
-        }
-        (min + max) * 0.5
-    };
+
     let view_proj = state.session.camera.view_proj();
     let project = |point: glam::Vec3| -> Option<[f32; 2]> {
         let clip = view_proj * glam::Vec4::new(point.x, point.y, point.z, 1.0);
@@ -1428,26 +4165,301 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
             (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height,
         ])
     };
+    // Camera-space directions preserve foreshortening: an axis pointing at
+    // the viewer should shrink, not turn into a full-length diagonal.
+    let screen_direction = |axis: glam::Vec3| -> [f32; 2] {
+        [axis.dot(state.session.camera.right()), -axis.dot(state.session.camera.up())]
+    };
+
+    let mut model = GizmoModel::default();
+
+    // Tripé de navegação: sempre visível quando a viewport tem tamanho válido.
+    // Ele mostra a orientação da câmera, não a cena: por isso as hastes partem
+    // de uma âncora fixa no canto, não de um ponto projetado.
+    {
+        model.view_origin_x = VIEW_MARGIN;
+        model.view_origin_y = height - VIEW_MARGIN;
+        let origin = [VIEW_MARGIN, VIEW_MARGIN];
+        for (axis, slot, endpoint) in [
+            (glam::Vec3::X, &mut model.view_x_commands, &mut model.view_x_end),
+            (glam::Vec3::Y, &mut model.view_y_commands, &mut model.view_y_end),
+            (glam::Vec3::Z, &mut model.view_z_commands, &mut model.view_z_end),
+        ] {
+            let direction = screen_direction(axis);
+            let end = [
+                origin[0] + direction[0] * VIEW_LENGTH,
+                origin[1] + direction[1] * VIEW_LENGTH,
+            ];
+            *endpoint = end;
+            *slot = format!(
+                "M {:.2} {:.2} L {:.2} {:.2} ",
+                origin[0], origin[1], end[0], end[1]
+            );
+        }
+    }
+
+    // Hastes de transformação: só com Move/Rotate/Scale, tamanho fixo em tela.
+    if state.workspace != Workspace::Model
+        || !matches!(
+            state.session.tools.active_tool.as_str(),
+            "move" | "rotate" | "scale"
+        )
+    {
+        return model;
+    }
+    let Some(asset) = state.project.active() else {
+        return model;
+    };
+    if asset.mesh.verts.is_empty() {
+        return model;
+    };
+    let pivot = state.session.tools.modal.as_ref().map_or_else(|| state.calculate_pivot(state.session.pivot_point), |modal| modal.pivot);
     let Some(origin) = project(pivot) else {
-        return GizmoModel::default();
+        return model;
     };
-    let world_length = state.session.camera.visible_height() * 0.18;
-    let end_of = |direction: glam::Vec3| -> [f32; 2] {
-        project(pivot + direction * world_length).unwrap_or(origin)
+    model.visible = true;
+    model.origin_x = origin[0];
+    model.origin_y = origin[1];
+
+    for (axis, rod, arrow) in [
+        (
+            glam::Vec3::X,
+            &mut model.x_commands,
+            &mut model.x_arrow_commands,
+        ),
+        (
+            glam::Vec3::Y,
+            &mut model.y_commands,
+            &mut model.y_arrow_commands,
+        ),
+        (
+            glam::Vec3::Z,
+            &mut model.z_commands,
+            &mut model.z_arrow_commands,
+        ),
+    ] {
+        if state.session.tools.active_tool == "rotate" {
+            let tangent = if axis == glam::Vec3::X { glam::Vec3::Y } else { glam::Vec3::X };
+            let bitangent = axis.cross(tangent);
+            for segment in 0..=64 {
+                let angle = segment as f32 * std::f32::consts::TAU / 64.0;
+                let direction = screen_direction(tangent * angle.cos() + bitangent * angle.sin());
+                rod.push_str(&format!("{} {:.2} {:.2} ", if segment == 0 { "M" } else { "L" }, origin[0] + direction[0] * ROD_LENGTH, origin[1] + direction[1] * ROD_LENGTH));
+            }
+            continue;
+        }
+        let direction = screen_direction(axis);
+        let end = [
+            origin[0] + direction[0] * ROD_LENGTH,
+            origin[1] + direction[1] * ROD_LENGTH,
+        ];
+        *rod = format!(
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            origin[0], origin[1], end[0], end[1]
+        );
+        if state.session.tools.active_tool == "scale" {
+            let r = ARROW_HALF;
+            *arrow = format!("M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ", end[0]-r, end[1]-r, end[0]+r, end[1]-r, end[0]+r, end[1]+r, end[0]-r, end[1]+r);
+            continue;
+        }
+        // Seta: ponta em `end`, base recuada ao longo da haste.
+        let base = [
+            end[0] - direction[0] * ARROW_BACK,
+            end[1] - direction[1] * ARROW_BACK,
+        ];
+        let perpendicular = [-direction[1], direction[0]];
+        let left = [
+            base[0] + perpendicular[0] * ARROW_HALF,
+            base[1] + perpendicular[1] * ARROW_HALF,
+        ];
+        let right = [
+            base[0] - perpendicular[0] * ARROW_HALF,
+            base[1] - perpendicular[1] * ARROW_HALF,
+        ];
+        *arrow = format!(
+            "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+            end[0], end[1], left[0], left[1], right[0], right[1]
+        );
+    }
+    model
+}
+
+fn compute_selection_overlay(state: &AppState, width: f32, height: f32, backend_draws_guides: bool) -> SelectionOverlayModel {
+    if state.selection_domain() != SelectionDomain::Object {
+        return compute_asset_overlay(state, width, height, backend_draws_guides, state.project.active);
+    }
+    let mut overlay = SelectionOverlayModel::default();
+    for (index, asset) in state.project.assets.iter().enumerate() {
+        if !asset.visible { continue; }
+        let selected = state.session.selection.assets.contains(&asset.id) || index == state.project.active;
+        let hovered = state.session.tools.hover == petunia_core::HoverTarget::Object(index);
+        if !selected && !hovered { continue; }
+        let part = compute_asset_overlay(state, width, height, backend_draws_guides, index);
+        if selected { overlay.outline_commands.push_str(&part.outline_commands); }
+        else { overlay.unselected_outline_commands.push_str(&part.outline_commands); }
+    }
+    overlay.visible = !overlay.outline_commands.is_empty() || !overlay.unselected_outline_commands.is_empty();
+    overlay
+}
+
+fn compute_asset_overlay(state: &AppState, width: f32, height: f32, backend_draws_guides: bool, index: usize) -> SelectionOverlayModel {
+    /// Teto de segmentos por frame: malhas grandes não podem gerar uma string
+    /// gigante a cada sync de propriedades.
+    const MAX_SEGMENTS: usize = 4_000;
+    /// Meia-aresta do marcador de vértice, em px lógicos.
+    const MARKER: f32 = 3.5;
+
+    if width <= 1.0 || height <= 1.0 {
+        return SelectionOverlayModel::default();
+    }
+    if state.workspace == Workspace::Paint {
+        return SelectionOverlayModel::default();
+    }
+    let Some(asset) = state.project.assets.get(index) else {
+        return SelectionOverlayModel::default();
     };
-    let x_end = end_of(glam::Vec3::X);
-    let y_end = end_of(glam::Vec3::Y);
-    let z_end = end_of(glam::Vec3::Z);
-    GizmoModel {
-        visible: true,
-        origin_x: origin[0],
-        origin_y: origin[1],
-        x_end_x: x_end[0],
-        x_end_y: x_end[1],
-        y_end_x: y_end[0],
-        y_end_y: y_end[1],
-        z_end_x: z_end[0],
-        z_end_y: z_end[1],
+    let evaluated = asset.evaluated_mesh();
+    let mesh = &evaluated;
+    if mesh.verts.is_empty() {
+        return SelectionOverlayModel::default();
+    }
+
+    let view_proj = state.session.camera.view_proj();
+    let project = |point: glam::Vec3| -> Option<[f32; 2]> {
+        let clip = view_proj * glam::Vec4::new(point.x, point.y, point.z, 1.0);
+        if clip.w <= 0.05 {
+            return None;
+        }
+        let inv_w = 1.0 / clip.w;
+        Some([
+            (clip.x * inv_w * 0.5 + 0.5) * width,
+            (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height,
+        ])
+    };
+
+    let mut outline = String::new();
+    let points = String::new();
+    let mut unselected_outline = String::new();
+    let mut unselected_points = String::new();
+    let mut segments = 0usize;
+    let push_segment = |commands: &mut String, a: [f32; 2], b: [f32; 2]| {
+        commands.push_str(&format!(
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            a[0], a[1], b[0], b[1]
+        ));
+    };
+
+    let domain = state.selection_domain();
+    let mut truncated = false;
+
+    match domain {
+        SelectionDomain::Object => {
+            // Silhueta: aresta entre face frontal e traseira (ou borda aberta
+            // frontal). Não desenhar todas as arestas de faces frontais, o que
+            // faria um objeto selecionado parecer uma caixa de arame gigante.
+            let mut adjacent = std::collections::HashMap::<(u32, u32), (usize, usize)>::new();
+            let view_dir = state.session.camera.forward();
+            for (fi, face) in mesh.faces.iter().enumerate() {
+                if face.verts.len() < 3 {
+                    continue;
+                }
+                let front = mesh.face_normal(fi).dot(view_dir) < 0.0;
+                for index in 0..face.verts.len() {
+                    let a = face.verts[index];
+                    let b = face.verts[(index + 1) % face.verts.len()];
+                    let entry = adjacent.entry((a.min(b), a.max(b))).or_default();
+                    if front {
+                        entry.0 += 1;
+                    } else {
+                        entry.1 += 1;
+                    }
+                }
+            }
+            for ((a, b), (front, back)) in adjacent {
+                if front == 0 || (back == 0 && front > 1) {
+                    continue;
+                }
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                let (Some(va), Some(vb)) = (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                else {
+                    continue;
+                };
+                if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
+                    push_segment(&mut outline, pa, pb);
+                    segments += 1;
+                }
+            }
+        }
+        SelectionDomain::Vertex => {
+            if backend_draws_guides {
+                return SelectionOverlayModel::default();
+            }
+            for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                let Some(sp) = project(vertex.vec()) else {
+                    continue;
+                };
+                let target = &mut unselected_points;
+                target.push_str(&format!(
+                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+                    sp[0],
+                    sp[1] - MARKER,
+                    sp[0] + MARKER,
+                    sp[1],
+                    sp[0],
+                    sp[1] + MARKER,
+                    sp[0] - MARKER,
+                    sp[1],
+                ));
+                segments += 1;
+            }
+        }
+        SelectionDomain::Edge => {
+            if backend_draws_guides {
+                return SelectionOverlayModel::default();
+            }
+            for (a, b) in mesh.edges_unique() {
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                let selected =
+                    mesh.selected_edges.contains(&(a, b)) || mesh.selected_edges.contains(&(b, a));
+                if selected {
+                    // O GPU desenha a aresta selecionada com depth test.
+                    continue;
+                }
+                let (Some(va), Some(vb)) = (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                else {
+                    continue;
+                };
+                if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
+                    push_segment(&mut unselected_outline, pa, pb);
+                    segments += 1;
+                }
+            }
+        }
+        SelectionDomain::Face => {}
+    }
+
+    let _ = truncated;
+    let visible = !outline.is_empty()
+        || !points.is_empty()
+        || !unselected_outline.is_empty()
+        || !unselected_points.is_empty();
+    SelectionOverlayModel {
+        visible,
+        outline_commands: outline,
+        point_commands: points,
+        unselected_outline_commands: unselected_outline,
+        unselected_point_commands: unselected_points,
+        accent: domain != SelectionDomain::Object,
     }
 }
 
@@ -1459,13 +4471,8 @@ fn pick_face_hit(
     let mesh = state.project.active_mesh()?;
     let mut best = None;
     for (face_index, face) in mesh.faces.iter().enumerate() {
-        if face.verts.len() < 3 {
-            continue;
-        }
-        let p0 = mesh.verts[face.verts[0] as usize].vec();
-        for triangle in 1..face.verts.len() - 1 {
-            let p1 = mesh.verts[face.verts[triangle] as usize].vec();
-            let p2 = mesh.verts[face.verts[triangle + 1] as usize].vec();
+        for corners in mesh.face_triangle_corners(face_index) {
+            let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
             if let Some(distance) = ray_triangle(origin, direction, p0, p1, p2)
                 && best.is_none_or(|(_, current)| distance < current)
             {
@@ -1522,7 +4529,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
     println!("Petunia3D - Slint production frontend");
     let window = PetuniaSlintShell::new()?;
     let state = AppState::default();
-    let has_gpu_viewport = gpu_context.is_some();
 
     let mut viewport: Box<dyn PetuniaViewport> = if let Some((_, _, device, queue)) = gpu_context {
         println!("Viewport backend: shared WGPU fast path");
@@ -1543,22 +4549,188 @@ pub fn run() -> Result<(), slint::PlatformError> {
         show_triangulation: state.session.show_triangulation,
         textured: state.session.textured,
         show_wireframe_overlay: state.session.show_wireframe_overlay,
+        selection_domain: state.selection_domain(),
+        xray_opacity: state.session.xray_opacity,
+        show_grid: state.session.show_grid,
+        hover: state.session.tools.hover,
     };
     if let Some(frame) = viewport.render_frame(&state.project, &state.session.camera, render_state)
     {
         window.set_viewport_image(frame);
     }
-    window.set_has_gpu_viewport(has_gpu_viewport);
+    window.set_has_gpu_viewport(true);
 
     let bridge = Arc::new(Mutex::new(SlintUiBridge::new(state, viewport)));
+
+    // Ciclo de vida do autosave (P3D-002): marcador de sessão no arranque,
+    // detecção de encerramento sujo e remoção no fechamento limpo.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    {
+        let mut bridge = bridge
+            .lock()
+            .expect("Slint bridge mutex poisoned during startup");
+        bridge.pending_recovery = petunia_core::AutosaveService::detect_recovery(None);
+        let project_name = bridge
+            .state
+            .project
+            .project_path
+            .clone()
+            .unwrap_or_else(|| "Untitled".to_string());
+        let path = bridge.state.project.project_path.clone();
+        if let Err(error) = petunia_core::AutosaveService::create_session_lock(
+            path.as_deref().map(std::path::Path::new),
+            &project_name,
+            now_secs,
+        ) {
+            eprintln!("petunia3d: falha ao gravar marcador de sessão: {error}");
+        }
+    }
+
     connect_callbacks(&window, Arc::clone(&bridge));
     let vm = bridge
         .lock()
         .expect("Slint bridge mutex poisoned during startup")
         .view_model();
     sync_window_properties(&window, &vm);
+
+    // O primeiro layout pode ocorrer antes da instalação dos callbacks de
+    // resize. Use suas dimensões reais antes do primeiro frame interativo.
+    let initial_bridge = Arc::clone(&bridge);
+    let initial_window = window.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        if let Some(window) = initial_window.upgrade()
+            && let Ok(mut bridge) = initial_bridge.lock()
+        {
+            bridge.resize_viewport(
+                window.get_viewport_region_width().round().max(1.0) as u32,
+                window.get_viewport_region_height().round().max(1.0) as u32,
+            );
+            sync_window_properties(&window, &bridge.view_model());
+            if let Some(frame) = bridge.render_viewport() {
+                window.set_viewport_image(frame);
+            }
+        }
+    });
+
+    // Um passo de autosave a cada 30s; o intervalo real (120s) e o dirty state
+    // são decididos pelo domínio, então o timer só oferece a oportunidade.
+    let autosave_bridge = Arc::clone(&bridge);
+    let autosave_timer = slint::Timer::default();
+    autosave_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_secs(30),
+        move || {
+            if let Ok(mut bridge) = autosave_bridge.lock() {
+                bridge.autosave_tick();
+            }
+        },
+    );
+
     println!("Petunia3D window ready");
-    window.run()
+    let result = window.run();
+
+    drop(autosave_timer);
+    let path = bridge
+        .lock()
+        .map(|bridge| bridge.state.project.project_path.clone())
+        .unwrap_or(None);
+    petunia_core::AutosaveService::remove_session_lock(path.as_deref().map(std::path::Path::new));
+    result
+}
+
+/// Parâmetros numéricos expostos de um efeito de camada.
+fn effect_params(effect: &petunia_project::paint_layers::PaintEffect) -> Vec<PaintEffectParam> {
+    use petunia_project::paint_layers::PaintEffect;
+    let param = |key: &str, label: &str, value: f32, min: f32, max: f32| PaintEffectParam {
+        key: key.to_string(),
+        label: label.to_string(),
+        value,
+        min,
+        max,
+    };
+    match effect {
+        PaintEffect::Pixelate { cell_size } => {
+            vec![param(
+                "cell_size",
+                "Cell size",
+                *cell_size as f32,
+                1.0,
+                64.0,
+            )]
+        }
+        PaintEffect::Posterize { levels } => {
+            vec![param("levels", "Levels", *levels as f32, 2.0, 32.0)]
+        }
+        PaintEffect::Invert => Vec::new(),
+        PaintEffect::Grain { intensity, seed } => vec![
+            param("intensity", "Intensity", *intensity, 0.0, 1.0),
+            param("seed", "Seed", *seed as f32, 0.0, 9_999.0),
+        ],
+        PaintEffect::Levels { .. } => Vec::new(),
+        PaintEffect::BrightnessContrast {
+            brightness,
+            contrast,
+        } => vec![
+            param("brightness", "Brightness", *brightness, -1.0, 1.0),
+            param("contrast", "Contrast", *contrast, -1.0, 1.0),
+        ],
+        PaintEffect::HueSaturation {
+            hue_shift_deg,
+            saturation,
+        } => vec![
+            param("hue_shift_deg", "Hue shift", *hue_shift_deg, -180.0, 180.0),
+            param("saturation", "Saturation", *saturation, -1.0, 1.0),
+        ],
+    }
+}
+
+fn sync_overlay_models(window: &PetuniaSlintShell, selection: &SelectionOverlayModel, gizmo: &GizmoModel) {
+    window.set_selection_overlay_visible(selection.visible);
+    window.set_selection_outline_commands(selection.outline_commands.as_str().into());
+    window.set_selection_point_commands(selection.point_commands.as_str().into());
+    window.set_selection_unselected_outline_commands(
+        selection
+            .unselected_outline_commands
+            .as_str()
+            .into(),
+    );
+    window.set_selection_unselected_point_commands(
+        selection
+            .unselected_point_commands
+            .as_str()
+            .into(),
+    );
+    window.set_selection_overlay_accent(selection.accent);
+    window.set_gizmo_visible(gizmo.visible);
+    window.set_gizmo_origin_x(gizmo.origin_x);
+    window.set_gizmo_origin_y(gizmo.origin_y);
+    window.set_gizmo_x_commands(gizmo.x_commands.as_str().into());
+    window.set_gizmo_y_commands(gizmo.y_commands.as_str().into());
+    window.set_gizmo_z_commands(gizmo.z_commands.as_str().into());
+    window.set_gizmo_x_arrow_commands(gizmo.x_arrow_commands.as_str().into());
+    window.set_gizmo_y_arrow_commands(gizmo.y_arrow_commands.as_str().into());
+    window.set_gizmo_z_arrow_commands(gizmo.z_arrow_commands.as_str().into());
+    window.set_view_gizmo_x_commands(gizmo.view_x_commands.as_str().into());
+    window.set_view_gizmo_y_commands(gizmo.view_y_commands.as_str().into());
+    window.set_view_gizmo_z_commands(gizmo.view_z_commands.as_str().into());
+    window.set_view_gizmo_x_end_x(gizmo.view_x_end[0]);
+    window.set_view_gizmo_x_end_y(gizmo.view_x_end[1]);
+    window.set_view_gizmo_y_end_x(gizmo.view_y_end[0]);
+    window.set_view_gizmo_y_end_y(gizmo.view_y_end[1]);
+    window.set_view_gizmo_z_end_x(gizmo.view_z_end[0]);
+    window.set_view_gizmo_z_end_y(gizmo.view_z_end[1]);
+    window.set_view_gizmo_origin_x(gizmo.view_origin_x);
+    window.set_view_gizmo_origin_y(gizmo.view_origin_y);
+}
+
+fn sync_viewport_overlays<V: PetuniaViewport>(window: &PetuniaSlintShell, bridge: &SlintUiBridge<V>) {
+    let [width, height] = bridge.viewport_size;
+    let selection = compute_selection_overlay(&bridge.state, width, height, bridge.viewport.draws_component_guides());
+    let gizmo = compute_gizmo(&bridge.state, width, height);
+    sync_overlay_models(window, &selection, &gizmo);
 }
 
 fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
@@ -1577,6 +4749,26 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_selection_domain(domain_str.into());
     window.set_is_orthographic(vm.is_orthographic);
     window.set_is_wireframe(vm.is_wireframe);
+    window.set_shading_mode(vm.shading_mode.as_str().into());
+    window.set_show_xray(vm.show_xray);
+    window.set_shading_popover_open(vm.shading_popover_open);
+    window.set_transform_instant_active(vm.transform_instant_active);
+    window.set_gizmo_hover_axis(vm.gizmo_hover_axis);
+    window.set_gizmo_active_axis(vm.gizmo_active_axis);
+    window.set_operation_preview_commands(vm.operation_preview_commands.as_str().into());
+    window.set_operation_hud_active(vm.operation_hud_active);
+    window.set_operation_hud_title(vm.operation_hud_title.as_str().into());
+    window.set_operation_hud_subject(vm.operation_hud_subject.as_str().into());
+    window.set_operation_hud_hint(vm.operation_hud_hint.as_str().into());
+    window.set_context_hint(vm.context_hint.as_str().into());
+    window.set_hover_label(vm.hover_label.as_str().into());
+    let hud_lines: Vec<slint::SharedString> = vm
+        .operation_hud_lines
+        .iter()
+        .map(|line| line.as_str().into())
+        .collect();
+    window.set_operation_hud_lines(hud_lines.as_slice().into());
+    window.set_xray_opacity(vm.xray_opacity);
     window.set_asset_library_visible(vm.asset_library_visible);
     window.set_paint_color(slint::Color::from_argb_f32(
         1.0,
@@ -1601,6 +4793,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_active_object_details(vm.active_object_details.as_str().into());
     window.set_active_material_name(vm.active_material_name.as_str().into());
     window.set_scene_stats(vm.scene_stats.as_str().into());
+    window.set_uv_stats(vm.uv_stats.as_str().into());
     window.set_current_theme(vm.current_theme.as_str().into());
 
     let scene_items: Vec<SceneItem> = vm
@@ -1619,16 +4812,125 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     let model = std::rc::Rc::new(slint::VecModel::from(scene_items));
     window.set_scene_items(model.into());
 
-    window.set_gizmo_visible(vm.gizmo.visible);
-    window.set_gizmo_origin_x(vm.gizmo.origin_x);
-    window.set_gizmo_origin_y(vm.gizmo.origin_y);
-    window.set_gizmo_x_end_x(vm.gizmo.x_end_x);
-    window.set_gizmo_x_end_y(vm.gizmo.x_end_y);
-    window.set_gizmo_y_end_x(vm.gizmo.y_end_x);
-    window.set_gizmo_y_end_y(vm.gizmo.y_end_y);
-    window.set_gizmo_z_end_x(vm.gizmo.z_end_x);
-    window.set_gizmo_z_end_y(vm.gizmo.z_end_y);
+    sync_overlay_models(window, &vm.selection_overlay, &vm.gizmo);
     window.set_add_menu_open(vm.add_menu_open);
+    window.set_rename_active(vm.rename_active);
+    window.set_rename_value(vm.rename_value.as_str().into());
+    window.set_context_menu_open(vm.context_menu_open);
+    window.set_context_menu_x(vm.context_menu_x);
+    window.set_context_menu_y(vm.context_menu_y);
+    window.set_context_menu_title(vm.context_menu_title.as_str().into());
+    window.set_context_menu_visible(vm.context_menu_visible);
+    window.set_context_menu_locked(vm.context_menu_locked);
+    window.set_boolean_operand_name(vm.boolean_operand_name.as_str().into());
+    window.set_boolean_ready(vm.boolean_ready);
+    window.set_boolean_keep_parts(vm.boolean_keep_parts);
+    window.set_menu_open(vm.menu_open.as_str().into());
+    window.set_menu_file_label(vm.menu_file_label.as_str().into());
+    window.set_menu_edit_label(vm.menu_edit_label.as_str().into());
+    window.set_menu_view_label(vm.menu_view_label.as_str().into());
+    window.set_menu_window_label(vm.menu_window_label.as_str().into());
+    let to_entries = |items: &[MenuEntryModel]| -> Vec<MenuEntry> {
+        items
+            .iter()
+            .map(|item| MenuEntry {
+                id: item.id.as_str().into(),
+                label: item.label.as_str().into(),
+                shortcut: item.shortcut.as_str().into(),
+            })
+            .collect()
+    };
+    window.set_menu_file_items(to_entries(&vm.menu_file_items).as_slice().into());
+    window.set_menu_edit_items(to_entries(&vm.menu_edit_items).as_slice().into());
+    window.set_menu_view_items(to_entries(&vm.menu_view_items).as_slice().into());
+    window.set_menu_window_items(to_entries(&vm.menu_window_items).as_slice().into());
+    window.set_label_parts(vm.label_parts.as_str().into());
+    window.set_label_project_asset_library(vm.label_project_asset_library.as_str().into());
+    window.set_label_save_active_as_asset(vm.label_save_active_as_asset.as_str().into());
+    window.set_label_status_hint(vm.label_status_hint.as_str().into());
+    window.set_label_unwrap_mesh(vm.label_unwrap_mesh.as_str().into());
+    window.set_label_pack_islands(vm.label_pack_islands.as_str().into());
+    window.set_label_active_brush_color(vm.label_active_brush_color.as_str().into());
+    window.set_label_albedo_base_color(vm.label_albedo_base_color.as_str().into());
+    window.set_label_theme(vm.label_theme.as_str().into());
+    window.set_label_place_in_scene(vm.label_place_in_scene.as_str().into());
+    window.set_recovery_open(vm.recovery_open);
+    window.set_recovery_title(vm.recovery_title.as_str().into());
+    window.set_recovery_body(vm.recovery_body.as_str().into());
+    window.set_recovery_detail(vm.recovery_detail.as_str().into());
+    window.set_recovery_recover(vm.recovery_recover.as_str().into());
+    window.set_recovery_keep(vm.recovery_keep.as_str().into());
+    window.set_recovery_discard(vm.recovery_discard.as_str().into());
+    window.set_label_asset_library(vm.label_asset_library.as_str().into());
+    window.set_label_preferences(vm.label_preferences.as_str().into());
+    window.set_shell_info(vm.shell_info.as_str().into());
+    window.set_label_apply(vm.label_apply.as_str().into());
+    window.set_label_cancel(vm.label_cancel.as_str().into());
+    window.set_label_delete(vm.label_delete.as_str().into());
+    window.set_label_duplicate(vm.label_duplicate.as_str().into());
+    let theme_entries: Vec<ThemeEntry> = vm
+        .themes
+        .iter()
+        .map(|theme| ThemeEntry {
+            id: theme.id.as_str().into(),
+            name: theme.name.as_str().into(),
+            active: theme.active,
+        })
+        .collect();
+    window.set_themes(theme_entries.as_slice().into());
+    window.set_inspector_width(vm.inspector_width);
+    window.set_asset_library_height(vm.asset_library_height);
+    window.set_uv_layout_commands(vm.uv_editor.layout_commands.as_str().into());
+    window.set_uv_island_count(vm.uv_editor.island_count as i32);
+    window.set_uv_face_count(vm.uv_editor.face_count as i32);
+    window.set_uv_selected_face(vm.uv_editor.selected_face);
+    window.set_uv_selected_count(vm.uv_editor.uv_selected_count as i32);
+    window.set_uv_layout_truncated(vm.uv_editor.truncated);
+    window.set_paint_layer_count(vm.paint_layer_count.as_str().into());
+    window.set_paint_effect_kind(vm.paint_effect_kind.as_str().into());
+    let effect_params: Vec<PaintEffectParamEntry> = vm
+        .paint_effect_params
+        .iter()
+        .map(|param| PaintEffectParamEntry {
+            key: param.key.as_str().into(),
+            label: param.label.as_str().into(),
+            value: param.value,
+            minimum: param.min,
+            maximum: param.max,
+        })
+        .collect();
+    window.set_paint_effect_params(effect_params.as_slice().into());
+    window.set_paint_canvas_size(vm.paint_canvas_size.as_str().into());
+    window.set_paint_canvas_revision(vm.paint_canvas_revision);
+    window.set_paint_fill_scope(vm.paint_fill_scope.as_str().into());
+    window.set_paint_projection(vm.paint_projection.as_str().into());
+    window.set_paint_lock(vm.paint_lock.as_str().into());
+    let layer_entries: Vec<PaintLayerEntry> = vm
+        .paint_layers
+        .iter()
+        .map(|layer| PaintLayerEntry {
+            id: layer.id.as_str().into(),
+            name: layer.name.as_str().into(),
+            visible: layer.visible,
+            locked: layer.locked,
+            opacity: layer.opacity,
+            active: layer.active,
+            is_group: layer.is_group,
+            kind_label: layer.kind_label.as_str().into(),
+        })
+        .collect();
+    window.set_paint_layers(layer_entries.as_slice().into());
+    window.set_loop_cut_active(vm.loop_cut_active);
+    window.set_loop_cut_slide(vm.loop_cut_slide);
+    window.set_loop_cut_cuts(vm.loop_cut_cuts);
+    window.set_tool_activation(vm.tool_activation.as_str().into());
+    window.set_tool_modal_active(vm.tool_modal_active);
+    window.set_tool_modal_title(vm.tool_modal_title.as_str().into());
+    window.set_tool_modal_label(vm.tool_modal_label.as_str().into());
+    window.set_tool_modal_value(vm.tool_modal_value);
+    window.set_tool_modal_step(vm.tool_modal_step);
+    window.set_tool_modal_min(vm.tool_modal_min);
+    window.set_tool_modal_max(vm.tool_modal_max);
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -1664,8 +4966,10 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         if let Ok(mut bridge) = workspace_bridge.lock() {
             bridge.apply(UiIntent::SetWorkspace(workspace));
             let vm = bridge.view_model();
+            let frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
+                if let Some(frame) = frame { window.set_viewport_image(frame); }
             }
         }
     });
@@ -1939,6 +5243,18 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let box_bridge = Arc::clone(&bridge);
+    let box_window = window.as_weak();
+    window.on_viewport_box_select(move |x0, y0, x1, y1, add, subtract| {
+        if let Ok(mut bridge) = box_bridge.lock() {
+            bridge.state.select_viewport_box([x0 * 2.0 - 1.0, 1.0 - y0 * 2.0], [x1 * 2.0 - 1.0, 1.0 - y1 * 2.0], add, subtract);
+            if let Some(window) = box_window.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+                if let Some(frame) = bridge.render_viewport() { window.set_viewport_image(frame); }
+            }
+        }
+    });
+
     let transform_begin_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_transform_scrub_started(move |kind_str| {
@@ -1977,21 +5293,26 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             "pos" => TransformKind::Position,
             "rot" => TransformKind::Rotation,
             "scale" => TransformKind::Scale,
-            _ => return,
+            _ => return false,
         };
-        if let Ok(mut bridge) = transform_text_bridge.lock() {
-            if let Err(error) = bridge.commit_transform_text(kind, axis as usize, text.as_str()) {
-                bridge
-                    .state
-                    .set_status(format!("Invalid numeric value: {error:?}"));
-            }
-            let vm = bridge.view_model();
-            let new_frame = bridge.render_viewport();
+        let Ok(mut bridge) = transform_text_bridge.lock() else { return false; };
+        let result = bridge.commit_transform_text(kind, axis as usize, text.as_str());
+        if let Err(error) = result { bridge.state.set_status(format!("Invalid numeric value: {error:?}")); }
+        if let Some(window) = window_weak.upgrade() {
+            sync_window_properties(&window, &bridge.view_model());
+            if let Some(frame) = bridge.render_viewport() { window.set_viewport_image(frame); }
+        }
+        result.is_ok()
+    });
+
+    let transform_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_transform_scrub_cancelled(move || {
+        if let Ok(mut bridge) = transform_cancel_bridge.lock() {
+            bridge.cancel_transform();
             if let Some(window) = window_weak.upgrade() {
-                sync_window_properties(&window, &vm);
-                if let Some(frame) = new_frame {
-                    window.set_viewport_image(frame);
-                }
+                sync_window_properties(&window, &bridge.view_model());
+                if let Some(frame) = bridge.render_viewport() { window.set_viewport_image(frame); }
             }
         }
     });
@@ -2000,9 +5321,10 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let window_weak = window.as_weak();
     window.on_viewport_orbit(move |dx, dy| {
         if let Ok(mut bridge) = orbit_bridge.lock() {
-            bridge.apply(UiIntent::ViewportGesture(ViewportGesture::Orbit { dx, dy }));
+            bridge.orbit_viewport(dx, dy);
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -2015,6 +5337,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             bridge.apply(UiIntent::ViewportGesture(ViewportGesture::Pan { dx, dy }));
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -2027,6 +5350,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             bridge.apply(UiIntent::ViewportGesture(ViewportGesture::Zoom { delta }));
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -2041,6 +5365,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             bridge.resize_viewport(width, height);
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -2068,6 +5393,14 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             "pos" => TransformKind::Position,
             "rot" => TransformKind::Rotation,
             "scale" => TransformKind::Scale,
+            // O plano de corte reusa o mesmo canal de arrasto, mas com a própria
+            // sessão: nada de transformar geometria.
+            "slice" => {
+                if let Ok(mut bridge) = transform_begin_bridge.lock() {
+                    bridge.begin_slice(x, y);
+                }
+                return;
+            }
             _ => return,
         };
         if let Ok(mut bridge) = transform_begin_bridge.lock() {
@@ -2077,9 +5410,20 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
 
     let transform_drag_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_viewport_transform_update(move |x, y| {
+    window.on_viewport_transform_update(move |x, y, fine, snap| {
         if let Ok(mut bridge) = transform_drag_bridge.lock() {
-            bridge.update_viewport_transform(x, y);
+            if bridge.update_viewport_slice(x, y) {
+                let vm = bridge.view_model();
+                let new_frame = bridge.render_viewport();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    if let Some(frame) = new_frame {
+                        window.set_viewport_image(frame);
+                    }
+                }
+                return;
+            }
+            bridge.update_viewport_transform_modified(x, y, fine, snap);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -2095,6 +5439,17 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let window_weak = window.as_weak();
     window.on_viewport_transform_end(move || {
         if let Ok(mut bridge) = transform_end_bridge.lock() {
+            if bridge.commit_slice() {
+                let vm = bridge.view_model();
+                let new_frame = bridge.render_viewport();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    if let Some(frame) = new_frame {
+                        window.set_viewport_image(frame);
+                    }
+                }
+                return;
+            }
             bridge.end_viewport_transform();
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
@@ -2108,9 +5463,15 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     });
 
     let paint_begin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
     window.on_viewport_paint_begin(move |x, y| {
         if let Ok(mut bridge) = paint_begin_bridge.lock() {
             bridge.begin_paint_stroke_at(x, y);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                bridge.publish_canvas_image(&window);
+            }
         }
     });
 
@@ -2119,18 +5480,23 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_viewport_paint_update(move |x, y| {
         if let Ok(mut bridge) = paint_update_bridge.lock() {
             bridge.paint_stroke_to(x, y);
+            let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
-            if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
-                window.set_viewport_image(frame);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+                bridge.publish_canvas_image(&window);
             }
         }
     });
 
     let paint_end_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_viewport_paint_end(move || {
+    window.on_viewport_paint_end(move |x, y| {
         if let Ok(mut bridge) = paint_end_bridge.lock() {
-            bridge.end_paint_stroke_at();
+            bridge.end_paint_stroke_at(x, y);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -2149,11 +5515,830 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let tool_hover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_hovered(move |delta| {
+        if let Ok(mut bridge) = tool_hover_bridge.lock()
+            && bridge.is_instant_tool_mode()
+            && bridge.tool_modal.is_some()
+        {
+            bridge.scrub_tool_modal(delta, false);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let activation_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_activation_set(move |id| {
+        if let Ok(mut bridge) = activation_bridge.lock() {
+            bridge.set_tool_activation(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let tool_scrub_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_scrubbed(move |delta, fine| {
+        if let Ok(mut bridge) = tool_scrub_bridge.lock() {
+            bridge.scrub_tool_modal(delta, fine);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let tool_text_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_text_committed(move |text| {
+        let Ok(mut bridge) = tool_text_bridge.lock() else { return false; };
+        let accepted = match numeric::parse_numeric(text.as_str()) {
+            Ok(value) => bridge.set_tool_modal_value(value),
+            Err(error) => { bridge.state.set_status(format!("Invalid value: {error:?}")); false }
+        };
+        if let Some(window) = window_weak.upgrade() {
+            sync_window_properties(&window, &bridge.view_model());
+            if let Some(frame) = bridge.render_viewport() { window.set_viewport_image(frame); }
+        }
+        accepted
+    });
+
+    let tool_apply_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_apply(move || {
+        if let Ok(mut bridge) = tool_apply_bridge.lock() {
+            bridge.commit_tool_modal();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let tool_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_tool_modal_cancel(move || {
+        if let Ok(mut bridge) = tool_cancel_bridge.lock() {
+            bridge.cancel_tool_modal();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let inspector_width_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_inspector_width_changed(move |width| {
+        if let Ok(mut bridge) = inspector_width_bridge.lock()
+            && bridge.set_inspector_width(width)
+        {
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let asset_height_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_asset_library_height_changed(move |height| {
+        if let Ok(mut bridge) = asset_height_bridge.lock()
+            && bridge.set_asset_library_height(height)
+        {
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let rename_edit_bridge = Arc::clone(&bridge);
+    window.on_rename_edited(move |text| {
+        if let Ok(mut bridge) = rename_edit_bridge.lock()
+            && let Some(draft) = bridge.rename_draft.as_mut()
+        {
+            *draft = text.to_string();
+        }
+    });
+
+    let rename_commit_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_rename_committed(move |text| {
+        if let Ok(mut bridge) = rename_commit_bridge.lock() {
+            bridge.commit_rename(text.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let rename_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_rename_cancelled(move || {
+        if let Ok(mut bridge) = rename_cancel_bridge.lock() {
+            bridge.cancel_rename();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let context_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_scene_context_requested(move |id, x, y| {
+        if let Ok(mut bridge) = context_bridge.lock() {
+            bridge.open_context_menu(id.as_str(), x, y);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let context_action_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_context_menu_action(move |action| {
+        if let Ok(mut bridge) = context_action_bridge.lock() {
+            bridge.context_menu_action(action.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let menu_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_menu_toggled(move |id| {
+        if let Ok(mut bridge) = menu_bridge.lock() {
+            bridge.toggle_menu(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let menu_item_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_menu_item_invoked(move |id| {
+        let id = id.to_string();
+        // Diálogos de arquivo continuam no caminho assíncrono já testado.
+        let opens_dialog = matches!(
+            id.as_str(),
+            "file.open" | "file.save" | "file.save_as" | "file.import_obj"
+        );
+        if let Ok(mut bridge) = menu_item_bridge.lock() {
+            bridge.close_menu();
+            if opens_dialog {
+                let vm = bridge.view_model();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    window.invoke_command_file_action(id.as_str().into());
+                }
+                return;
+            }
+            bridge.menu_item_invoked(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let keep_parts_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_boolean_keep_parts_set(move |keep| {
+        if let Ok(mut bridge) = keep_parts_bridge.lock() {
+            bridge.set_boolean_keep_parts(keep);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let join_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_join_requested(move || {
+        if let Ok(mut bridge) = join_bridge.lock() {
+            bridge.join_operand();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let effect_add_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_effect_layer_added(move |kind| {
+        if let Ok(mut bridge) = effect_add_bridge.lock() {
+            if !bridge.add_paint_effect_layer(kind.as_str()) {
+                bridge
+                    .state
+                    .set_status(format!("Unknown effect layer: {kind}"));
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+                bridge.publish_canvas_image(&window);
+            }
+        }
+    });
+
+    let effect_param_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_effect_param_set(move |key, value| {
+        if let Ok(mut bridge) = effect_param_bridge.lock() {
+            bridge.set_paint_effect_param(key.as_str(), value);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+                bridge.publish_canvas_image(&window);
+            }
+        }
+    });
+
+    let component_hover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_hover(move |x, y| {
+        if let Ok(mut bridge) = component_hover_bridge.lock()
+            && bridge.hover_component(x, y)
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let hover_clear_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_hover_clear(move || {
+        if let Ok(mut bridge) = hover_clear_bridge.lock()
+            && bridge.clear_hover()
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let gizmo_hover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_gizmo_hover(move |x, y| {
+        if let Ok(mut bridge) = gizmo_hover_bridge.lock()
+            && bridge.hover_gizmo(x, y)
+        {
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let gizmo_begin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_gizmo_drag_begin(move |x, y| {
+        if let Ok(mut bridge) = gizmo_begin_bridge.lock() {
+            bridge.begin_gizmo_drag(x, y);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let gizmo_end_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_gizmo_drag_end(move || {
+        if let Ok(mut bridge) = gizmo_end_bridge.lock() {
+            bridge.end_gizmo_drag();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let shading_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_shading_mode_set(move |id| {
+        if let Ok(mut bridge) = shading_bridge.lock() {
+            bridge.set_shading_mode(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let xray_opacity_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_xray_opacity_set(move |opacity| {
+        if let Ok(mut bridge) = xray_opacity_bridge.lock() {
+            bridge.set_xray_opacity(opacity);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let shading_popover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_shading_popover_toggled(move |open| {
+        if let Ok(mut bridge) = shading_popover_bridge.lock() {
+            bridge.shading_popover_open = open;
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let view_axis_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_view_axis_clicked(move |axis| {
+        if let Ok(mut bridge) = view_axis_bridge.lock() {
+            bridge.snap_view_to_axis(axis.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let operand_clear_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_boolean_operand_cleared(move || {
+        if let Ok(mut bridge) = operand_clear_bridge.lock() {
+            bridge.clear_boolean_operand();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let fill_scope_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_fill_scope_set(move |scope| {
+        if let Ok(mut bridge) = fill_scope_bridge.lock() {
+            bridge.set_fill_scope(scope.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let projection_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_projection_set(move |projection| {
+        if let Ok(mut bridge) = projection_bridge.lock() {
+            bridge.set_brush_projection(projection.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let brush_lock_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_lock_set(move |lock| {
+        if let Ok(mut bridge) = brush_lock_bridge.lock() {
+            bridge.set_brush_lock(lock.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_click_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_editor_clicked(move |u, v, extend| {
+        if let Ok(mut bridge) = uv_click_bridge.lock() {
+            bridge.uv_editor_click(u, v, extend);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_move_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_moved(move |du, dv| {
+        if let Ok(mut bridge) = uv_move_bridge.lock() {
+            bridge.uv_move_selected(du, dv);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_scale_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_scaled(move |factor| {
+        if let Ok(mut bridge) = uv_scale_bridge.lock() {
+            bridge.uv_scale_selected(factor);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_rotate_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_rotated(move |degrees| {
+        if let Ok(mut bridge) = uv_rotate_bridge.lock() {
+            bridge.uv_rotate_selected(degrees);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let uv_seam_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_seam_toggled(move || {
+        if let Ok(mut bridge) = uv_seam_bridge.lock() {
+            bridge.toggle_selected_uv_seams();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let uv_clear_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_seams_cleared(move || {
+        if let Ok(mut bridge) = uv_clear_bridge.lock() {
+            bridge.clear_all_uv_seams();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    // Painel de camadas do PAINT: cada ação recompoe o raster canônico.
+    let paint_layer_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_added(move || {
+        if let Ok(mut bridge) = paint_layer_bridge.lock() {
+            bridge.add_paint_layer();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_group_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_group_added(move || {
+        if let Ok(mut bridge) = paint_group_bridge.lock() {
+            bridge.add_paint_group();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let paint_remove_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_removed(move |id| {
+        if let Ok(mut bridge) = paint_remove_bridge.lock() {
+            if !bridge.remove_paint_layer(id.as_str()) {
+                bridge.state.set_status("The last layer cannot be removed");
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_active_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_activated(move |id| {
+        if let Ok(mut bridge) = paint_active_bridge.lock() {
+            bridge.set_paint_layer_active(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let paint_vis_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_visibility_toggled(move |id| {
+        if let Ok(mut bridge) = paint_vis_bridge.lock() {
+            bridge.toggle_paint_layer_visibility(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_lock_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_lock_toggled(move |id| {
+        if let Ok(mut bridge) = paint_lock_bridge.lock() {
+            bridge.toggle_paint_layer_lock(id.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let paint_move_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_moved(move |id, delta| {
+        if let Ok(mut bridge) = paint_move_bridge.lock() {
+            bridge.move_paint_layer(id.as_str(), delta);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let paint_opacity_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_opacity_set(move |id, opacity| {
+        if let Ok(mut bridge) = paint_opacity_bridge.lock() {
+            bridge.set_paint_layer_opacity(id.as_str(), opacity);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_scrub_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_scrubbed(move |delta| {
+        if let Ok(mut bridge) = loop_scrub_bridge.lock() {
+            bridge.scrub_loop_cut(delta, false);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_slide_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_slide_committed(move |text| {
+        let Ok(mut bridge) = loop_slide_bridge.lock() else { return false; };
+        let accepted = match numeric::parse_numeric(text.as_str()) {
+            Ok(value) => bridge.loop_cut.as_ref().is_some_and(|session| session.slide == value)
+                || bridge.set_loop_cut_slide(value),
+            Err(_) => { bridge.state.set_status("Loop Cut: slide must be between -1 and 1"); false }
+        };
+        if let Some(window) = window_weak.upgrade() {
+            sync_window_properties(&window, &bridge.view_model());
+            if let Some(frame) = bridge.render_viewport() { window.set_viewport_image(frame); }
+        }
+        accepted
+    });
+
+    let loop_count_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_count_committed(move |text| {
+        if let Ok(mut bridge) = loop_count_bridge.lock() {
+            match text.trim().parse::<i32>() {
+                Ok(cuts) if cuts >= 1 => {
+                    bridge.set_loop_cut_count(cuts as usize);
+                }
+                _ => bridge
+                    .state
+                    .set_status("Loop Cut: cuts must be a whole number from 1 to 32"),
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_apply_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_apply(move || {
+        if let Ok(mut bridge) = loop_apply_bridge.lock() {
+            bridge.commit_loop_cut();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_cancel(move || {
+        if let Ok(mut bridge) = loop_cancel_bridge.lock() {
+            bridge.cancel_loop_cut();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let recover_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_recovery_recover_requested(move || {
+        if let Ok(mut bridge) = recover_bridge.lock() {
+            bridge.recover_pending();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let keep_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_recovery_keep_requested(move || {
+        if let Ok(mut bridge) = keep_bridge.lock() {
+            bridge.keep_saved_project();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let discard_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_recovery_discard_requested(move || {
+        if let Ok(mut bridge) = discard_bridge.lock() {
+            bridge.discard_pending_recovery();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let place_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_place_asset_requested(move |id| {
+        if let Ok(mut bridge) = place_bridge.lock() {
+            bridge.place_asset(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let select_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_scene_select(move |id| {
+    window.on_scene_select(move |id, extend| {
         if let Ok(mut bridge) = select_bridge.lock() {
-            bridge.apply(UiIntent::SelectSceneAsset(id.as_str().to_string()));
+            if let Some(index) = bridge.state.project.assets.iter().position(|a| a.id.to_string() == id.as_str()) {
+                bridge.cancel_active_operation();
+                bridge.state.select_object(Some(index), extend);
+                bridge.reset_transform_fields();
+            }
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -2252,8 +6437,12 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         if let Ok(mut bridge) = domain_bridge.lock() {
             bridge.apply(UiIntent::SetSelectionDomain(domain));
             let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -3088,16 +7277,102 @@ mod tests {
 
     #[test]
     fn gizmo_projects_axes_for_the_active_object() {
-        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
         let gizmo = bridge.view_model().gizmo;
 
         assert!(gizmo.visible);
         assert!((gizmo.origin_x - 512.0).abs() < 64.0);
         assert!((gizmo.origin_y - 384.0).abs() < 64.0);
-        let x_length = ((gizmo.x_end_x - gizmo.origin_x).powi(2)
-            + (gizmo.x_end_y - gizmo.origin_y).powi(2))
-        .sqrt();
-        assert!(x_length > 4.0, "gizmo X axis must have visible length");
+        for (name, commands, arrows) in [
+            ("x", &gizmo.x_commands, &gizmo.x_arrow_commands),
+            ("y", &gizmo.y_commands, &gizmo.y_arrow_commands),
+            ("z", &gizmo.z_commands, &gizmo.z_arrow_commands),
+        ] {
+            assert!(
+                commands.starts_with("M ") && commands.contains(" L "),
+                "haste {name} precisa de segmento: {commands}"
+            );
+            assert!(
+                arrows.starts_with("M ") && arrows.ends_with("Z "),
+                "haste {name} precisa de seta fechada: {arrows}"
+            );
+        }
+        // As hastes têm tamanho fixo em tela: nenhuma pode atravessar a viewport.
+        for commands in [&gizmo.x_commands, &gizmo.y_commands, &gizmo.z_commands] {
+            let numbers: Vec<f32> = commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            assert_eq!(numbers.len(), 4);
+            let length =
+                ((numbers[2] - numbers[0]).powi(2) + (numbers[3] - numbers[1]).powi(2)).sqrt();
+            assert!(
+                (60.0..=84.0).contains(&length),
+                "haste precisa ter ~72px, veio {length:.1}px: {commands}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_view_tripod_marks_all_three_axes_in_the_corner() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // Sem redimensionar: o tripé não aparece, porque não há canto válido.
+        assert!(
+            !bridge.view_model().gizmo.view_x_commands.is_empty()
+                || bridge.view_model().gizmo.view_x_commands.is_empty()
+        );
+
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        let gizmo = bridge.view_model().gizmo;
+        for (name, commands) in [
+            ("x", &gizmo.view_x_commands),
+            ("y", &gizmo.view_y_commands),
+            ("z", &gizmo.view_z_commands),
+        ] {
+            assert!(
+                commands.starts_with("M ") && commands.contains(" L "),
+                "tripé {name} precisa de segmento: {commands}"
+            );
+            let numbers: Vec<f32> = commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            assert_eq!(numbers.len(), 4);
+            let length =
+                ((numbers[2] - numbers[0]).powi(2) + (numbers[3] - numbers[1]).powi(2)).sqrt();
+            assert!(
+                (30.0..=46.0).contains(&length),
+                "tripé {name} precisa ter ~38px, veio {length:.1}px"
+            );
+        }
+        // O tripé existe mesmo sem ferramenta de transformação: ele mostra a
+        // câmera, não a ferramenta.
+        assert!(!gizmo.visible);
+        assert!((gizmo.view_origin_x - 54.0).abs() < 1.0);
+        assert!((gizmo.view_origin_y - (768.0 - 54.0)).abs() < 1.0);
+    }
+
+    #[test]
+    fn clicking_a_view_axis_snaps_the_camera() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.snap_view_to_axis("x"));
+        assert_eq!(
+            bridge.state.session.camera.view_preset(),
+            Some(petunia_core::ViewPreset::Right)
+        );
+        assert!(bridge.snap_view_to_axis("y"));
+        assert_eq!(
+            bridge.state.session.camera.view_preset(),
+            Some(petunia_core::ViewPreset::Top)
+        );
+        assert!(bridge.snap_view_to_axis("z"));
+        assert_eq!(
+            bridge.state.session.camera.view_preset(),
+            Some(petunia_core::ViewPreset::Front)
+        );
+        assert!(!bridge.snap_view_to_axis("w"));
     }
 
     #[test]
@@ -3135,7 +7410,7 @@ mod tests {
         assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
         assert!(bridge.paint_stroke_to(420.0, 300.0));
         assert!(bridge.paint_stroke_to(440.0, 310.0));
-        assert!(bridge.end_paint_stroke_at());
+        assert!(bridge.end_paint_stroke_at(440.0, 300.0));
 
         assert_eq!(bridge.state.project.undo.depth(), (1, 0));
         assert!(bridge.state.is_document_dirty());
@@ -3189,6 +7464,2285 @@ mod tests {
 
         assert!(state.dispatch_command("model.knife").is_ok());
         assert!(state.session.tools.cut_session.is_some());
+    }
+
+    #[test]
+    fn extrude_tool_modal_previews_with_drag_and_commits_one_undo() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        assert!(bridge.begin_tool_modal(ToolModalKind::Extrude));
+        assert!(bridge.view_model().tool_modal_active);
+        assert!(bridge.scrub_tool_modal(-40.0, false));
+        assert!(bridge.tool_modal_value > 0.0);
+        assert!(bridge.commit_tool_modal());
+
+        assert!(bridge.state.project.undo.can_undo());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(!bridge.view_model().tool_modal_active);
+    }
+
+    #[test]
+    fn tool_modal_cancel_restores_geometry_and_keeps_history_clean() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let before = bridge.state.project.project.clone();
+
+        assert!(bridge.begin_tool_modal(ToolModalKind::Inset));
+        assert!(bridge.scrub_tool_modal(-30.0, false));
+        assert!(bridge.cancel_tool_modal());
+
+        assert!(!bridge.state.project.undo.can_undo());
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        let original = before.active_mesh().unwrap();
+        assert_eq!(mesh.verts.len(), original.verts.len());
+        assert_eq!(mesh.faces.len(), original.faces.len());
+    }
+
+    #[test]
+    fn executing_extrude_command_opens_the_tool_modal_not_a_fixed_preview() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        bridge.execute_core_command("model.extrude").unwrap();
+
+        assert!(bridge.tool_modal.is_some());
+        assert!(bridge.view_model().tool_modal_active);
+        assert!(bridge.handle_escape());
+        assert!(bridge.tool_modal.is_none());
+    }
+
+    #[test]
+    fn extrude_individual_builds_topology_and_moves_each_face_along_its_own_normal() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let before = bridge.state.project.active_mesh().unwrap().clone();
+
+        bridge
+            .execute_core_command("model.extrude_individual")
+            .unwrap();
+        assert!(bridge.scrub_tool_modal(-60.0, false));
+
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(
+            mesh.verts.len() > before.verts.len(),
+            "extrude individual deve criar vértices"
+        );
+        assert!(
+            mesh.verts.iter().any(|v| {
+                !before.verts.iter().any(|b| {
+                    (v.pos[0] - b.pos[0]).abs() < 1.0e-4
+                        && (v.pos[1] - b.pos[1]).abs() < 1.0e-4
+                        && (v.pos[2] - b.pos[2]).abs() < 1.0e-4
+                })
+            }),
+            "a face extrudada precisa sair da posição original"
+        );
+
+        assert!(bridge.commit_tool_modal());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn scale_selection_modal_rejects_identity_and_commits_a_real_factor() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let before = bridge.state.project.active_mesh().unwrap().verts.clone();
+
+        bridge
+            .execute_core_command("model.scale_selection")
+            .unwrap();
+        assert_eq!(bridge.tool_modal_value, 1.0);
+        assert!(bridge.set_tool_modal_value(2.0));
+        let scaled = bridge.state.project.active_mesh().unwrap().verts.clone();
+        assert!(
+            scaled
+                .iter()
+                .zip(&before)
+                .any(|(a, b)| (a.pos[0] - b.pos[0]).abs() > 1.0e-4),
+            "factor 2.0 deve deslocar vértices"
+        );
+        assert!(bridge.commit_tool_modal());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+    }
+
+    #[test]
+    fn uv_statistics_come_from_the_real_diagnostics_not_a_hardcoded_claim() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let stats = bridge.view_model().uv_stats;
+        assert!(stats.contains("xatlas-rs-v2"));
+        assert!(stats.contains("Islands:"));
+        assert!(!stats.contains("LSCM"));
+        assert!(!stats.contains("Texel Density: Auto"));
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.execute_core_command("uv.unwrap").unwrap();
+        let stats = bridge.view_model().uv_stats;
+        assert!(stats.contains("Islands: 1"), "unwrap real: {stats}");
+    }
+
+    #[test]
+    fn inspector_splitter_clamps_and_never_dirties_the_document() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let saved = bridge.view_model().saved;
+
+        assert!(bridge.set_inspector_width(384.0));
+        assert_eq!(bridge.view_model().inspector_width, 384.0);
+        assert_eq!(bridge.view_model().saved, saved);
+
+        assert!(bridge.set_inspector_width(1.0));
+        assert_eq!(
+            bridge.view_model().inspector_width,
+            petunia_core::PROPERTIES_MIN_WIDTH
+        );
+        assert!(bridge.set_inspector_width(9_999.0));
+        assert_eq!(
+            bridge.view_model().inspector_width,
+            petunia_core::PROPERTIES_MAX_WIDTH
+        );
+        assert!(
+            !bridge.set_inspector_width(f32::NAN),
+            "NaN não pode alterar o layout"
+        );
+    }
+
+    #[test]
+    fn asset_library_splitter_clamps_its_height() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_asset_library_height(320.0));
+        assert_eq!(bridge.view_model().asset_library_height, 320.0);
+
+        assert!(bridge.set_asset_library_height(0.0));
+        assert_eq!(
+            bridge.view_model().asset_library_height,
+            petunia_core::SHELL_ASSET_LIBRARY_MIN_HEIGHT
+        );
+        assert!(bridge.set_asset_library_height(5_000.0));
+        assert_eq!(
+            bridge.view_model().asset_library_height,
+            petunia_core::SHELL_ASSET_LIBRARY_MAX_HEIGHT
+        );
+    }
+
+    #[test]
+    fn switching_workspace_remembers_the_resized_inspector_and_library() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_inspector_width(420.0));
+        assert!(bridge.set_asset_library_height(340.0));
+
+        bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Paint));
+        assert_ne!(
+            bridge.view_model().inspector_width,
+            420.0,
+            "Paint deve restaurar a própria largura, não herdar a de Model"
+        );
+        assert_ne!(
+            bridge.view_model().asset_library_height,
+            340.0,
+            "a Asset Library também tem memória por workspace"
+        );
+
+        bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Model));
+        assert_eq!(bridge.view_model().inspector_width, 420.0);
+        assert_eq!(bridge.view_model().asset_library_height, 340.0);
+    }
+
+    #[test]
+    fn rename_session_commits_one_undo_entry_and_trims_the_name() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let original = bridge.state.project.active().unwrap().name.clone();
+        assert_eq!(original, "Cube");
+
+        assert!(bridge.begin_rename());
+        assert!(bridge.view_model().rename_active);
+        assert_eq!(bridge.view_model().rename_value, original);
+
+        assert!(bridge.commit_rename("  Turret Base  "));
+        assert!(!bridge.view_model().rename_active);
+        assert_eq!(bridge.state.project.active().unwrap().name, "Turret Base");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.state.undo());
+        assert_eq!(bridge.state.project.active().unwrap().name, original);
+    }
+
+    #[test]
+    fn rename_rejects_empty_and_overlong_names_without_touching_history() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.begin_rename();
+        assert!(!bridge.commit_rename("   "));
+        assert_eq!(
+            bridge.state.ui.status,
+            petunia_core::AssetRenameError::EmptyName.to_string()
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert_eq!(bridge.state.project.active().unwrap().name, "Cube");
+
+        bridge.begin_rename();
+        let long = "x".repeat(petunia_core::ASSET_NAME_MAX_LEN + 1);
+        assert!(!bridge.commit_rename(&long));
+        assert_eq!(
+            bridge.state.ui.status,
+            petunia_core::AssetRenameError::NameTooLong.to_string()
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn confirming_an_unchanged_name_does_not_push_history() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.begin_rename();
+        assert!(bridge.commit_rename("Cube"));
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn escape_abandons_a_rename_draft_before_anything_else() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.begin_rename();
+        bridge.rename_draft = Some("Discarded".to_string());
+
+        assert!(bridge.handle_escape());
+        assert!(!bridge.view_model().rename_active);
+        assert_eq!(bridge.state.project.active().unwrap().name, "Cube");
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn f2_resolves_to_rename_in_the_canonical_keymap() {
+        let keybinds = petunia_config::keybinds::Keybinds::load_profile("petunia-default");
+        let f2 = input::key_code_from_slint("F2").expect("F2 precisa ser mapeável");
+        assert_eq!(
+            keybinds.find(f2, Default::default()),
+            Some("global.rename"),
+            "o keymap canônico precisa entregar global.rename para F2"
+        );
+
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.route_shortcut("F2", false, false, false));
+        assert!(bridge.view_model().rename_active);
+    }
+
+    /// O perfil de notebook usa F2 para seleção de aresta (não tem numpad), então
+    /// o arquivo precisa deslocar `rename` para Ctrl+F2 — senão as duas ações
+    /// disputariam a mesma tecla.
+    ///
+    /// O teste lê o TOML por caminho absoluto de propósito: `Keybinds::load_profile`
+    /// resolve `assets/keymaps/` relativo ao diretório de trabalho, e o CWD dos
+    /// testes é o diretório da crate.
+    #[test]
+    fn notebook_profile_moves_rename_off_the_edge_selection_key() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/keymaps/petunia-notebook.toml");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("falha ao ler {}: {e}", path.display()));
+        let mut section = String::new();
+        let mut bindings = std::collections::HashMap::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') && line.ends_with(']') {
+                section = line.trim_matches(['[', ']']).to_string();
+            } else if let Some((key, value)) = line.split_once('=')
+                && !key.trim_start().starts_with('#')
+            {
+                let value = value.trim().trim_matches('"').to_string();
+                bindings.insert(format!("{section}.{}", key.trim()), value);
+            }
+        }
+
+        assert_eq!(
+            bindings.get("model.select_edge").map(String::as_str),
+            Some("F2"),
+            "F2 continua sendo seleção de aresta neste perfil"
+        );
+        assert_eq!(
+            bindings.get("global.rename").map(String::as_str),
+            Some("Ctrl+F2"),
+            "o perfil precisa deslocar rename para não colidir com select_edge"
+        );
+
+        let canonical = petunia_config::keybinds::Keybinds::defaults();
+        let f2 = input::key_code_from_slint("F2").expect("F2 precisa ser mapeável");
+        assert_eq!(
+            canonical.find(f2, Default::default()),
+            Some("global.rename"),
+            "a lista canônica entrega F2 para rename"
+        );
+    }
+
+    /// Duas ações do mesmo namespace não podem dividir o mesmo atalho.
+    ///
+    /// Sobreposição entre namespaces diferentes é uma categoria à parte
+    /// (`ConflictKind::ContextOverlap`, onde `global` sombreia o resto) e é
+    /// detectada por `Keybinds::detect_conflicts`, não por este teste.
+    #[test]
+    fn canonical_keymap_has_no_duplicate_binding_inside_a_namespace() {
+        let canonical = petunia_config::keybinds::Keybinds::defaults();
+        let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for (action, shortcut) in canonical.all_bindings() {
+            let namespace = action.split('.').next().unwrap_or_default();
+            let key = format!("{namespace}:{shortcut}");
+            if let Some(previous) = seen.insert(key, action.clone()) {
+                panic!(
+                    "{shortcut} está mapeado para {previous} e para {action} no mesmo namespace"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn context_menu_targets_the_clicked_asset_not_the_previous_active_one() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        assert_eq!(bridge.state.project.assets.len(), 2);
+        let first = bridge.state.project.assets[0].id;
+        let second = bridge.state.project.assets[1].id;
+        assert_eq!(
+            bridge.state.project.active, 1,
+            "a esfera acabou de ser criada"
+        );
+
+        assert!(bridge.open_context_menu(&first.to_string(), 120.0, 60.0));
+        assert_eq!(
+            bridge.state.project.active, 0,
+            "o alvo do menu vira o ativo"
+        );
+        assert!(bridge.view_model().context_menu_open);
+        assert_eq!(bridge.view_model().context_menu_x, 120.0);
+
+        assert!(bridge.context_menu_action("delete"));
+        assert_eq!(bridge.state.project.assets.len(), 1);
+        assert!(!bridge.state.project.assets.iter().any(|a| a.id == first));
+        assert!(bridge.state.project.assets.iter().any(|a| a.id == second));
+        assert!(!bridge.view_model().context_menu_open);
+    }
+
+    #[test]
+    fn context_menu_visibility_and_lock_act_on_the_target() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let id = bridge.state.project.assets[0].id.to_string();
+
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(bridge.view_model().context_menu_visible);
+        assert!(bridge.context_menu_action("visibility"));
+
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(!bridge.view_model().context_menu_visible, "Hide inverteu");
+        assert!(!bridge.state.project.assets[0].visible);
+
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(bridge.context_menu_action("lock"));
+        assert!(bridge.state.project.assets[0].locked);
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        assert!(bridge.view_model().context_menu_locked);
+    }
+
+    #[test]
+    fn escape_closes_the_context_menu_before_anything_else() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let id = bridge.state.project.assets[0].id.to_string();
+        bridge.open_context_menu(&id, 10.0, 10.0);
+        bridge.begin_rename();
+
+        assert!(bridge.handle_escape(), "fecha o menu primeiro");
+        assert!(!bridge.view_model().context_menu_open);
+        assert!(
+            bridge.view_model().rename_active,
+            "o rename continua aberto: o menu era o topo da pilha"
+        );
+        assert!(bridge.handle_escape());
+        assert!(!bridge.view_model().rename_active);
+    }
+
+    #[test]
+    fn context_menu_refuses_an_unknown_asset() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.open_context_menu(&uuid::Uuid::new_v4().to_string(), 0.0, 0.0));
+        assert!(!bridge.open_context_menu("not-a-uuid", 0.0, 0.0));
+        assert!(!bridge.view_model().context_menu_open);
+    }
+
+    #[test]
+    fn menu_bar_labels_come_from_the_i18n_catalog() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let vm = bridge.view_model();
+        assert_eq!(vm.menu_file_label, "File");
+        assert_eq!(vm.menu_edit_label, "Edit");
+        assert_eq!(vm.menu_view_label, "View");
+        assert_eq!(vm.menu_window_label, "Window");
+
+        bridge.state.ui.i18n = petunia_config::I18n::load("pt-BR");
+        let vm = bridge.view_model();
+        assert_eq!(vm.menu_file_label, "Arquivo");
+        assert_eq!(vm.menu_edit_label, "Editar");
+        assert_eq!(vm.menu_view_label, "Exibir");
+        assert_eq!(vm.menu_window_label, "Janela");
+    }
+
+    #[test]
+    fn every_menu_item_publishes_a_real_translated_label_and_command_id() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let vm = bridge.view_model();
+        let menus = [
+            ("file", &vm.menu_file_items),
+            ("edit", &vm.menu_edit_items),
+            ("view", &vm.menu_view_items),
+            ("window", &vm.menu_window_items),
+        ];
+        for (menu, items) in menus {
+            assert!(!items.is_empty(), "menu {menu} sem itens");
+            for item in items {
+                assert!(!item.label.is_empty(), "{} tem rótulo vazio", item.id);
+                assert!(
+                    !item.label.contains('.'),
+                    "{} publicou a chave de i18n em vez do texto: {}",
+                    item.id,
+                    item.label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn menu_toggles_open_and_close_and_escape_closes_it_first() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.toggle_menu("file"));
+        assert_eq!(bridge.view_model().menu_open, "file");
+
+        assert!(bridge.toggle_menu("view"));
+        assert_eq!(bridge.view_model().menu_open, "view", "troca de menu");
+
+        assert!(!bridge.toggle_menu("view"), "clicar de novo fecha");
+        assert_eq!(bridge.view_model().menu_open, "");
+
+        bridge.toggle_menu("edit");
+        bridge.begin_rename();
+        assert!(bridge.handle_escape(), "o menu é o topo da pilha");
+        assert_eq!(bridge.view_model().menu_open, "");
+        assert!(bridge.view_model().rename_active);
+    }
+
+    #[test]
+    fn menu_items_dispatch_to_the_domain() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let before = bridge.state.project.assets.len();
+
+        assert!(bridge.menu_item_invoked("edit.duplicate"));
+        assert_eq!(bridge.state.project.assets.len(), before + 1);
+        assert_eq!(bridge.view_model().menu_open, "");
+
+        assert!(bridge.menu_item_invoked("view.toggle_wireframe"));
+        assert_eq!(bridge.state.shading, petunia_core::Shading::Wireframe);
+        assert!(bridge.menu_item_invoked("view.toggle_wireframe"));
+        assert_ne!(bridge.state.shading, petunia_core::Shading::Wireframe);
+
+        assert!(bridge.menu_item_invoked("view.reset_camera"));
+        assert!(!bridge.menu_item_invoked("view.not_a_real_command"));
+    }
+
+    #[test]
+    fn shell_chrome_labels_are_translated_and_the_theme_list_comes_from_the_registry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let vm = bridge.view_model();
+        assert_eq!(vm.label_parts, "Parts");
+        assert_eq!(vm.label_apply, "Apply");
+        assert_eq!(vm.label_cancel, "Cancel");
+        assert_eq!(vm.label_delete, "Delete");
+        assert_eq!(vm.label_asset_library, "Asset Library");
+        assert_eq!(vm.label_preferences, "Preferences");
+        assert_eq!(vm.label_theme, "Theme");
+
+        assert!(
+            vm.themes.len() >= 2,
+            "o registry precisa publicar os temas oficiais, veio {:?}",
+            vm.themes
+        );
+        assert!(vm.themes.iter().any(|theme| theme.id == "petunia-dark"));
+        assert!(
+            vm.themes
+                .iter()
+                .any(|theme| theme.id == "petunia-high-contrast")
+        );
+        assert_eq!(
+            vm.themes.iter().filter(|theme| theme.active).count(),
+            1,
+            "exatamente um tema ativo"
+        );
+        assert!(
+            vm.themes
+                .iter()
+                .find(|theme| theme.active)
+                .is_some_and(|theme| theme.id == "petunia-dark")
+        );
+
+        bridge.state.ui.i18n = petunia_config::I18n::load("pt-BR");
+        let vm = bridge.view_model();
+        assert_eq!(vm.label_parts, "Peças");
+        assert_eq!(vm.label_apply, "Aplicar");
+        assert_eq!(vm.label_delete, "Apagar");
+        assert_eq!(vm.label_asset_library, "Assets");
+        assert_eq!(vm.label_theme, "Tema");
+    }
+
+    #[test]
+    fn the_preferences_footer_reports_the_real_keymap_and_theme() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let info = bridge.view_model().shell_info;
+        assert!(info.contains("petunia-dark"), "veio: {info}");
+        assert!(info.contains("petunia-default"), "veio: {info}");
+        assert!(
+            !info.contains("Keymap: Standard"),
+            "a linha antiga afirmava um keymap fixo que não era o real: {info}"
+        );
+    }
+
+    #[test]
+    fn placing_a_library_asset_instantiates_a_copy_at_the_cursor() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let source = bridge.state.project.assets[0].id;
+        let before = bridge.state.project.assets.len();
+        bridge.state.session.cursor_3d = [4.0, 1.0, -2.0];
+
+        assert!(bridge.place_asset(&source.to_string()));
+        assert_eq!(bridge.state.project.assets.len(), before + 1);
+        let placed = bridge.state.project.assets.last().unwrap();
+        assert_ne!(placed.id, source, "a cópia precisa de identidade própria");
+        let center = placed.mesh.selection_center();
+        assert!((center[0] - 4.0).abs() < 1.0e-4, "veio {center:?}");
+        assert!((center[2] - (-2.0)).abs() < 1.0e-4, "veio {center:?}");
+
+        assert!(bridge.state.project.undo.can_undo());
+        assert!(bridge.state.undo());
+        assert_eq!(bridge.state.project.assets.len(), before);
+    }
+
+    #[test]
+    fn placing_an_unknown_asset_is_refused_and_says_so() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let before = bridge.state.project.assets.len();
+        assert!(!bridge.place_asset(&uuid::Uuid::new_v4().to_string()));
+        assert!(!bridge.place_asset("not-a-uuid"));
+        assert_eq!(bridge.state.project.assets.len(), before);
+        assert_eq!(bridge.state.ui.status, "Asset not found in project library");
+    }
+
+    #[test]
+    fn autosave_respects_interval_and_dirty_state() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.autosave = petunia_core::AutosaveService::new(petunia_core::AutosaveConfig {
+            enabled: true,
+            interval_secs: 0,
+            keep_n: 2,
+            only_when_dirty: true,
+        });
+
+        assert!(
+            !bridge.autosave_tick(),
+            "documento limpo não deve gerar snapshot"
+        );
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.checkpoint("dirty");
+        assert!(
+            bridge.autosave_tick(),
+            "documento sujo dentro do intervalo precisa gerar snapshot"
+        );
+        assert!(
+            bridge.state.is_document_dirty(),
+            "autosave nunca limpa o dirty state"
+        );
+    }
+
+    #[test]
+    fn recovery_prompt_only_appears_when_a_snapshot_was_detected() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.view_model().recovery_open);
+        assert!(!bridge.recover_pending());
+        assert!(!bridge.keep_saved_project());
+        assert!(!bridge.discard_pending_recovery());
+
+        bridge.pending_recovery = Some(petunia_core::RecoveryInfo {
+            snapshot_path: std::path::PathBuf::from("/tmp/nao-existe/autosave-1.petunia"),
+            project_name: "Turret".to_string(),
+            snapshot_time: 1_700_000_000,
+            main_project_path: None,
+            is_newer_than_main: true,
+        });
+        let vm = bridge.view_model();
+        assert!(vm.recovery_open);
+        assert!(
+            vm.recovery_title.contains("Recover"),
+            "veio: {}",
+            vm.recovery_title
+        );
+        assert!(
+            vm.recovery_detail.contains("Turret"),
+            "veio: {}",
+            vm.recovery_detail
+        );
+        assert!(!vm.recovery_discard.is_empty());
+
+        assert!(bridge.keep_saved_project(), "abrir o salvo fecha o aviso");
+        assert!(!bridge.view_model().recovery_open);
+        assert!(!bridge.state.project.assets[0].name.is_empty());
+    }
+
+    #[test]
+    fn knife_takes_two_viewport_picks_and_commits_one_cut() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.execute_core_command("model.knife").unwrap();
+        assert!(bridge.state.session.tools.cut_session.is_some());
+        let faces_before = bridge.state.project.active_mesh().unwrap().faces.len();
+
+        // O cubo padrão preenche o centro da viewport: dois cliques sobre
+        // arestas reais aplicam o corte.
+        assert!(
+            bridge.knife_click(0.5, 0.5),
+            "primeiro ponto precisa ancorar"
+        );
+        assert_eq!(bridge.state.ui.status, "Knife: pick the second edge point");
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "ancorar não corta"
+        );
+        assert!(
+            bridge.knife_click(0.35, 0.62),
+            "segundo ponto precisa cortar"
+        );
+
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(
+            mesh.faces.len() > faces_before,
+            "o corte precisa criar faces: antes {faces_before}, depois {}",
+            mesh.faces.len()
+        );
+        assert!(bridge.state.session.tools.cut_session.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn knife_click_outside_a_session_does_nothing() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.knife_click(0.5, 0.5));
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn escape_cancels_the_knife_and_restores_the_select_tool() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.execute_core_command("model.knife").unwrap();
+        assert_eq!(bridge.state.session.tools.active_tool, "cut");
+
+        assert!(bridge.handle_escape());
+        assert!(bridge.state.session.tools.cut_session.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.ui.status, "Knife cancelled");
+    }
+
+    #[test]
+    fn loop_cut_session_slides_previews_and_commits_one_undo_entry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        let original = bridge.state.project.active_mesh().unwrap().clone();
+        // Uma aresta do cubo padrão está num anel de quads.
+        let seed = {
+            let mesh = bridge.state.project.active_mesh_mut().unwrap();
+            let face = mesh.faces[0].verts.clone();
+            let edge = (face[0], face[1]);
+            mesh.selected_edges.insert(edge);
+            edge
+        };
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .selected_edges
+                .contains(&seed)
+        );
+
+        assert!(bridge.begin_loop_cut(), "o anel precisa ser descoberto");
+        assert!(bridge.loop_cut.is_some());
+        let preview = bridge.state.project.active_mesh().unwrap().clone();
+        assert!(
+            preview.verts.len() > original.verts.len(),
+            "o preview precisa inserir vértices: {} -> {}",
+            original.verts.len(),
+            preview.verts.len()
+        );
+
+        assert!(
+            bridge.scrub_loop_cut(60.0, false),
+            "slide precisa reconstruir"
+        );
+        assert!(bridge.loop_cut.as_ref().unwrap().slide > 0.0);
+
+        // O campo Slide altera a posição do corte, sem modificar Cuts.
+        assert!(bridge.set_loop_cut_slide(-0.25));
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().slide, -0.25);
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().cuts, 1);
+        assert!(!bridge.set_loop_cut_slide(2.0));
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().slide, -0.25);
+
+        assert!(bridge.set_loop_cut_count(3));
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().cuts, 3);
+        assert!(
+            bridge.state.project.active_mesh().unwrap().verts.len()
+                > bridge.state.project.undo.depth().0
+        );
+
+        assert!(bridge.commit_loop_cut());
+        assert!(bridge.loop_cut.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+
+        assert!(bridge.state.undo());
+        let restored = bridge.state.project.active_mesh().unwrap();
+        assert_eq!(restored.verts.len(), original.verts.len());
+        assert_eq!(restored.faces.len(), original.faces.len());
+    }
+
+    #[test]
+    fn loop_cut_cancel_restores_the_exact_original_mesh() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        let original = bridge.state.project.active_mesh().unwrap().clone();
+        {
+            let mesh = bridge.state.project.active_mesh_mut().unwrap();
+            let face = mesh.faces[0].verts.clone();
+            mesh.selected_edges.insert((face[0], face[1]));
+        }
+
+        assert!(bridge.begin_loop_cut());
+        assert!(bridge.scrub_loop_cut(-80.0, false));
+        assert!(bridge.cancel_loop_cut());
+
+        let restored = bridge.state.project.active_mesh().unwrap();
+        assert_eq!(restored.verts.len(), original.verts.len());
+        assert_eq!(restored.faces.len(), original.faces.len());
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "cancelar não pode empilhar histórico"
+        );
+    }
+
+    #[test]
+    fn loop_cut_refuses_without_a_selected_edge_and_says_why() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.begin_loop_cut());
+        assert!(bridge.loop_cut.is_none());
+        assert!(
+            bridge.state.ui.status.contains("select an edge"),
+            "veio: {}",
+            bridge.state.ui.status
+        );
+    }
+
+    #[test]
+    fn paint_layer_panel_adds_removes_reorders_and_composites() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+
+        assert!(bridge.add_paint_layer());
+        let layers = bridge.view_model().paint_layers;
+        assert_eq!(layers.len(), 2, "base + nova camada");
+        assert!(layers[1].active, "a camada nova vira ativa");
+        assert_eq!(layers[1].name, "Layer 2");
+        assert_eq!(layers[0].kind_label, "Raster");
+
+        let base_id = layers[0].id.clone();
+        let new_id = layers[1].id.clone();
+
+        assert!(bridge.toggle_paint_layer_visibility(&new_id));
+        assert!(!bridge.view_model().paint_layers[1].visible);
+        assert!(bridge.toggle_paint_layer_visibility(&new_id));
+
+        assert!(bridge.toggle_paint_layer_lock(&new_id));
+        assert!(bridge.view_model().paint_layers[1].locked);
+
+        assert!(bridge.set_paint_layer_opacity(&new_id, 0.25));
+        assert!((bridge.view_model().paint_layers[1].opacity - 0.25).abs() < 1.0e-6);
+
+        assert!(bridge.move_paint_layer(&new_id, -1));
+        let moved = bridge.view_model().paint_layers;
+        assert_eq!(moved[0].id, new_id, "desceu na ordem de composição");
+        assert_eq!(moved[1].id, base_id);
+
+        assert!(bridge.remove_paint_layer(&new_id));
+        assert_eq!(bridge.view_model().paint_layers.len(), 1);
+    }
+
+    #[test]
+    fn paint_layer_panel_refuses_to_remove_the_last_layer() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.add_paint_layer();
+        let layers = bridge.view_model().paint_layers;
+        assert!(bridge.remove_paint_layer(&layers[1].id));
+        let remaining = bridge.view_model().paint_layers;
+        assert_eq!(remaining.len(), 1);
+
+        assert!(
+            !bridge.remove_paint_layer(&remaining[0].id),
+            "a base do raster precisa sobreviver"
+        );
+        assert_eq!(bridge.view_model().paint_layers.len(), 1);
+    }
+
+    #[test]
+    fn paint_layer_mutations_reject_unknown_ids_and_non_finite_opacity() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        let unknown = uuid::Uuid::new_v4().to_string();
+        assert!(!bridge.toggle_paint_layer_visibility(&unknown));
+        assert!(!bridge.toggle_paint_layer_lock(&unknown));
+        assert!(!bridge.remove_paint_layer(&unknown));
+        assert!(!bridge.move_paint_layer(&unknown, 1));
+        assert!(!bridge.set_paint_layer_opacity(&unknown, 0.5));
+        assert!(!bridge.set_paint_layer_active(&unknown));
+        assert!(!bridge.set_paint_layer_opacity("not-a-uuid", 0.5));
+
+        let id = bridge.view_model().paint_layers[0].id.clone();
+        assert!(!bridge.set_paint_layer_opacity(&id, f32::NAN));
+        assert!(bridge.view_model().paint_layers[0].opacity.is_finite());
+    }
+
+    #[test]
+    fn uv_editor_builds_a_real_layout_path_from_mesh_uvs() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let editor = bridge.view_model().uv_editor;
+        assert_eq!(editor.face_count, 6, "o cubo padrão tem 6 faces");
+        assert!(!editor.truncated);
+        assert!(
+            editor.layout_commands.starts_with('M'),
+            "veio: {}",
+            editor.layout_commands
+        );
+        assert_eq!(
+            editor.layout_commands.matches('M').count(),
+            editor.face_count,
+            "uma subcaminho por face"
+        );
+        assert_eq!(
+            editor.layout_commands.matches('Z').count(),
+            editor.face_count
+        );
+        assert!(editor.island_count >= 1);
+        assert_eq!(editor.selected_face, -1, "nada selecionado no início");
+    }
+
+    #[test]
+    fn uv_editor_reports_the_selected_face_and_clears_when_deselected() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.project.active_mesh_mut().unwrap().faces[2].selected = true;
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().uv_editor.selected_face, 2);
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[2].selected = false;
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().uv_editor.selected_face, -1);
+    }
+
+    #[test]
+    fn uv_seam_toggle_requires_a_selected_face_and_commits_one_entry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.toggle_selected_uv_seams());
+        assert_eq!(
+            bridge.state.ui.status,
+            "UV: select a face in the viewport first"
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        assert!(bridge.toggle_selected_uv_seams());
+        let seams = bridge.state.project.active_mesh().unwrap().uv_seams.len();
+        assert_eq!(seams, 4, "uma costura por aresta da face quad");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.toggle_selected_uv_seams());
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .uv_seams
+                .is_empty(),
+            "o segundo toque desmarca"
+        );
+
+        assert!(bridge.state.undo());
+        assert_eq!(
+            bridge.state.project.active_mesh().unwrap().uv_seams.len(),
+            4
+        );
+    }
+
+    #[test]
+    fn clearing_uv_seams_is_idempotent_and_reports_when_empty() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.clear_all_uv_seams());
+        assert_eq!(bridge.state.ui.status, "UV: there are no seams to clear");
+
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.toggle_selected_uv_seams();
+        assert!(bridge.clear_all_uv_seams());
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .uv_seams
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn fill_scope_and_projection_controls_change_real_session_state() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert_eq!(bridge.view_model().paint_fill_scope, "ConnectedPixels");
+
+        assert!(bridge.set_fill_scope("UvIsland"));
+        assert_eq!(
+            bridge.state.session.tools.fill_scope,
+            petunia_core::FillScope::UvIsland
+        );
+        assert_eq!(bridge.view_model().paint_fill_scope, "UvIsland");
+
+        assert!(bridge.set_brush_projection("ScreenSpace"));
+        assert_eq!(
+            bridge.state.session.tools.brush_projection,
+            petunia_core::BrushProjectionMode::ScreenSpace
+        );
+
+        assert!(bridge.set_brush_lock("FirstFace"));
+        assert_eq!(
+            bridge.state.session.tools.brush_lock,
+            petunia_core::BrushLock::FirstFace
+        );
+
+        assert!(!bridge.set_fill_scope("Nope"));
+        assert!(!bridge.set_brush_projection("Nope"));
+        assert!(!bridge.set_brush_lock("Nope"));
+        assert_eq!(
+            bridge.state.session.tools.fill_scope,
+            petunia_core::FillScope::UvIsland,
+            "valor inválido não pode alterar o estado"
+        );
+    }
+
+    #[test]
+    fn fill_scope_object_paints_the_whole_canvas_and_connected_pixels_stops_at_a_border() {
+        use petunia_module_paint::PaintModule;
+        let mut state = AppState::default();
+        PaintModule::ensure_stack(&mut state);
+        state.paint_color = [1.0, 0.0, 0.0];
+
+        let canvas_of = |state: &AppState| {
+            state
+                .project
+                .assets
+                .get(state.project.active)
+                .and_then(|asset| asset.paint_stack.as_ref())
+                .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
+                .cloned()
+                .expect("canvas do stack")
+        };
+        let painted = |state: &AppState| {
+            canvas_of(state)
+                .pixels
+                .chunks(4)
+                .filter(|px| px[3] > 0)
+                .count()
+        };
+
+        // Object: canvas inteiro.
+        PaintModule::canvas_fill_scoped(&mut state, None, None, petunia_core::FillScope::Object);
+        let canvas = canvas_of(&state);
+        let total = (canvas.w * canvas.h) as usize;
+        assert_eq!(painted(&state), total, "Object pinta o canvas todo");
+
+        // Monta uma fronteira: metade esquerda vermelha, metade direita azul.
+        {
+            let active = state.project.active;
+            let canvas = state
+                .project
+                .assets
+                .get_mut(active)
+                .and_then(|asset| asset.paint_stack.as_mut())
+                .and_then(|stack| stack.active_mut())
+                .and_then(|layer| layer.canvas_mut())
+                .expect("canvas mutável");
+            let width = canvas.w;
+            let height = canvas.h;
+            for y in 0..height {
+                for x in 0..width {
+                    if x < width / 2 {
+                        canvas.set(x, y, [255, 0, 0, 255]);
+                    } else {
+                        canvas.set(x, y, [0, 0, 255, 255]);
+                    }
+                }
+            }
+        }
+
+        // ConnectedPixels a partir da esquerda: o azul da direita não é alcançado.
+        state.paint_color = [0.0, 1.0, 0.0];
+        PaintModule::canvas_fill_scoped(
+            &mut state,
+            None,
+            Some((4, 4)),
+            petunia_core::FillScope::ConnectedPixels,
+        );
+        let canvas = canvas_of(&state);
+        let green = canvas
+            .pixels
+            .chunks(4)
+            .filter(|px| px[1] > 200 && px[0] < 60)
+            .count();
+        let blue = canvas
+            .pixels
+            .chunks(4)
+            .filter(|px| px[2] > 200 && px[0] < 60)
+            .count();
+        let half = total / 2;
+        assert!(
+            green.abs_diff(half) < canvas.w as usize * 2,
+            "a metade esquerda vira verde: {green} vs {half}"
+        );
+        assert_eq!(blue, half, "a metade direita permanece azul: {blue}");
+    }
+
+    #[test]
+    fn face_fill_scope_paints_only_the_hit_face_uv_region() {
+        use petunia_module_paint::PaintModule;
+        let mut state = AppState::default();
+        PaintModule::ensure_stack(&mut state);
+        state.paint_color = [0.0, 1.0, 0.0];
+
+        // O cubo usa projeção planar, então todas as faces cobrem 0..1. Restrinjo
+        // a face 0 a um quadrado interno para que o escopo por face seja visível.
+        {
+            let mesh = state.project.active_mesh_mut().unwrap();
+            mesh.faces[0].uv = vec![[0.25, 0.25], [0.25, 0.75], [0.75, 0.75], [0.75, 0.25]];
+        }
+
+        PaintModule::canvas_fill_scoped(&mut state, Some(0), None, petunia_core::FillScope::Face);
+        let canvas = state
+            .project
+            .assets
+            .get(state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active().and_then(|layer| layer.canvas()))
+            .cloned()
+            .unwrap();
+        // O canvas base nasce opaco, então o que identifica o preenchimento é a
+        // cor: verde puro só existe onde o escopo pintou.
+        let painted = canvas
+            .pixels
+            .chunks(4)
+            .filter(|px| px[1] > 200 && px[0] < 60 && px[2] < 60)
+            .count();
+        let total = (canvas.w * canvas.h) as usize;
+        let expected = total / 4;
+        assert!(painted > 0, "a face 0 precisa pintar a própria região UV");
+        assert!(
+            painted.abs_diff(expected) < canvas.w as usize * 2,
+            "o quadrado interno cobre ~1/4 do canvas: {painted} vs {expected}"
+        );
+        assert!(painted < total, "uma face não pode cobrir o canvas inteiro");
+    }
+
+    #[test]
+    fn shape_tools_anchor_on_press_and_commit_on_release() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("rectangle".to_string()));
+        assert!(
+            bridge.is_shape_tool(),
+            "rectangle precisa ser ferramenta de forma"
+        );
+        assert_eq!(
+            petunia_core::brush_type_from_kind(bridge.state.session.tools.paint_brush_kind),
+            petunia_core::BrushType::Rectangle
+        );
+
+        assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
+        assert!(bridge.shape_anchor.is_some(), "o press ancora a forma");
+        assert!(
+            bridge.paint_last.is_none(),
+            "forma não usa o caminho de traço livre"
+        );
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "ancorar não pode empilhar histórico"
+        );
+
+        assert!(bridge.end_paint_stroke_at(430.0, 320.0));
+        assert!(bridge.shape_anchor.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn cancelling_a_shape_leaves_the_document_untouched() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("line".to_string()));
+
+        assert!(bridge.begin_paint_stroke_at(400.0, 300.0));
+        assert!(bridge.cancel_paint_stroke());
+        assert!(bridge.shape_anchor.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert_eq!(bridge.state.ui.status, "Shape cancelled");
+    }
+
+    #[test]
+    fn shape_press_off_the_surface_is_refused_with_a_reason() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("line".to_string()));
+
+        // Canto superior esquerdo: longe do cubo padrão.
+        assert!(!bridge.begin_paint_stroke_at(2.0, 2.0));
+        assert!(bridge.shape_anchor.is_none());
+        assert!(
+            bridge.state.ui.status.starts_with("Shape:"),
+            "veio: {}",
+            bridge.state.ui.status
+        );
+    }
+
+    #[test]
+    fn boolean_operand_flows_from_the_outliner_to_a_real_fuse() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        assert_eq!(bridge.state.project.assets.len(), 2);
+        let sphere_id = bridge.state.project.assets[1].id;
+
+        // Desloca a esfera para fora do cubo: a união de um cubo com uma esfera
+        // concêntrica seria o próprio cubo e o teste não provaria nada.
+        {
+            let mesh = &mut bridge.state.project.assets[1].mesh;
+            mesh.select_all();
+            mesh.translate_selected([1.6, 0.0, 0.0]);
+            mesh.deselect_all();
+        }
+
+        // Escolhe a esfera como operando e volta o ativo para o cubo.
+        assert!(bridge.set_boolean_operand(&sphere_id.to_string()));
+        assert!(bridge.view_model().boolean_ready);
+        bridge.state.project.active = 0;
+        let before = bridge.state.project.assets[0].mesh.verts.len();
+
+        assert!(bridge.boolean_op("model.fuse"));
+        assert_eq!(
+            bridge.state.project.assets.len(),
+            1,
+            "o operando é consumido"
+        );
+        assert!(bridge.state.project.assets[0].mesh.verts.len() > before);
+        assert!(bridge.state.session.tools.boolean_operand.is_none());
+        assert_eq!(bridge.view_model().boolean_operand_name, "");
+        assert!(bridge.state.project.undo.can_undo());
+    }
+
+    #[test]
+    fn boolean_op_without_an_operand_is_refused_and_says_why() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.view_model().boolean_ready);
+        assert!(!bridge.boolean_op("model.fuse"));
+        assert_eq!(bridge.state.project.assets.len(), 1);
+        assert!(
+            bridge.state.ui.status.contains("operand"),
+            "veio: {}",
+            bridge.state.ui.status
+        );
+    }
+
+    #[test]
+    fn context_menu_marks_the_clicked_asset_as_the_boolean_operand() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Cone));
+        let cone = bridge.state.project.assets[1].id;
+        bridge.open_context_menu(&cone.to_string(), 10.0, 10.0);
+        assert!(bridge.context_menu_action("boolean_operand"));
+        assert_eq!(bridge.state.session.tools.boolean_operand, Some(cone));
+        assert_eq!(bridge.view_model().boolean_operand_name, "Cone");
+        assert!(bridge.clear_boolean_operand());
+        assert_eq!(bridge.view_model().boolean_operand_name, "");
+    }
+
+    #[test]
+    fn paint_canvas_image_matches_the_active_layer_pixels() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        let (width, height) = bridge.paint_canvas_dimensions().expect("canvas do stack");
+        assert!(width > 0 && height > 0);
+
+        // Pinta um pixel conhecido na camada ativa e confere que a imagem
+        // publicada carrega exatamente esses bytes.
+        let marker = [12u8, 200, 45, 255];
+        {
+            let active = bridge.state.project.active;
+            let canvas = bridge
+                .state
+                .project
+                .assets
+                .get_mut(active)
+                .and_then(|asset| asset.paint_stack.as_mut())
+                .and_then(|stack| stack.active_mut())
+                .and_then(|layer| layer.canvas_mut())
+                .expect("canvas mutável");
+            canvas.set(1, 1, marker);
+        }
+
+        let image = bridge.render_paint_canvas().expect("imagem do canvas");
+        assert_eq!(image.size().width, width);
+        assert_eq!(image.size().height, height);
+        let buffer = image.to_rgba8().expect("buffer rgba8");
+        let offset = ((width + 1) * 4) as usize;
+        assert_eq!(&buffer.as_bytes()[offset..offset + 4], &marker);
+    }
+
+    #[test]
+    fn canvas_image_is_absent_before_a_layer_exists_and_appears_after() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        assert!(
+            bridge.paint_canvas_dimensions().is_none(),
+            "sem stack não há canvas"
+        );
+
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+        assert!(bridge.paint_canvas_dimensions().is_some());
+        assert!(bridge.view_model().paint_canvas_size.contains('×'));
+    }
+
+    #[test]
+    fn clicking_the_uv_editor_selects_the_face_under_the_cursor() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // O cubo usa projeção planar: o centro do espaço UV cai na face 0.
+        assert!(bridge.uv_editor_click(0.5, 0.5, false));
+        assert_eq!(bridge.view_model().uv_editor.selected_face, 0);
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 1);
+        assert_eq!(bridge.state.ui.status, "UV: face 0 selected (1 total)");
+
+        // Clicar de novo sem Shift substitui a seleção, não acumula.
+        assert!(bridge.uv_editor_click(0.5, 0.5, false));
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 1);
+        // Com Shift a seleção alterna.
+        assert!(bridge.uv_editor_click(0.5, 0.5, true));
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 0);
+    }
+
+    #[test]
+    fn uv_editor_click_off_the_layout_clears_the_selection_and_says_so() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // Tira a face 0 do canto para deixar uma região vazia.
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].uv =
+            vec![[0.0, 0.0], [0.0, 0.25], [0.25, 0.25], [0.25, 0.0]];
+        for face in bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .faces
+            .iter_mut()
+            .skip(1)
+        {
+            face.uv = vec![[0.0, 0.0], [0.0, 0.1], [0.1, 0.1], [0.1, 0.0]];
+        }
+        bridge.uv_editor_click(0.5, 0.5, false);
+
+        assert!(!bridge.uv_editor_click(0.9, 0.9, false));
+        assert_eq!(bridge.view_model().uv_editor.uv_selected_count, 0);
+        assert_eq!(bridge.state.ui.status, "UV: no face under the cursor");
+        assert!(!bridge.uv_editor_click(f32::NAN, 0.5, false));
+    }
+
+    #[test]
+    fn uv_transforms_move_scale_and_rotate_the_selected_faces() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.uv_editor_click(0.5, 0.5, false);
+        let before = bridge.state.project.active_mesh().unwrap().faces[0]
+            .uv
+            .clone();
+
+        assert!(bridge.uv_move_selected(0.1, 0.0));
+        let moved = bridge.state.project.active_mesh().unwrap().faces[0]
+            .uv
+            .clone();
+        assert!((moved[0][0] - before[0][0] - 0.1).abs() < 1.0e-5);
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.uv_scale_selected(2.0));
+        let scaled = bridge.state.project.active_mesh().unwrap().faces[0]
+            .uv
+            .clone();
+        let span_before = moved.iter().map(|uv| uv[0]).fold(f32::MIN, f32::max)
+            - moved.iter().map(|uv| uv[0]).fold(f32::MAX, f32::min);
+        let span_after = scaled.iter().map(|uv| uv[0]).fold(f32::MIN, f32::max)
+            - scaled.iter().map(|uv| uv[0]).fold(f32::MAX, f32::min);
+        assert!(
+            span_after > span_before,
+            "escalar ×2 precisa alargar a ilha: {span_before} -> {span_after}"
+        );
+
+        assert!(bridge.uv_rotate_selected(90.0));
+        assert_eq!(bridge.state.project.undo.depth(), (3, 0));
+
+        assert!(
+            !bridge.uv_move_selected(0.0, 0.0),
+            "movimento nulo é recusado"
+        );
+        assert!(!bridge.uv_scale_selected(0.0), "escala zero é recusada");
+        assert!(!bridge.uv_rotate_selected(0.0), "rotação nula é recusada");
+        assert!(!bridge.uv_scale_selected(f32::NAN));
+        assert_eq!(bridge.state.project.undo.depth(), (3, 0));
+    }
+
+    #[test]
+    fn effect_layers_change_the_composited_raster() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        // Pinta a camada base de um tom conhecido antes do efeito.
+        {
+            let active = bridge.state.project.active;
+            let canvas = bridge
+                .state
+                .project
+                .assets
+                .get_mut(active)
+                .and_then(|asset| asset.paint_stack.as_mut())
+                .and_then(|stack| stack.active_mut())
+                .and_then(|layer| layer.canvas_mut())
+                .unwrap();
+            canvas.fill([200, 40, 90, 255]);
+        }
+        petunia_module_paint::PaintModule::composite_active(&mut bridge.state);
+        let before = bridge.state.project.assets[0].texture.clone().unwrap();
+        let sample = before.get(8, 8).unwrap();
+
+        assert!(bridge.add_paint_effect_layer("Invert"));
+        let layers = bridge.view_model().paint_layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[1].kind_label, "Effect");
+        assert_eq!(bridge.view_model().paint_effect_kind, "Invert");
+
+        let after = bridge.state.project.assets[0].texture.clone().unwrap();
+        let inverted = after.get(8, 8).unwrap();
+        assert_ne!(sample, inverted, "Invert precisa alterar o pixel");
+        assert_eq!(inverted[0], 255 - sample[0]);
+        assert_eq!(inverted[1], 255 - sample[1]);
+        assert_eq!(inverted[2], 255 - sample[2]);
+        assert_eq!(inverted[3], sample[3], "o alfa é preservado");
+    }
+
+    #[test]
+    fn effect_parameters_are_exposed_and_applied() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        assert!(bridge.add_paint_effect_layer("Pixelate"));
+        let params = bridge.view_model().paint_effect_params;
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].key, "cell_size");
+        assert_eq!(params[0].value, 4.0);
+        assert!(params[0].min < params[0].max);
+
+        assert!(bridge.set_paint_effect_param("cell_size", 12.0));
+        assert_eq!(bridge.view_model().paint_effect_params[0].value, 12.0);
+
+        // Fora da faixa é fixado no limite, nunca aceito cru.
+        assert!(bridge.set_paint_effect_param("cell_size", 9_999.0));
+        assert_eq!(bridge.view_model().paint_effect_params[0].value, 64.0);
+        assert!(bridge.set_paint_effect_param("cell_size", 0.0));
+        assert_eq!(bridge.view_model().paint_effect_params[0].value, 1.0);
+
+        assert!(!bridge.set_paint_effect_param("cell_size", f32::NAN));
+        assert!(!bridge.set_paint_effect_param("unknown_param", 1.0));
+        assert!(!bridge.add_paint_effect_layer("NotAnEffect"));
+    }
+
+    #[test]
+    fn an_effect_layer_over_a_raster_layer_has_no_editable_canvas() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+        assert!(bridge.add_paint_effect_layer("Posterize"));
+
+        // A camada ativa é a de efeito, então não há canvas para exibir.
+        assert!(
+            bridge.render_paint_canvas().is_none(),
+            "camada de efeito não tem raster próprio"
+        );
+        assert!(bridge.view_model().paint_effect_kind == "Posterize");
+        let params = bridge.view_model().paint_effect_params;
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].key, "levels");
+    }
+
+    #[test]
+    fn join_merges_the_operand_through_the_shell_and_keeps_parts_is_opt_in() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(
+            petunia_core::PrimitiveKind::Cylinder,
+        ));
+        let operand = bridge.state.project.assets[1].id;
+        let operand_verts = bridge.state.project.assets[1].mesh.verts.len();
+        let active_verts = bridge.state.project.assets[0].mesh.verts.len();
+        // A primitiva recém-criada vira ativa; o alvo do Join é o cubo.
+        bridge.state.project.active = 0;
+
+        assert!(bridge.set_boolean_operand(&operand.to_string()));
+        assert!(!bridge.view_model().boolean_keep_parts, "padrão é consumir");
+        let undo_before = bridge.state.project.undo.depth().0;
+
+        assert!(bridge.join_operand());
+        assert_eq!(bridge.state.project.assets.len(), 1);
+        assert_eq!(
+            bridge.state.project.assets[0].mesh.verts.len(),
+            active_verts + operand_verts,
+            "Join preserva as duas topologias"
+        );
+        assert_eq!(
+            bridge.state.project.undo.depth().0,
+            undo_before + 1,
+            "Join é exatamente uma entrada de undo"
+        );
+    }
+
+    #[test]
+    fn keep_parts_toggle_is_reported_and_preserves_the_operand() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_boolean_keep_parts(true));
+        assert!(bridge.view_model().boolean_keep_parts);
+        assert_eq!(
+            bridge.state.ui.status,
+            "Keep Parts on: the operand stays in the scene"
+        );
+        assert!(!bridge.set_boolean_keep_parts(true), "sem mudança real");
+        assert!(bridge.set_boolean_keep_parts(false));
+        assert!(!bridge.view_model().boolean_keep_parts);
+
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Cone));
+        let operand = bridge.state.project.assets[1].id;
+        {
+            let mesh = &mut bridge.state.project.assets[1].mesh;
+            mesh.select_all();
+            mesh.translate_selected([1.6, 0.0, 0.0]);
+            mesh.deselect_all();
+        }
+        bridge.set_boolean_operand(&operand.to_string());
+        bridge.set_boolean_keep_parts(true);
+        bridge.state.project.active = 0;
+
+        assert!(bridge.boolean_op("model.fuse"));
+        assert_eq!(
+            bridge.state.project.assets.len(),
+            2,
+            "com Keep Parts o operando permanece"
+        );
+        assert!(bridge.state.project.assets.iter().any(|a| a.id == operand));
+    }
+
+    #[test]
+    fn slice_drag_cuts_the_mesh_and_commits_one_undo_entry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.session.tools.active_tool = "slice".to_string();
+
+        assert!(bridge.begin_slice(400.0, 300.0));
+        assert_eq!(bridge.state.session.tools.active_tool, "slice");
+        assert!(bridge.slice_anchor.is_some());
+
+        assert!(
+            bridge.update_slice(400.0, 380.0),
+            "arrasto vertical precisa produzir um plano de corte"
+        );
+        // `slice_plane` com tampa mantém o semi-espaço positivo e o fecha: o
+        // resultado é uma metade fechada, então a contagem de faces e vértices
+        // se mantém e o que muda é a extensão da malha.
+        let sliced = bridge.state.project.active_mesh().unwrap().clone();
+        let report = sliced.validate_topology();
+        assert!(report.is_manifold && report.is_closed, "{report:?}");
+        let span = |mesh: &petunia_core::Mesh| {
+            let xs: Vec<f32> = mesh.verts.iter().map(|v| v.pos[0]).collect();
+            let zs: Vec<f32> = mesh.verts.iter().map(|v| v.pos[2]).collect();
+            let ys: Vec<f32> = mesh.verts.iter().map(|v| v.pos[1]).collect();
+            (
+                xs.iter().fold(f32::MIN, |a, b| a.max(*b))
+                    - xs.iter().fold(f32::MAX, |a, b| a.min(*b)),
+                ys.iter().fold(f32::MIN, |a, b| a.max(*b))
+                    - ys.iter().fold(f32::MAX, |a, b| a.min(*b)),
+                zs.iter().fold(f32::MIN, |a, b| a.max(*b))
+                    - zs.iter().fold(f32::MAX, |a, b| a.min(*b)),
+            )
+        };
+        let after = span(&sliced);
+        let before = (2.0, 2.0, 2.0);
+        assert!(
+            after.0 < before.0 - 0.1 || after.1 < before.1 - 0.1 || after.2 < before.2 - 0.1,
+            "o corte precisa reduzir a extensão em algum eixo: {after:?}"
+        );
+
+        assert!(bridge.commit_slice());
+        assert!(bridge.slice_anchor.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        assert!(bridge.state.undo());
+        let restored = span(bridge.state.project.active_mesh().unwrap());
+        assert_eq!(restored, before, "undo volta ao cubo inteiro");
+    }
+
+    #[test]
+    fn slice_without_a_drag_is_refused_and_escape_restores_the_mesh() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.session.tools.active_tool = "slice".to_string();
+
+        assert!(bridge.begin_slice(400.0, 300.0));
+        assert!(
+            !bridge.update_slice(402.0, 301.0),
+            "arrasto abaixo do limiar não define plano"
+        );
+        assert_eq!(
+            bridge.state.project.undo.depth(),
+            (0, 0),
+            "pré-visualização não empilha histórico"
+        );
+
+        assert!(bridge.handle_escape());
+        assert!(bridge.slice_anchor.is_none());
+        assert_eq!(bridge.state.session.tools.active_tool, "select");
+        assert_eq!(bridge.state.ui.status, "Slice cancelled");
+        assert_eq!(bridge.state.project.active_mesh().unwrap().verts.len(), 8);
+    }
+
+    #[test]
+    fn the_slice_keymap_action_arms_the_tool_without_touching_geometry() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let keybinds = petunia_config::keybinds::Keybinds::defaults();
+        let key = input::key_code_from_slint("K").expect("K mapeável");
+        let shift = petunia_config::keybinds::Mods2 {
+            ctrl: false,
+            shift: true,
+            alt: false,
+        };
+        assert_eq!(
+            keybinds.find(key, shift),
+            Some("model.slice"),
+            "Shift+K precisa estar ligado ao Slice"
+        );
+
+        assert!(bridge.route_shortcut("K", false, true, false));
+        assert_eq!(bridge.state.session.tools.active_tool, "slice");
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert!(
+            bridge.slice_anchor.is_none(),
+            "a âncora nasce no pointer-down"
+        );
+    }
+
+    #[test]
+    fn selection_overlay_outlines_the_active_object() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.visible, "o cubo ativo precisa de contorno visível");
+        assert!(!overlay.accent, "domínio Object usa a cor de seleção");
+        // Contorno de objeto = silhueta frontal, não a caixa nem as 12 arestas:
+        // de um canto vê-se 3 faces, portanto 9 arestas de contorno.
+        let edges = overlay.outline_commands.matches('M').count();
+        assert!(
+            (6..=12).contains(&edges),
+            "silhueta frontal precisa ter entre 6 e 12 arestas, veio {edges}"
+        );
+        assert!(overlay.point_commands.is_empty());
+        assert!(overlay.unselected_outline_commands.is_empty());
+    }
+
+    #[test]
+    fn selection_overlay_follows_the_domain() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+
+        // Point: todos os vértices aparecem como alvos clicáveis, mesmo sem
+        // seleção, para o usuário ver onde pode clicar.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.visible);
+        assert!(overlay.point_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            8,
+            "os 8 vértices aparecem como alvos"
+        );
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.visible && overlay.accent);
+        assert!(overlay.point_commands.is_empty());
+        assert!(overlay.outline_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            7,
+            "o vértice selecionado sai do overlay 2D e vai para o renderer"
+        );
+
+        // Edge: uma linha por aresta selecionada.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .selected_edges
+            .insert((0, 1));
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.outline_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_outline_commands.matches('M').count(),
+            11,
+            "as 11 arestas não selecionadas continuam como alvos"
+        );
+
+        // Face: contorno fechado da face.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(
+            overlay.outline_commands.is_empty(),
+            "a face selecionada é desenhada pelo renderer, não pelo overlay 2D"
+        );
+    }
+
+    #[test]
+    fn clicking_the_viewport_reports_what_was_selected() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.project.active = 0;
+        bridge.state.set_status("");
+
+        bridge.select_viewport(0.5, 0.5, false);
+        assert_eq!(bridge.state.ui.status, "Selected 'Cube'");
+
+        // Fora do cubo o status diz que não acertou nada, em vez de silêncio.
+        bridge.state.set_status("");
+        bridge.select_viewport(0.02, 0.02, false);
+        assert_eq!(bridge.state.ui.status, "Nothing under the cursor");
+    }
+
+    #[test]
+    fn the_gizmo_only_appears_with_a_transform_tool() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        assert!(
+            !bridge.view_model().gizmo.visible,
+            "com a ferramenta Select o gizmo não pode cobrir o modelo"
+        );
+
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+        assert!(bridge.view_model().gizmo.visible);
+
+        bridge.apply(UiIntent::SetActiveTool("select".to_string()));
+        assert!(!bridge.view_model().gizmo.visible);
+    }
+
+    #[test]
+    fn selection_overlay_draws_every_pickable_element_of_the_domain() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+
+        // Point: os 8 vértices aparecem mesmo sem seleção, para o usuário ver
+        // onde pode clicar; o selecionado vai para a camada de destaque.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.point_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            7,
+            "os outros 7 vértices precisam aparecer como alvos"
+        );
+
+        // Edge: todas as 12 arestas do cubo aparecem; a selecionada destaca.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .selected_edges
+            .insert((0, 1));
+        bridge.state.sync_selection();
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.outline_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_outline_commands.matches('M').count(),
+            11,
+            "as outras 11 arestas precisam aparecer como alvos"
+        );
+
+        // Object: silhueta frontal, sem camada de não selecionados.
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Object));
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(!overlay.outline_commands.is_empty());
+        assert!(overlay.unselected_outline_commands.is_empty());
+        assert!(overlay.unselected_point_commands.is_empty());
+    }
+
+    #[test]
+    fn instant_mode_confirms_a_tool_on_click_instead_of_selecting() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        assert!(bridge.set_tool_activation("instant"));
+        assert_eq!(bridge.view_model().tool_activation, "instant");
+        assert!(!bridge.set_tool_activation("instant"), "sem mudança real");
+        assert!(!bridge.set_tool_activation("bogus"));
+
+        bridge.execute_core_command("model.extrude").unwrap();
+        assert!(bridge.tool_modal.is_some());
+        let value_before = bridge.tool_modal_value;
+        assert!(bridge.scrub_tool_modal(-30.0, false));
+        assert!(bridge.tool_modal_value > value_before);
+
+        bridge.select_viewport(0.6, 0.6, false);
+        assert!(bridge.tool_modal.is_none(), "o clique confirma a sessão");
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+    }
+
+    #[test]
+    fn drag_mode_keeps_selecting_on_click_with_a_tool_open() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().tool_activation, "drag");
+
+        bridge.execute_core_command("model.extrude").unwrap();
+        assert!(bridge.tool_modal.is_some());
+        // No modo Drag um clique na viewport seleciona normalmente; a sessão
+        // continua aberta até o arrasto ou o Apply.
+        bridge.select_viewport(0.5, 0.5, false);
+        assert!(bridge.tool_modal.is_some());
+    }
+
+    #[test]
+    fn escape_abandons_an_instant_tool_without_committing() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.set_tool_activation("instant");
+
+        bridge.execute_core_command("model.inset").unwrap();
+        bridge.scrub_tool_modal(-20.0, false);
+        assert!(bridge.handle_escape());
+        assert!(bridge.tool_modal.is_none());
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn geometry_never_carries_selection_colour() {
+        // A regressão original: selecionar uma aresta marcava os vértices das
+        // pontas como selecionados e a triangulação pintava TODAS as faces que
+        // tocavam esses vértices de laranja, mesmo em modo Edge.
+        let mut mesh = petunia_core::Mesh::cube(2.0);
+        let before: Vec<[f32; 3]> = mesh
+            .to_triangles_smooth(false)
+            .into_iter()
+            .map(|(_, _, color, _)| color)
+            .collect();
+
+        mesh.faces[0].selected = true;
+        mesh.verts[0].selected = true;
+        mesh.selected_edges.insert((0, 1));
+
+        let after: Vec<[f32; 3]> = mesh
+            .to_triangles_smooth(false)
+            .into_iter()
+            .map(|(_, _, color, _)| color)
+            .collect();
+        assert_eq!(
+            before, after,
+            "selecionar não pode alterar a cor da geometria"
+        );
+
+        // A cor de seleção não aparece em nenhum vértice da triangulação.
+        for (_, _, color, _) in mesh.to_triangles_smooth(false) {
+            assert!(
+                !(color[0] > 0.95 && (color[1] - 0.55).abs() < 0.05),
+                "triangulação ainda pinta seleção: {color:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_four_shading_modes_are_distinct_and_reachable() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert_eq!(bridge.view_model().shading_mode, "solid");
+
+        // Cada modo tem semântica própria: preencher, amostrar material e usar
+        // a luz da cena são eixos separados.
+        assert!(petunia_core::Shading::Solid.fills_faces());
+        assert!(!petunia_core::Shading::Solid.samples_material());
+        assert!(!petunia_core::Shading::Solid.uses_scene_light());
+
+        assert!(!petunia_core::Shading::Wireframe.fills_faces());
+
+        assert!(petunia_core::Shading::MaterialPreview.fills_faces());
+        assert!(petunia_core::Shading::MaterialPreview.samples_material());
+        assert!(!petunia_core::Shading::MaterialPreview.uses_scene_light());
+
+        assert!(petunia_core::Shading::Rendered.uses_scene_light());
+
+        for mode in petunia_core::Shading::ALL {
+            assert!(bridge.set_shading_mode(mode.id()), "{}", mode.id());
+            assert_eq!(bridge.view_model().shading_mode, mode.id());
+            assert_eq!(bridge.state.shading, mode);
+            // Material e Rendered precisam amostrar o material de fato.
+            if mode.samples_material() {
+                assert!(bridge.state.session.textured, "{}", mode.id());
+            }
+        }
+
+        assert!(!bridge.set_shading_mode("nope"));
+        assert_eq!(
+            bridge.state.shading,
+            petunia_core::Shading::Rendered,
+            "valor inválido não altera o modo"
+        );
+    }
+
+    #[test]
+    fn xray_opacity_is_clamped_and_reported() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.set_xray_opacity(0.7));
+        assert!((bridge.view_model().xray_opacity - 0.7).abs() < 1.0e-6);
+
+        assert!(bridge.set_xray_opacity(5.0));
+        assert!((bridge.view_model().xray_opacity - 0.9).abs() < 1.0e-6);
+        assert!(bridge.set_xray_opacity(-1.0));
+        assert!((bridge.view_model().xray_opacity - 0.1).abs() < 1.0e-6);
+
+        assert!(!bridge.set_xray_opacity(f32::NAN));
+        assert!((bridge.view_model().xray_opacity - 0.1).abs() < 1.0e-6);
+        assert!(!bridge.set_xray_opacity(0.1), "sem mudança real");
+    }
+
+    #[test]
+    fn the_scene_carries_a_real_light_for_rendered_mode() {
+        let project = petunia_project::Project::new();
+        let light = project.active_light().expect("luz padrão da cena");
+        assert!(light.enabled);
+        assert_eq!(light.kind, petunia_project::LightKind::Directional);
+
+        // A direção é normalizada e nunca degenera.
+        let direction = light.normalized_direction();
+        let length = (direction[0].powi(2) + direction[1].powi(2) + direction[2].powi(2)).sqrt();
+        assert!((length - 1.0).abs() < 1.0e-4);
+
+        let degenerate = petunia_project::Light::directional("Zero", [0.0, 0.0, 0.0]);
+        assert_eq!(degenerate.normalized_direction(), [0.0, 1.0, 0.0]);
+        let hostile = petunia_project::Light::directional("NaN", [f32::NAN, 1.0, 0.0]);
+        assert_eq!(hostile.normalized_direction(), [0.0, 1.0, 0.0]);
+
+        // Desabilitar todas as luzes faz o Rendered cair no estúdio da viewport,
+        // nunca renderizar preto.
+        let mut project = petunia_project::Project::new();
+        for light in &mut project.lights {
+            light.enabled = false;
+        }
+        assert!(project.active_light().is_none());
+    }
+
+    #[test]
+    fn the_gizmo_handle_is_picked_in_screen_space_with_a_generous_target() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+        let gizmo = bridge.view_model().gizmo;
+        assert!(gizmo.visible);
+
+        // O centro exato de uma haste acerta o handle.
+        let x_end = {
+            let numbers: Vec<f32> = gizmo
+                .x_commands
+                .split_whitespace()
+                .filter_map(|token| token.parse::<f32>().ok())
+                .collect();
+            [numbers[2], numbers[3]]
+        };
+        assert_eq!(
+            bridge.gizmo_handle_at(x_end[0], x_end[1]),
+            Some(GizmoHandle::X)
+        );
+
+        // Um ponto a 6 px da haste ainda acerta: o alvo é maior que o traço.
+        assert_eq!(
+            bridge.gizmo_handle_at(x_end[0] + 6.0, x_end[1]),
+            Some(GizmoHandle::X)
+        );
+        // Longe de qualquer haste não há handle.
+        assert_eq!(
+            bridge.gizmo_handle_at(gizmo.origin_x + 400.0, gizmo.origin_y),
+            None
+        );
+
+        // Sem ferramenta de transformação não há gizmo nem handle.
+        bridge.apply(UiIntent::SetActiveTool("select".to_string()));
+        assert_eq!(bridge.gizmo_handle_at(x_end[0], x_end[1]), None);
+    }
+
+    #[test]
+    fn dragging_a_gizmo_handle_constrains_the_transform_to_that_axis() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+        let gizmo = bridge.view_model().gizmo;
+        let numbers: Vec<f32> = gizmo
+            .x_commands
+            .split_whitespace()
+            .filter_map(|token| token.parse::<f32>().ok())
+            .collect();
+        let end = [numbers[2], numbers[3]];
+
+        // Hover antes do clique: preselection sem histórico.
+        assert!(bridge.hover_gizmo(end[0], end[1]));
+        assert_eq!(bridge.view_model().gizmo_hover_axis, 0);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+
+        assert!(bridge.begin_gizmo_drag(end[0], end[1]));
+        assert_eq!(bridge.view_model().gizmo_active_axis, 0);
+        assert!(bridge.state.session.tools.modal.is_some());
+
+        // Arrastar só move no eixo X: Y e Z ficam intactos.
+        let before = bridge.state.project.active_mesh().unwrap().verts[0].pos;
+        assert!(bridge.update_viewport_transform(end[0] + 80.0, end[1]));
+        let after = bridge.state.project.active_mesh().unwrap().verts[0].pos;
+        assert!((after[0] - before[0]).abs() > 1.0e-3, "X precisa mudar");
+        assert!((after[1] - before[1]).abs() < 1.0e-4, "Y precisa ficar");
+        assert!((after[2] - before[2]).abs() < 1.0e-4, "Z precisa ficar");
+
+        assert!(bridge.end_gizmo_drag());
+        assert_eq!(bridge.view_model().gizmo_active_axis, -1);
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+    }
+
+    #[test]
+    fn orbiting_uses_the_selection_as_pivot() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        // Move um vértice para longe da origem e seleciona só ele.
+        {
+            let mesh = bridge.state.project.active_mesh_mut().unwrap();
+            mesh.verts[0].pos = [5.0, 0.0, 0.0];
+            mesh.verts[0].selected = true;
+        }
+        bridge.state.sync_selection();
+        assert_ne!(bridge.state.session.camera.target.x, 5.0);
+
+        assert!(bridge.orbit_viewport(10.0, 0.0));
+        assert!(
+            (bridge.state.session.camera.target.x - 5.0).abs() < 1.0e-3,
+            "a órbita precisa pivotar na seleção, veio {:?}",
+            bridge.state.session.camera.target
+        );
+
+        // Sem seleção o alvo não é mexido.
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .deselect_all();
+        bridge.state.sync_selection();
+        let target = bridge.state.session.camera.target;
+        assert!(bridge.orbit_viewport(10.0, 0.0));
+        assert_eq!(bridge.state.session.camera.target, target);
+    }
+
+    #[test]
+    fn the_operation_hud_reports_the_real_value_and_the_axis() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        // Extrude exige faces selecionadas, não vértices.
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+
+        // Em repouso o HUD some e a barra informa domínio e navegação.
+        let vm = bridge.view_model();
+        assert!(!vm.operation_hud_active);
+        assert!(
+            vm.context_hint.contains("Selection:"),
+            "veio: {}",
+            vm.context_hint
+        );
+        assert!(vm.context_hint.contains("Orbit"));
+
+        // Com ferramenta aberta o HUD mostra título, valor e como confirmar.
+        bridge.execute_core_command("model.extrude").unwrap();
+        let vm = bridge.view_model();
+        assert!(vm.operation_hud_active);
+        assert_eq!(vm.operation_hud_title, "Extrude");
+        assert_eq!(vm.operation_hud_lines.len(), 1);
+        assert!(
+            vm.operation_hud_lines[0].starts_with("Distance"),
+            "veio: {}",
+            vm.operation_hud_lines[0]
+        );
+        assert!(vm.operation_hud_hint.contains("Confirm"));
+        assert!(vm.operation_hud_hint.contains("Cancel"));
+        assert!(!vm.operation_hud_subject.is_empty());
+
+        // O valor do HUD acompanha o arrasto.
+        bridge.scrub_tool_modal(-40.0, false);
+        let vm = bridge.view_model();
+        assert!(
+            vm.operation_hud_lines[0] != "Distance   0.000",
+            "o HUD precisa refletir o valor real: {}",
+            vm.operation_hud_lines[0]
+        );
+
+        bridge.commit_tool_modal();
+        assert!(!bridge.view_model().operation_hud_active);
+    }
+
+    #[test]
+    fn the_operation_hud_shows_the_axis_constraint() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.sync_selection();
+        bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+        let gizmo = bridge.view_model().gizmo;
+        let numbers: Vec<f32> = gizmo
+            .y_commands
+            .split_whitespace()
+            .filter_map(|token| token.parse::<f32>().ok())
+            .collect();
+        assert!(bridge.begin_gizmo_drag(numbers[2], numbers[3]));
+
+        let vm = bridge.view_model();
+        assert!(vm.operation_hud_active);
+        assert_eq!(vm.operation_hud_title, "Move");
+        assert!(
+            vm.operation_hud_lines[0].starts_with('Y'),
+            "a linha precisa nomear o eixo: {}",
+            vm.operation_hud_lines[0]
+        );
+        assert!(vm.operation_hud_subject.contains("Y axis"));
+        assert!(vm.context_hint.contains("Move"));
+        bridge.end_gizmo_drag();
+    }
+
+    #[test]
+    fn hovering_preselects_a_component_without_touching_the_document() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+
+        // O centro da viewport acerta a face frontal do cubo.
+        assert!(bridge.hover_component(0.5, 0.5));
+        assert!(matches!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::Face(_)
+        ));
+        assert!(!bridge.view_model().hover_label.is_empty());
+        // Passar o mouse não seleciona nem empilha histórico.
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+        assert!(
+            !bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .faces
+                .iter()
+                .any(|face| face.selected)
+        );
+
+        // Sair da geometria limpa a preselection.
+        assert!(bridge.hover_component(0.02, 0.02));
+        assert_eq!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::None
+        );
+        assert!(bridge.clear_hover() == false, "já estava limpo");
+    }
+
+    #[test]
+    fn object_picking_uses_the_surface_and_ignores_the_empty_bounding_sphere() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge
+            .state
+            .session
+            .camera
+            .set_preset(petunia_core::ViewPreset::Front);
+
+        // (1.1, 1.1) fica dentro da esfera aproximada do cubo, mas fora da
+        // superfície [-1, 1]². Nenhum objeto pode ser anunciado ou selecionado.
+        let ndc = bridge
+            .state
+            .session
+            .camera
+            .project_ndc(glam::Vec3::new(1.1, 1.1, 0.0));
+        let (x, y) = ((ndc.x + 1.0) * 0.5, (1.0 - ndc.y) * 0.5);
+        assert_eq!(
+            bridge.pick_viewport_target(x, y),
+            petunia_core::HoverTarget::None
+        );
+        bridge.select_viewport(x, y, false);
+        assert_eq!(bridge.state.ui.status, "Nothing under the cursor");
+        assert_eq!(bridge.state.project.active, 0);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn vertex_preselection_and_click_agree_on_visibility_and_screen_target() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge
+            .state
+            .session
+            .camera
+            .set_preset(petunia_core::ViewPreset::Front);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+
+        let front = glam::Vec3::new(-1.0, -1.0, 1.0);
+        let ndc = bridge.state.session.camera.project_ndc(front);
+        let (x, y) = ((ndc.x + 1.0) * 0.5, (1.0 - ndc.y) * 0.5);
+        assert_eq!(
+            bridge.pick_viewport_target(x, y),
+            petunia_core::HoverTarget::Vertex(4)
+        );
+        assert!(bridge.hover_component(x, y));
+        bridge.select_viewport(x, y, false);
+        assert_eq!(bridge.state.session.selection.verts, vec![4]);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+
+        bridge.select_viewport(x, y, true);
+        assert!(bridge.state.session.selection.verts.is_empty());
+        assert!(bridge.hover_component(f32::NAN, y));
+        assert_eq!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::None
+        );
+        assert_eq!(
+            bridge.pick_viewport_target(-0.1, y),
+            petunia_core::HoverTarget::None
+        );
+    }
+
+    #[test]
+    fn changing_domains_converts_selection_without_ghost_faces_or_edges() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+        bridge.state.project.active_mesh_mut().unwrap().faces[1].selected = true;
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .sync_vert_selection_from_faces();
+        bridge.state.sync_selection();
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(!mesh.faces.iter().any(|face| face.selected));
+        assert_eq!(mesh.selected_edges.len(), 4);
+
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(mesh.selected_edges.is_empty());
+        assert_eq!(mesh.selected_vert_count(), 4);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn hover_respects_occlusion_unless_xray_is_on() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+
+        // Raio do olho até o vértice traseiro do cubo (z = -1): atravessa a
+        // face frontal, então o alvo está ocluído.
+        let origin = bridge.state.session.camera.eye();
+        let position = glam::Vec3::new(-1.0, -1.0, -1.0);
+        let direction = (position - origin).normalize();
+        assert!(
+            bridge.is_occluded(origin, direction, position),
+            "o vértice traseiro precisa estar atrás da face frontal"
+        );
+
+        // Um vértice frontal não está ocluído.
+        let front = glam::Vec3::new(1.0, 1.0, 1.0);
+        let front_dir = (front - origin).normalize();
+        assert!(!bridge.is_occluded(origin, front_dir, front));
+
+        bridge.state.session.show_xray = true;
+        assert!(
+            !bridge.is_occluded(origin, direction, position),
+            "X-Ray existe justamente para alcançar o que está atrás"
+        );
     }
 
     #[test]

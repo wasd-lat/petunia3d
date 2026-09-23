@@ -11,6 +11,7 @@ save_project = "Ctrl+S"
 cycle_mode = "Tab"
 
 [model]
+box_select = "B"
 select_vertex = "1"
 select_edge = "2"
 select_face = "3"

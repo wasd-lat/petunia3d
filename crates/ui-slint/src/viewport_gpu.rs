@@ -147,7 +147,12 @@ impl WgpuViewport {
             state.xray,
             state.show_triangulation,
             state.textured,
+            state.show_wireframe_overlay,
+            state.selection_domain,
+            state.hover,
         );
+        self.renderer.set_xray_opacity(state.xray_opacity);
+        self.renderer.set_overlays(true, state.show_grid);
 
         let mut encoder = self
             .device
@@ -216,6 +221,10 @@ impl PetuniaViewport for WgpuViewport {
         self.selection_domain = domain;
     }
 
+    fn draws_component_guides(&self) -> bool {
+        true
+    }
+
     fn render_frame(
         &mut self,
         project: &Project,
@@ -254,6 +263,10 @@ mod tests {
                         show_triangulation: false,
                         textured: false,
                         show_wireframe_overlay: false,
+                        selection_domain: petunia_core::SelectionDomain::Object,
+                        xray_opacity: 0.42,
+                        show_grid: true,
+                        hover: petunia_core::HoverTarget::None,
                     },
                 );
                 assert!(img.is_ok());
@@ -262,5 +275,29 @@ mod tests {
                 println!("WgpuViewport ignorado por falta de GPU física: {err}");
             }
         }
+    }
+
+    #[test]
+    fn hover_updates_selection_without_rebuilding_scene_geometry() {
+        let Ok(mut viewport) = WgpuViewport::try_create_default(320, 240) else {
+            // Os testes de domínio ainda executam em hosts sem Vulkan/Metal/DX.
+            return;
+        };
+        let project = Project::new();
+        let camera = Camera::default();
+        let state = ViewportRenderState::default();
+        viewport.render_frame(&project, &camera, state).unwrap();
+        let rebuilt = viewport.renderer.mesh_rebuilds();
+        viewport
+            .render_frame(
+                &project,
+                &camera,
+                ViewportRenderState {
+                    hover: petunia_core::HoverTarget::Face(0),
+                    ..state
+                },
+            )
+            .unwrap();
+        assert_eq!(viewport.renderer.mesh_rebuilds(), rebuilt);
     }
 }

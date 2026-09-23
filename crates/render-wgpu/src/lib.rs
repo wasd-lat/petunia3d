@@ -28,10 +28,53 @@ struct LineVertex {
     color: [f32; 3],
 }
 
+/// Vértice da camada de seleção: posição + cor com alpha.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SelectionVertex {
+    pos: [f32; 3],
+    color: [f32; 4],
+}
+
+/// Cruz orientada para a tela. O raio é em pixels lógicos do target WGPU,
+/// independente do zoom e da profundidade do vértice.
+fn append_point_marker(
+    lines: &mut Vec<SelectionVertex>,
+    point: Vec3,
+    camera: &Camera,
+    viewport_height: u32,
+    radius_px: f32,
+    color: [f32; 4],
+) {
+    let perspective_scale = if camera.proj == petunia_core::Projection::Perspective {
+        ((point - camera.eye()).dot(camera.forward()) / camera.distance.max(0.01)).max(0.01)
+    } else {
+        1.0
+    };
+    let radius = camera.visible_height() * perspective_scale * radius_px
+        / viewport_height.max(1) as f32;
+    for axis in [camera.right(), camera.up()] {
+        lines.push(SelectionVertex {
+            pos: (point - axis * radius).to_array(),
+            color,
+        });
+        lines.push(SelectionVertex {
+            pos: (point + axis * radius).to_array(),
+            color,
+        });
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    /// xyz = direção da luz (normalizada), w = livre.
+    light_dir: [f32; 4],
+    /// x = ambiente, y = difusa, z/w = livres.
+    light_params: [f32; 4],
+    /// x = alpha do X-Ray, y/z/w = livres.
+    xray: [f32; 4],
 }
 
 #[repr(C)]
@@ -92,6 +135,7 @@ pub struct Renderer {
     line_pipeline: wgpu::RenderPipeline,
     line_xray_pipeline: wgpu::RenderPipeline,
     xray: bool,
+    xray_opacity: f32,
     ref_pipeline: wgpu::RenderPipeline,
     ref_xray_pipeline: wgpu::RenderPipeline,
     cam_buffer: wgpu::Buffer,
@@ -105,6 +149,16 @@ pub struct Renderer {
     asset_tex: Vec<AssetTexGpu>,
     line_vb: Option<wgpu::Buffer>,
     line_count: u32,
+    selection_tri_pipeline: wgpu::RenderPipeline,
+    selection_line_pipeline: wgpu::RenderPipeline,
+    selection_tri_xray_pipeline: wgpu::RenderPipeline,
+    selection_line_xray_pipeline: wgpu::RenderPipeline,
+    /// Preenchimento translúcido das faces selecionadas (depth test, sem write).
+    selection_tri_vb: Option<wgpu::Buffer>,
+    selection_tri_count: u32,
+    /// Contorno e marcadores da seleção (depth test).
+    selection_line_vb: Option<wgpu::Buffer>,
+    selection_line_count: u32,
     grid_vb: wgpu::Buffer,
     grid_count: u32,
     ref_vb: Option<wgpu::Buffer>,
@@ -113,12 +167,57 @@ pub struct Renderer {
     pub show_overlays: bool,
     pub show_grid: bool,
     last_fingerprint: Option<SceneFingerprint>,
+    last_domain: Option<petunia_core::SelectionDomain>,
+    /// Passo do grid atualmente na GPU, para reconstruir só ao cruzar degrau.
+    grid_step: f32,
+    /// Último alvo de preselection desenhado.
+    last_hover: petunia_core::HoverTarget,
+    last_selection_view_proj: Option<[f32; 16]>,
     mesh_rebuilds: u64,
     skipped_frames: u64,
 }
 
+/// Seleção: cor chapada, sem iluminação, com alpha. A seleção precisa ser
+/// legível sobre qualquer shading e nunca depender da luz da cena.
+const SELECTION_WGSL: &str = r#"
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> cam: Camera;
+
+struct In {
+    @location(0) pos: vec3<f32>,
+    @location(1) color: vec4<f32>,
+};
+struct Out {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_main(in: In) -> Out {
+    var out: Out;
+    out.clip = cam.view_proj * vec4<f32>(in.pos, 1.0);
+    out.color = in.color;
+    return out;
+}
+
+@fragment
+fn fs_main(in: Out) -> @location(0) vec4<f32> {
+    return in.color;
+}
+"#;
+
 const MESH_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 
 struct In {
@@ -147,25 +246,24 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     if (length(in.normal) < 0.1) {
         return vec4<f32>(in.color, 1.0);
     }
-    let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
+    let light = normalize(cam.light_dir.xyz);
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
-    let amb = LIGHT_AMB;
-    let c = in.color * (amb + LIGHT_DIF * diff);
+    let c = in.color * (cam.light_params.x + cam.light_params.y * diff);
     return vec4<f32>(c, 1.0);
 }
 
 @fragment
 fn fs_xray(in: Out) -> @location(0) vec4<f32> {
     if (length(in.normal) < 0.1) {
-        return vec4<f32>(in.color, 0.45);
+        return vec4<f32>(in.color, cam.xray.x);
     }
     let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
     let amb = LIGHT_AMB;
     let c = in.color * (amb + LIGHT_DIF * diff);
-    return vec4<f32>(c, 0.45);
+    return vec4<f32>(c, cam.xray.x);
 }
 "#;
 
@@ -173,7 +271,12 @@ fn fs_xray(in: Out) -> @location(0) vec4<f32> {
 /// cor do vértice pelo texel do canvas do asset. Fora do modo texturizado
 /// (ou sem canvas) o range usa o pipeline de cor sólida.
 const MESH_TEX_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var smp: sampler;
@@ -213,11 +316,10 @@ fn fs_tex(in: Out) -> @location(0) vec4<f32> {
     if (length(in.normal) < 0.1) {
         return vec4<f32>(base, 1.0);
     }
-    let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
+    let light = normalize(cam.light_dir.xyz);
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
-    let amb = LIGHT_AMB;
-    let c = base * (amb + LIGHT_DIF * diff);
+    let c = base * (cam.light_params.x + cam.light_params.y * diff);
     return vec4<f32>(c, 1.0);
 }
 
@@ -226,14 +328,14 @@ fn fs_tex_xray(in: Out) -> @location(0) vec4<f32> {
     let t = textureSample(tex, smp, in.uv);
     let base = in.color * t.rgb;
     if (length(in.normal) < 0.1) {
-        return vec4<f32>(base, 0.45);
+        return vec4<f32>(base, cam.xray.x);
     }
     let light = normalize(vec3<f32>(LIGHT_X, LIGHT_Y, LIGHT_Z));
     let n = normalize(in.normal);
     let diff = max(dot(n, light), 0.0);
     let amb = LIGHT_AMB;
     let c = base * (amb + LIGHT_DIF * diff);
-    return vec4<f32>(c, 0.45);
+    return vec4<f32>(c, cam.xray.x);
 }
 "#;
     (MESH_TEX_WGSL.to_string() + FRAG)
@@ -268,7 +370,12 @@ fn mesh_wgsl() -> String {
 }
 
 const LINE_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 
 struct In {
@@ -293,7 +400,12 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
 "#;
 
 const REF_WGSL: &str = r#"
-struct Camera { view_proj: mat4x4<f32> };
+struct Camera {
+    view_proj: mat4x4<f32>,
+    light_dir: vec4<f32>,
+    light_params: vec4<f32>,
+    xray: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> cam: Camera;
 struct Params { opacity: f32, _p0: f32, _p1: f32, _p2: f32 };
 @group(1) @binding(0) var<uniform> params: Params;
@@ -322,8 +434,41 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Passo do grid correspondente a uma escala visível.
+fn adaptive_grid_step(visible_height: f32) -> f32 {
+    if visible_height > 60.0 {
+        10.0
+    } else if visible_height > 24.0 {
+        5.0
+    } else if visible_height > 8.0 {
+        1.0
+    } else if visible_height > 3.0 {
+        0.5
+    } else {
+        0.1
+    }
+}
+
 fn grid_lines() -> Vec<LineVertex> {
     petunia_render::scene::grid_lines()
+        .into_iter()
+        .flat_map(|(a, b, c)| {
+            [
+                LineVertex { pos: a, color: c },
+                LineVertex { pos: b, color: c },
+            ]
+        })
+        .collect()
+}
+
+/// Grid adaptativo: o passo acompanha a escala visível da câmera.
+///
+/// Afastado, o passo cresce (linhas de 1 m desapareceriam no moiré);
+/// aproximado, subdivide. O grid nunca fica nem ilegível nem dominante.
+fn adaptive_grid_lines(visible_height: f32) -> Vec<LineVertex> {
+    let step = adaptive_grid_step(visible_height);
+    let extent = (step * 40.0).clamp(20.0, 400.0);
+    petunia_render::scene::grid_lines_custom(extent, step, 0.42, false, 30.0)
         .into_iter()
         .flat_map(|(a, b, c)| {
             [
@@ -355,7 +500,8 @@ impl Renderer {
             label: Some("simple3d-cam-layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                // O fragment lê a luz e a opacidade de X-Ray deste uniform.
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -548,6 +694,61 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+
+        // Camada de seleção: um pipeline para o preenchimento translúcido das
+        // faces e outro para contorno/marcadores. Ambos com depth test e sem
+        // depth write, para não ocluir a geometria nem se sobrepor a si mesmos.
+        let selection_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("simple3d-selection-shader"),
+            source: wgpu::ShaderSource::Wgsl(SELECTION_WGSL.into()),
+        });
+        let selection_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("simple3d-selection-layout"),
+            bind_group_layouts: &[Some(&cam_layout)],
+            immediate_size: 0,
+        });
+        let selection_attrs = [Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SelectionVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+        })];
+        let selection_pipeline = |label, topology, xray| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&selection_layout),
+                vertex: wgpu::VertexState {
+                    module: &selection_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &selection_attrs,
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &selection_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState { topology, cull_mode: None, ..Default::default() },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24Plus,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(if xray { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::LessEqual }),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let selection_tri_pipeline = selection_pipeline("selection-tri", wgpu::PrimitiveTopology::TriangleList, false);
+        let selection_line_pipeline = selection_pipeline("selection-line", wgpu::PrimitiveTopology::LineList, false);
+        let selection_tri_xray_pipeline = selection_pipeline("selection-tri-xray", wgpu::PrimitiveTopology::TriangleList, true);
+        let selection_line_xray_pipeline = selection_pipeline("selection-line-xray", wgpu::PrimitiveTopology::LineList, true);
 
         // refs: layout do grupo 1 (params + textura + sampler)
         let ref_tex_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -800,6 +1001,7 @@ impl Renderer {
             line_pipeline,
             line_xray_pipeline,
             xray: false,
+            xray_opacity: 0.42,
             ref_pipeline,
             ref_xray_pipeline,
             cam_buffer,
@@ -813,6 +1015,14 @@ impl Renderer {
             asset_tex: Vec::new(),
             line_vb: None,
             line_count: 0,
+            selection_tri_pipeline,
+            selection_line_pipeline,
+            selection_tri_xray_pipeline,
+            selection_line_xray_pipeline,
+            selection_tri_vb: None,
+            selection_tri_count: 0,
+            selection_line_vb: None,
+            selection_line_count: 0,
             grid_vb,
             grid_count,
             ref_vb: None,
@@ -821,6 +1031,10 @@ impl Renderer {
             show_overlays: true,
             show_grid: true,
             last_fingerprint: None,
+            last_domain: None,
+            grid_step: 1.0,
+            last_hover: petunia_core::HoverTarget::None,
+            last_selection_view_proj: None,
             mesh_rebuilds: 0,
             skipped_frames: 0,
         }
@@ -839,6 +1053,11 @@ impl Renderer {
     /// Invalida o cache manualmente (ex. após troca de backend ou teste).
     pub fn invalidate_cache(&mut self) {
         self.last_fingerprint = None;
+    }
+
+    /// Opacidade da geometria em X-Ray, aplicada no uniform do shader.
+    pub fn set_xray_opacity(&mut self, opacity: f32) {
+        self.xray_opacity = opacity.clamp(0.1, 0.9);
     }
 
     pub fn set_overlays(&mut self, show_overlays: bool, show_grid: bool) {
@@ -885,14 +1104,67 @@ impl Renderer {
         xray: bool,
         show_triangulation: bool,
         textured: bool,
+        show_wireframe_overlay: bool,
+        edit_domain: petunia_core::SelectionDomain,
+        hover: petunia_core::HoverTarget,
     ) {
         puffin::profile_function!();
         self.xray = xray;
+        // Trocar de domínio muda a camada de seleção, não só a malha.
+        let domain_changed = self.last_domain != Some(edit_domain);
+        self.last_domain = Some(edit_domain);
+        // Preselection entra no fingerprint: mover o mouse sobre a geometria
+        // precisa redesenhar a camada, mas nada mais.
+        let hover_changed = self.last_hover != hover;
+        self.last_hover = hover;
+        let selection_view_proj = camera.view_proj().to_cols_array();
+        let camera_changed = self.last_selection_view_proj != Some(selection_view_proj);
+        self.last_selection_view_proj = Some(selection_view_proj);
+        // Grid adaptativo: reconstrói só quando a escala visível cruza um degrau.
+        let wanted_step = adaptive_grid_step(camera.visible_height());
+        if (wanted_step - self.grid_step).abs() > f32::EPSILON {
+            self.grid_step = wanted_step;
+            let grid = adaptive_grid_lines(camera.visible_height());
+            self.grid_count = grid.len() as u32;
+            self.grid_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("simple3d-grid"),
+                contents: bytemuck::cast_slice(&grid),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        }
+        // Fonte de luz por modo: Solid/Material usam o estúdio fixo da viewport,
+        // Rendered usa a primeira luz habilitada da cena. Sem luz na cena o
+        // Rendered cai no estúdio em vez de renderizar preto.
+        let (light_dir, ambient, diffuse) = match (shading.uses_scene_light(), scene.active_light())
+        {
+            (true, Some(light)) => {
+                let [x, y, z] = light.normalized_direction();
+                let intensity = light.intensity.clamp(0.0, 8.0);
+                (
+                    [x, y, z, 0.0],
+                    petunia_render::scene::LIGHT_AMBIENT * 0.35,
+                    petunia_render::scene::LIGHT_DIFFUSE * intensity,
+                )
+            }
+            _ => (
+                [
+                    petunia_render::scene::LIGHT_DIR[0],
+                    petunia_render::scene::LIGHT_DIR[1],
+                    petunia_render::scene::LIGHT_DIR[2],
+                    0.0,
+                ],
+                petunia_render::scene::LIGHT_AMBIENT,
+                petunia_render::scene::LIGHT_DIFFUSE,
+            ),
+        };
         queue.write_buffer(
             &self.cam_buffer,
             0,
             bytemuck::cast_slice(&[CameraUniform {
                 view_proj: camera.view_proj().to_cols_array_2d(),
+                light_dir,
+                light_params: [ambient, diffuse, 0.0, 0.0],
+                xray: [self.xray_opacity, 0.0, 0.0, 0.0],
             }]),
         );
 
@@ -905,12 +1177,15 @@ impl Renderer {
                 show_triangulation,
                 textured,
                 edit_mode_is_edit: false,
-                show_wireframe_overlay: false,
+                show_wireframe_overlay,
             },
         );
         let mesh_changed = self.last_fingerprint.map(|f| f.mesh) != Some(fp.mesh);
         let refs_changed = self.last_fingerprint.map(|f| f.refs_layout) != Some(fp.refs_layout);
         if !mesh_changed && !refs_changed {
+            if hover_changed || camera_changed || domain_changed {
+                self.update_selection_layer(device, scene, camera, edit_domain, hover);
+            }
             self.skipped_frames += 1;
             return;
         }
@@ -923,9 +1198,12 @@ impl Renderer {
         let mut mv: Vec<MeshVertex> = Vec::new();
         let mut lv: Vec<LineVertex> = Vec::new();
         let mut mesh_ranges: Vec<MeshRange> = Vec::new();
-        let smooth = shading == Shading::Smooth;
-        let unlit = shading == Shading::Unlit;
-        let is_wire = shading == Shading::Wireframe;
+        // Wireframe não preenche; os outros três modos preenchem e diferem no
+        // que amostram: cor do objeto, textura do material, ou material sob a
+        // luz da cena. `smooth` é ortogonal: normais suavizadas por vértice.
+        let is_wire = !shading.fills_faces();
+        let unlit = false;
+        let smooth = false;
         for obj in &scene.assets {
             if !obj.visible {
                 continue;
@@ -994,7 +1272,9 @@ impl Renderer {
                 mesh_ranges.push(MeshRange {
                     start: range_start,
                     count: range_count,
-                    asset_id: if textured && tex_canvas.is_some() {
+                    // Material Preview e Rendered sempre amostram o material; nos
+                    // outros modos a textura é opt-in pelo toggle `textured`.
+                    asset_id: if (textured || shading.samples_material()) && tex_canvas.is_some() {
                         Some(obj.id)
                     } else {
                         None
@@ -1003,23 +1283,22 @@ impl Renderer {
             }
 
             if is_wire {
+                // Wireframe mostra topologia, não seleção: arestas neutras para
+                // a camada de seleção continuar sendo o único destaque.
                 for (a, b, sel) in mesh.to_edges() {
                     let c = if sel {
-                        [1.0, 0.3, 0.1]
+                        [1.0, 0.62, 0.20]
                     } else {
-                        [1.0, 0.6, 0.2]
+                        [0.62, 0.66, 0.74]
                     };
                     lv.push(LineVertex { pos: a, color: c });
                     lv.push(LineVertex { pos: b, color: c });
                 }
-            } else {
-                // overlay sutil das arestas (estilo Blender: wire sobre solid)
-                for (a, b, sel) in mesh.to_edges() {
-                    let c = if sel {
-                        [1.0, 0.35, 0.1]
-                    } else {
-                        [0.05, 0.05, 0.06]
-                    };
+            } else if show_wireframe_overlay {
+                // Overlay de wireframe é opt-in: sem ele, Solid/Material/Rendered
+                // mostram faces limpas e só a camada de seleção destaca arestas.
+                for (a, b, _sel) in mesh.to_edges() {
+                    let c = [0.05, 0.05, 0.06];
                     lv.push(LineVertex {
                         pos: [a[0], a[1] + 0.001, a[2]],
                         color: c,
@@ -1045,6 +1324,8 @@ impl Renderer {
                 }
             }
         }
+        self.update_selection_layer(device, scene, camera, edit_domain, hover);
+
         self.mesh_count = mv.len() as u32;
         self.mesh_ranges = mesh_ranges;
         self.sync_asset_textures(device, queue, scene, textured);
@@ -1112,6 +1393,191 @@ impl Renderer {
             )
         };
         let _ = queue;
+    }
+
+    /// Atualiza somente os buffers de seleção e preselection. Mover o cursor
+    /// não reconstrói a malha, texturas ou referências da cena.
+    fn update_selection_layer(
+        &mut self,
+        device: &wgpu::Device,
+        scene: &Project,
+        camera: &Camera,
+        edit_domain: petunia_core::SelectionDomain,
+        hover: petunia_core::HoverTarget,
+    ) {
+        // Camada de seleção: geometria própria, com depth test no render. Só o
+        // ativo contribui, e só o domínio atual — um vértice selecionado não
+        // pode virar face pintada, que era a contaminação antiga.
+        let mut sel_tri: Vec<SelectionVertex> = Vec::new();
+        let mut sel_line: Vec<SelectionVertex> = Vec::new();
+        if let Some(asset) = scene.assets.get(scene.active) {
+            let mesh = asset.evaluated_mesh();
+            let domain = edit_domain;
+            // Seleção: laranja quente com alpha, como Blender/C4D. Legível
+            // sobre qualquer shading porque o shader não aplica luz.
+            let face_color = [1.0f32, 0.55, 0.15, 0.32];
+            let edge_color = [1.0f32, 0.62, 0.20, 1.0];
+            let point_color = [1.0f32, 0.78, 0.35, 1.0];
+
+            if domain == petunia_core::SelectionDomain::Edge {
+                let guide_color = [0.62, 0.66, 0.74, 0.58];
+                for (a, b) in mesh.edges_unique() {
+                    if mesh.selected_edges.contains(&(a, b)) {
+                        continue;
+                    }
+                    let (Some(start), Some(end)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    else {
+                        continue;
+                    };
+                    sel_line.push(SelectionVertex {
+                        pos: start.pos,
+                        color: guide_color,
+                    });
+                    sel_line.push(SelectionVertex {
+                        pos: end.pos,
+                        color: guide_color,
+                    });
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Vertex {
+                let guide_color = [0.62, 0.66, 0.74, 0.72];
+                for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
+                    append_point_marker(
+                        &mut sel_line,
+                        vertex.vec(),
+                        camera,
+                        self.depth_size.1,
+                        2.5,
+                        guide_color,
+                    );
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Face {
+                for (fi, face) in mesh.faces.iter().enumerate().filter(|(_, face)| face.selected) {
+                    if face.verts.len() < 3 {
+                        continue;
+                    }
+                    for corners in mesh.face_triangle_corners(fi) {
+                        let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                        for point in [p0, p1, p2] {
+                            sel_tri.push(SelectionVertex {
+                                pos: point.to_array(),
+                                color: face_color,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Edge {
+                for &(a, b) in &mesh.selected_edges {
+                    let (Some(va), Some(vb)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    else {
+                        continue;
+                    };
+                    sel_line.push(SelectionVertex {
+                        pos: va.pos,
+                        color: edge_color,
+                    });
+                    sel_line.push(SelectionVertex {
+                        pos: vb.pos,
+                        color: edge_color,
+                    });
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Vertex {
+                for vertex in mesh.verts.iter().filter(|vertex| vertex.selected) {
+                    append_point_marker(
+                        &mut sel_line,
+                        vertex.vec(),
+                        camera,
+                        self.depth_size.1,
+                        4.0,
+                        point_color,
+                    );
+                }
+            }
+        }
+        // Preselection: mesma linguagem da seleção, porém mais fraca — o
+        // usuário vê o que vai clicar sem confundir com o que já selecionou.
+        let hover_line = [0.62f32, 0.72, 0.88, 0.85];
+        let hover_tri = [0.62f32, 0.72, 0.88, 0.18];
+        if let Some(asset) = scene.assets.get(scene.active) {
+            let mesh = asset.evaluated_mesh();
+            match hover {
+                petunia_core::HoverTarget::Vertex(index) => {
+                    if let Some(vertex) = mesh.verts.get(index as usize) {
+                        append_point_marker(
+                            &mut sel_line,
+                            vertex.vec(),
+                            camera,
+                            self.depth_size.1,
+                            5.0,
+                            hover_line,
+                        );
+                    }
+                }
+                petunia_core::HoverTarget::Edge(a, b) => {
+                    if let (Some(va), Some(vb)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    {
+                        sel_line.push(SelectionVertex {
+                            pos: va.pos,
+                            color: hover_line,
+                        });
+                        sel_line.push(SelectionVertex {
+                            pos: vb.pos,
+                            color: hover_line,
+                        });
+                    }
+                }
+                petunia_core::HoverTarget::Face(index) => {
+                    if let Some(face) = mesh.faces.get(index) {
+                        if face.verts.len() >= 3 {
+                            for corners in mesh.face_triangle_corners(index) {
+                                let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                                for point in [p0, p1, p2] {
+                                    sel_tri.push(SelectionVertex {
+                                        pos: point.to_array(),
+                                        color: hover_tri,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                petunia_core::HoverTarget::Object(_) | petunia_core::HoverTarget::None => {}
+            }
+        }
+        self.selection_tri_count = sel_tri.len() as u32;
+        self.selection_tri_vb = if sel_tri.is_empty() {
+            None
+        } else {
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("simple3d-selection-tri"),
+                    contents: bytemuck::cast_slice(&sel_tri),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            )
+        };
+        self.selection_line_count = sel_line.len() as u32;
+        self.selection_line_vb = if sel_line.is_empty() {
+            None
+        } else {
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("simple3d-selection-line"),
+                    contents: bytemuck::cast_slice(&sel_line),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            )
+        };
     }
 
     fn ensure_ref_textures(
@@ -1414,6 +1880,20 @@ impl Renderer {
                 }
             }
         }
+        // Seleção: preenchimento translúcido e contorno/marcadores, ambos com
+        // depth test. Fica depois da geometria e antes das arestas para que o
+        // wireframe permaneça legível por cima da seleção.
+        if let Some(vb) = &self.selection_tri_vb {
+            pass.set_pipeline(if self.xray { &self.selection_tri_xray_pipeline } else { &self.selection_tri_pipeline });
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.draw(0..self.selection_tri_count, 0..1);
+        }
+        if let Some(vb) = &self.selection_line_vb {
+            pass.set_pipeline(if self.xray { &self.selection_line_xray_pipeline } else { &self.selection_line_pipeline });
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.draw(0..self.selection_line_count, 0..1);
+        }
+
         // arestas
         if let Some(vb) = &self.line_vb {
             if self.xray {

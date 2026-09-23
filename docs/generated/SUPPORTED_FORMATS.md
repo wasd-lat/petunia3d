@@ -20,7 +20,7 @@ description: Matriz de capacidades do pipeline de entrega e importadores/exporta
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Wavefront OBJ** | `.obj` | ✅ Sim | ✅ Sim | — | — | — | — | — |
 | **glTF 2.0 (JSON)** | `.gltf` | ✅ Sim | ❌ Não | ✅ | ✅ | ✅ | ✅ | — |
-| **glTF 2.0 Binary (GLB)** | `.glb` | ❌ Não | ✅ Sim | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **glTF 2.0 Binary (GLB)** | `.glb` | ✅ Sim | ✅ Sim | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Petunia Package (.pkg)** | `.pkg` | ✅ Sim | ✅ Sim | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 

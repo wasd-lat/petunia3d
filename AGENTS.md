@@ -154,9 +154,24 @@ Leia, nesta ordem: este `AGENTS.md` → `ENTRYPOINT.md` → `prumo.json` →
 envolvidos. Contexto mínimo suficiente, expansão progressiva, ponteiro em vez de
 payload. Nunca enfraquecer critérios de aceitação em silêncio.
 
-## 6. Política de modelos (assinatura OpenCode Go) — obrigatória
+## 6. Escolha de modelos — sem obrigatoriedade
 
-Os agentes de função vivem em `.opencode/agent/` e podem fixar modelos adequados
-ao trabalho delegado. A sessão primária pode coordenar a intervenção com o modelo
-explicitamente autorizado pelo mantenedor; não interrompa trabalho em andamento
-por ausência de uma tabela global de modelos nesta seção.
+Não há modelo ou provedor obrigatório para nenhuma função, inclusive para a
+sessão primária. Use o modelo disponível e adequado à tarefa, considerando
+capacidade, custo e contexto.
+
+Preferências em `prumo.json` e modelos configurados nos agentes são sugestões ou
+configurações de execução, não requisitos de autorização. Não interrompa o
+trabalho, exija troca de modelo nem solicite confirmação apenas por divergência
+entre o modelo da sessão e essas configurações.
+
+A escolha de modelo não altera os requisitos de qualidade, segurança,
+conformidade, testes e revisão definidos neste arquivo.
+
+## 7. Destino de publicação autorizado
+
+O repositório de trabalho é **`wasd-lat/petunia3d`**. O usuário autorizou
+publicar nele e pediu **commit e push após cada alteração concluída**.
+Use a conexão autenticada da conta `wasd-lat` quando houver múltiplas contas.
+Verifique o conteúdo remoto após publicar e identifique claramente checkpoints
+que ainda aguardam testes; publicação não substitui os critérios de aceite.

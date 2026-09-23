@@ -16,6 +16,8 @@ pub enum OverlayId {
     Settings,
     SceneDrawer,
     AssetLibrary,
+    OutlinerContextMenu,
+    MenuBar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

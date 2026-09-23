@@ -134,7 +134,7 @@ impl Mesh {
     pub fn tri_count(&self) -> usize {
         self.faces
             .iter()
-            .map(|f| if f.verts.len() >= 4 { 2 } else { 1 })
+            .map(|f| f.verts.len().saturating_sub(2))
             .sum()
     }
 
@@ -180,30 +180,13 @@ impl Mesh {
         c / f.verts.len().max(1) as f32
     }
 
-    /// Raycast contra a malha (Möller–Trumbore, quads como 2 tris).
+    /// Raycast against the render triangulation, including concave n-gons.
     /// Retorna `(face, t, ponto)` mais próximo, se houver.
     pub fn ray_hit(&self, origin: Vec3, dir: Vec3) -> Option<(usize, f32, Vec3)> {
         let mut best: Option<(usize, f32)> = None;
         for (fi, f) in self.faces.iter().enumerate() {
-            let idx = &f.verts;
-            if idx.len() < 3 {
-                continue;
-            }
-            let tris: [(u32, u32, u32); 2] = if idx.len() >= 4 {
-                [(idx[0], idx[1], idx[2]), (idx[0], idx[2], idx[3])]
-            } else {
-                [(idx[0], idx[1], idx[2]), (u32::MAX, u32::MAX, u32::MAX)]
-            };
-            for (a, b, c) in tris {
-                if a == u32::MAX {
-                    continue;
-                }
-                if (a as usize) >= self.verts.len()
-                    || (b as usize) >= self.verts.len()
-                    || (c as usize) >= self.verts.len()
-                {
-                    continue;
-                }
+            for corners in self.face_triangle_corners(fi) {
+                let [a, b, c] = corners.map(|corner| f.verts[corner]);
                 if let Some(t) = triangulate::ray_tri(
                     origin,
                     dir,
@@ -234,20 +217,50 @@ pub mod obj;
 pub mod ops;
 pub mod primitives;
 pub mod profile_geo;
-pub mod triangulate;
 pub mod topology;
+pub mod triangulate;
+mod connect;
 pub mod uv;
 pub mod uv_tools;
 pub mod uv_xatlas;
 
-pub use topology::{DirtyDomains, ElementRemap, TopologyResult};
-pub use uv_tools::{UvDiagnostics, UvIsland};
 pub use half_edge::{
     EdgeId, FaceId, HalfEdge, HalfEdgeId, HalfEdgeMesh, TopologyDefect, TopologyReport, VertexId,
 };
+pub use topology::{DirtyDomains, ElementRemap, TopologyResult};
+pub use uv_tools::{UvDiagnostics, UvIsland};
 
 impl Mesh {
     // ---------------- saída p/ render/export ----------------
+
+    /// Triangles expressed as face-corner indices, preserving UV seams and
+    /// winding. Concave polygons must use the same tessellation for drawing
+    /// and picking; a fan can otherwise make empty space selectable.
+    pub fn face_triangle_corners(&self, face_index: usize) -> Vec<[usize; 3]> {
+        let Some(face) = self.faces.get(face_index) else { return Vec::new(); };
+        if face.verts.len() < 3 || face.verts.iter().any(|&v| v as usize >= self.verts.len() || !self.verts[v as usize].vec().is_finite()) {
+            return Vec::new();
+        }
+        if face.verts.len() == 3 { return vec![[0, 1, 2]]; }
+        let normal = self.face_normal(face_index).abs();
+        let axis = if normal.x >= normal.y && normal.x >= normal.z { 0 }
+            else if normal.y >= normal.z { 1 } else { 2 };
+        let points: Vec<[f32; 2]> = face.verts.iter().map(|&v| {
+            let p = self.verts[v as usize].pos;
+            match axis { 0 => [p[1], p[2]], 1 => [p[2], p[0]], _ => [p[0], p[1]] }
+        }).collect();
+        let area = triangulate::polygon_area(&points);
+        let convex = (0..points.len()).all(|i| {
+            let a = points[i]; let b = points[(i + 1) % points.len()]; let c = points[(i + 2) % points.len()];
+            ((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) * area >= 0.0
+        });
+        if convex && area.abs() > 1.0e-12 {
+            return (1..face.verts.len() - 1).map(|i| [0, i, i + 1]).collect();
+        }
+        let Ok(mut triangles) = triangulate::ear_clip(&points) else { return Vec::new(); };
+        if area < 0.0 { for tri in &mut triangles { tri.swap(1, 2); } }
+        triangles
+    }
 
     /// (pos, normal, cor, uv) por triângulo com normais facetadas (flat).
     pub fn to_triangles(&self) -> Vec<Tri> {
@@ -276,37 +289,23 @@ impl Mesh {
         };
 
         let mut out = Vec::new();
-        for f in &self.faces {
-            let m = f.verts.len();
-            if m < 3 {
-                continue;
-            }
-            for i in 1..(m - 1) {
-                let idx0 = f.verts[0] as usize;
-                let idx1 = f.verts[i] as usize;
-                let idx2 = f.verts[i + 1] as usize;
-                if idx0 >= self.verts.len() || idx1 >= self.verts.len() || idx2 >= self.verts.len()
-                {
-                    continue;
-                }
+        for (fi, f) in self.faces.iter().enumerate() {
+            for corners in self.face_triangle_corners(fi) {
+                let [idx0, idx1, idx2] = corners.map(|i| f.verts[i] as usize);
                 let pa = self.verts[idx0].vec();
                 let pb = self.verts[idx1].vec();
                 let pc = self.verts[idx2].vec();
                 let flat_n = (pb - pa).cross(pc - pa).normalize_or_zero().to_array();
 
                 let tri_indices = [idx0, idx1, idx2];
-                let tri_uvs = [
-                    f.uv.first().copied().unwrap_or([0.0, 0.0]),
-                    f.uv.get(i).copied().unwrap_or([0.0, 0.0]),
-                    f.uv.get(i + 1).copied().unwrap_or([0.0, 0.0]),
-                ];
+                let tri_uvs = corners.map(|i| f.uv.get(i).copied().unwrap_or([0.0, 0.0]));
 
                 for (k, &vi) in tri_indices.iter().enumerate() {
                     let v = &self.verts[vi];
-                    let mut col = v.color;
-                    if v.selected || f.selected {
-                        col = [1.0, 0.55, 0.15];
-                    }
+                    // A cor da geometria é do material, nunca da seleção: pintar
+                    // aqui fazia uma aresta selecionada tingir todas as faces que
+                    // tocam seus vértices. Seleção é uma camada de render à parte.
+                    let col = v.color;
                     let n = if smooth && vi < vert_normals.len() {
                         vert_normals[vi]
                     } else {

@@ -409,8 +409,8 @@ impl GlRenderer {
         if state.shading == Shading::Wireframe {
             return; // wireframe sai só nas arestas
         }
-        let smooth = state.shading == Shading::Smooth;
-        let unlit = state.shading == Shading::Unlit;
+        let smooth = false;
+        let unlit = false;
         let opacity: f32 = if state.show_xray { 0.45 } else { 1.0 };
         if state.show_xray {
             gl.enable(glow::BLEND);

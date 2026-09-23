@@ -14,15 +14,65 @@ use super::camera::Camera;
 use super::events::{AppEvent, EventBus};
 use super::selection::{SelectMode, Selection, SelectionDomain, Workspace};
 
-/// Viewport shading mode. Lives in core so session state does not depend on a
-/// renderer crate (ch. 28: core must not know concrete render backends).
+/// Modo de sombreamento da viewport.
+///
+/// Nomeia o que o usuário vê, não o modelo de iluminação: cada variante
+/// corresponde a um pipeline real no renderer. Vive no core para o estado de
+/// sessão não depender de crate de render (cap. 28).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Shading {
+    /// Só topologia: sem preenchimento de face, arestas neutras.
+    Wireframe,
+    /// Faces preenchidas com iluminação de estúdio da viewport, cor do objeto.
     #[default]
     Solid,
-    Smooth,
-    Unlit,
-    Wireframe,
+    /// Faces preenchidas com a textura do material amostrada por UV.
+    MaterialPreview,
+    /// Faces preenchidas com o material sob a luz da cena.
+    Rendered,
+}
+
+impl Shading {
+    pub const ALL: [Shading; 4] = [
+        Shading::Wireframe,
+        Shading::Solid,
+        Shading::MaterialPreview,
+        Shading::Rendered,
+    ];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Wireframe => "wireframe",
+            Self::Solid => "solid",
+            Self::MaterialPreview => "material",
+            Self::Rendered => "rendered",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "wireframe" => Some(Self::Wireframe),
+            "solid" => Some(Self::Solid),
+            "material" => Some(Self::MaterialPreview),
+            "rendered" => Some(Self::Rendered),
+            _ => None,
+        }
+    }
+
+    /// A viewport desenha faces preenchidas neste modo?
+    pub const fn fills_faces(self) -> bool {
+        !matches!(self, Self::Wireframe)
+    }
+
+    /// A textura do material é amostrada neste modo?
+    pub const fn samples_material(self) -> bool {
+        matches!(self, Self::MaterialPreview | Self::Rendered)
+    }
+
+    /// A iluminação vem da cena (não do estúdio fixo da viewport)?
+    pub const fn uses_scene_light(self) -> bool {
+        matches!(self, Self::Rendered)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -332,6 +382,70 @@ impl ProjectState {
 }
 
 /// 2. FERRAMENTAS E SESSÕES INTERATIVAS: contexto operacional de modelagem.
+///
+/// Como uma ferramenta paramétrica recebe o gesto de confirmação:
+///
+/// - `Drag`: a sessão abre no atalho e o valor vem do arrasto do ponteiro na
+///   viewport; soltar confirma.
+/// - `Instant`: a sessão abre no atalho e segue o movimento do mouse sem
+///   botão pressionado (estilo Blender); clicar ou Enter confirma, Esc cancela.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ToolActivation {
+    #[default]
+    Drag,
+    Instant,
+}
+
+impl ToolActivation {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Drag => "drag",
+            Self::Instant => "instant",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "drag" => Some(Self::Drag),
+            "instant" => Some(Self::Instant),
+            _ => None,
+        }
+    }
+}
+
+/// Componente sob o cursor (preselection).
+///
+/// Vive na sessão, nunca no documento: passar o mouse não pode alterar o
+/// projeto nem entrar no histórico. É o que responde "o que eu vou clicar"
+/// antes do clique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HoverTarget {
+    #[default]
+    None,
+    Vertex(u32),
+    Edge(u32, u32),
+    Face(usize),
+    /// Índice do asset ativo sob o cursor, no domínio Object.
+    Object(usize),
+}
+
+impl HoverTarget {
+    pub const fn is_some(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// Descrição curta para a barra de status.
+    pub fn label(self) -> String {
+        match self {
+            Self::None => String::new(),
+            Self::Vertex(index) => format!("Point {index}"),
+            Self::Edge(a, b) => format!("Edge {a}-{b}"),
+            Self::Face(index) => format!("Face {index}"),
+            Self::Object(index) => format!("Object {index}"),
+        }
+    }
+}
+
 pub struct ToolState {
     pub active_tool: String,
     pub gizmo_mode: crate::ModalKind,
@@ -339,6 +453,12 @@ pub struct ToolState {
     pub pending_modal: Option<crate::modal::ModalKind>,
     pub pointer_session: Option<crate::modal::PointerSession>,
     pub cut_session: Option<crate::cutting_session::CutSession>,
+    /// Operando B das operações booleanas (Fuse/Cut/Intersect): o outro ativo
+    /// escolhido pelo usuário, distinto do ativo atual (A).
+    pub boolean_operand: Option<uuid::Uuid>,
+    /// Modificador **Keep Parts**: mantém o operando na cena depois da operação,
+    /// em vez de consumi-lo.
+    pub boolean_keep_parts: bool,
     pub mesh_preview: Option<crate::mesh_preview::MeshPreview>,
     pub paint_color: [f32; 3],
     pub paint_radius: f32,
@@ -355,6 +475,8 @@ pub struct ToolState {
     pub paint_isolate_selection: bool,
     pub brush_projection: crate::brush::BrushProjectionMode,
     pub brush_lock: crate::brush::BrushLock,
+    /// Face travada pelo `BrushLock` no primeiro toque do traço atual.
+    pub paint_lock_face: Option<Option<usize>>,
     pub fill_scope: crate::brush::FillScope,
     /// Canal de textura alvo da pintura (P3D-062). V1: só Albedo opera;
     /// demais canais ficam desabilitados na UI até V1.x.
@@ -388,6 +510,11 @@ pub struct ToolState {
     pub selected_measurement: Option<uuid::Uuid>,
     pub active_measurement: Option<MeasurementItem>,
     pub active_annotation: Option<AnnotationStroke>,
+
+    /// Modo de confirmação das ferramentas paramétricas.
+    pub tool_activation: ToolActivation,
+    /// Componente sob o cursor (preselection).
+    pub hover: HoverTarget,
 }
 
 impl Default for ToolState {
@@ -405,6 +532,8 @@ impl ToolState {
             pending_modal: None,
             pointer_session: None,
             cut_session: None,
+            boolean_operand: None,
+            boolean_keep_parts: false,
             mesh_preview: None,
             paint_color: [1.0, 0.2, 0.2],
             paint_radius: 0.8,
@@ -421,6 +550,9 @@ impl ToolState {
             paint_isolate_selection: false,
             brush_projection: crate::brush::BrushProjectionMode::Surface,
             brush_lock: crate::brush::BrushLock::None,
+            paint_lock_face: None,
+            tool_activation: ToolActivation::Drag,
+            hover: HoverTarget::None,
             fill_scope: crate::brush::FillScope::ConnectedPixels,
             paint_channel: petunia_project::TextureChannel::Albedo,
             paint_pixel_grid: true,
@@ -569,6 +701,8 @@ pub struct EditorSession {
     pub pivot_point: PivotPoint,
     pub show_overlays: bool,
     pub show_xray: bool,
+    /// Opacidade da geometria em X-Ray (0.1..=0.9). Ajustável pelo popover.
+    pub xray_opacity: f32,
     pub show_triangulation: bool,
     pub show_nav_hud: bool,
     pub show_grid: bool,
@@ -628,6 +762,7 @@ impl EditorSession {
             pivot_point: PivotPoint::MedianPoint,
             show_overlays: true,
             show_xray: false,
+            xray_opacity: 0.42,
             show_triangulation: false,
             show_nav_hud: true,
             show_grid: true,
@@ -700,6 +835,8 @@ impl EditorSession {
         let mut sel = Selection::default();
         if let Some(a) = project.assets.get(project.active) {
             sel.asset = Some(a.id);
+            sel.assets = self.selection.assets.iter().copied().filter(|id| project.assets.iter().any(|asset| asset.id == *id)).collect();
+            if !sel.assets.contains(&a.id) { sel.assets = vec![a.id]; }
             sel.verts = a
                 .mesh
                 .verts
@@ -736,6 +873,33 @@ pub const TOOLBAR_DEFAULT_WIDTH: f32 = 74.0;
 ///
 /// Espelha `petunia_ui::tokens::PROPERTIES_DEFAULT_WIDTH`.
 pub const PROPERTIES_DEFAULT_WIDTH: f32 = 290.0;
+/// Piso do dock de contexto: abaixo disso os campos numéricos do inspetor
+/// deixam de caber lado a lado com o rótulo.
+pub const PROPERTIES_MIN_WIDTH: f32 = 208.0;
+/// Teto do dock de contexto: a viewport precisa manter área útil.
+pub const PROPERTIES_MAX_WIDTH: f32 = 560.0;
+/// Altura inicial da Asset Library do shell Slint (logical px).
+pub const SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT: f32 = 200.0;
+/// Piso da Asset Library: cabe uma fileira de cartões com o cabeçalho.
+pub const SHELL_ASSET_LIBRARY_MIN_HEIGHT: f32 = 132.0;
+/// Teto da Asset Library: nunca cobre mais que isso da viewport.
+pub const SHELL_ASSET_LIBRARY_MAX_HEIGHT: f32 = 520.0;
+/// Limite canônico do nome de ativo (Outliner, inspetor e biblioteca).
+pub const ASSET_NAME_MAX_LEN: usize = 64;
+
+/// Recusa de renomeação de ativo.
+///
+/// A mensagem é o texto de status que o shell mostra: o domínio decide o
+/// motivo, a UI só apresenta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum AssetRenameError {
+    #[error("No active asset to rename")]
+    NoActiveAsset,
+    #[error("Asset name cannot be empty")]
+    EmptyName,
+    #[error("Asset name is limited to 64 characters")]
+    NameTooLong,
+}
 
 /// 4. ESTADO DE APRESENTAÇÃO E WIDGETS UI: campos visuais, abas, pesquisas e preferências.
 pub struct UiState {
@@ -778,6 +942,9 @@ pub struct UiState {
     pub density: UiDensity,
     /// Altura do painel Scene automática (conteúdo) vs manual (divisor).
     pub scene_split_auto: bool,
+    /// Altura da Asset Library do shell Slint (logical px), dona do valor que o
+    /// divisor horizontal ajusta. Distinta da shelf do shell egui legado.
+    pub shell_asset_library_height: f32,
     /// Busca do Scene: aberta (campo expandido) e foco pendente (Ctrl+F).
     pub scene_search_open: bool,
     pub scene_search_focus_request: bool,
@@ -846,6 +1013,7 @@ impl UiState {
             show_shelf: true,
             density: UiDensity::Comfortable,
             scene_split_auto: true,
+            shell_asset_library_height: SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT,
             scene_search_open: false,
             scene_search_focus_request: false,
             scene_filter: SceneFilter::default(),
@@ -880,6 +1048,39 @@ impl UiState {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status = msg.into();
+    }
+
+    /// Largura do dock de contexto, limitada à faixa utilizável.
+    ///
+    /// Retorna `true` quando o valor mudou — o divisor arrastável usa isso para
+    /// evitar trabalho de renderização em arrastos que já bateram no limite.
+    /// Entradas não finitas são recusadas em vez de virarem um chute.
+    pub fn set_right_width(&mut self, width: f32) -> bool {
+        if !width.is_finite() {
+            return false;
+        }
+        let clamped = width.clamp(PROPERTIES_MIN_WIDTH, PROPERTIES_MAX_WIDTH);
+        if (clamped - self.right_width).abs() < f32::EPSILON {
+            return false;
+        }
+        self.right_width = clamped;
+        true
+    }
+
+    /// Altura da Asset Library do shell Slint, limitada à faixa utilizável.
+    pub fn set_shell_asset_library_height(&mut self, height: f32) -> bool {
+        if !height.is_finite() {
+            return false;
+        }
+        let clamped = height.clamp(
+            SHELL_ASSET_LIBRARY_MIN_HEIGHT,
+            SHELL_ASSET_LIBRARY_MAX_HEIGHT,
+        );
+        if (clamped - self.shell_asset_library_height).abs() < f32::EPSILON {
+            return false;
+        }
+        self.shell_asset_library_height = clamped;
+        true
     }
 }
 
@@ -1015,6 +1216,8 @@ pub struct WorkspaceUiMemory {
     /// restaura a composição, não só a divisão do dock.
     pub left_width: f32,
     pub right_width: f32,
+    /// Altura da Asset Library do shell Slint por workspace.
+    pub shell_asset_library_height: f32,
 }
 
 impl Default for WorkspaceUiMemory {
@@ -1026,6 +1229,7 @@ impl Default for WorkspaceUiMemory {
             inspector_collapsed: false,
             left_width: TOOLBAR_DEFAULT_WIDTH,
             right_width: PROPERTIES_DEFAULT_WIDTH,
+            shell_asset_library_height: SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT,
         }
     }
 }
@@ -1360,6 +1564,7 @@ impl AppState {
             inspector_collapsed: self.ui.inspector_collapsed,
             left_width: self.ui.left_width,
             right_width: self.ui.right_width,
+            shell_asset_library_height: self.ui.shell_asset_library_height,
         };
         let restored = self.ui.workspace_memory[workspace_index(next)].clone();
         self.ui.right_dock_split = restored.dock_split;
@@ -1368,6 +1573,7 @@ impl AppState {
         self.ui.inspector_collapsed = restored.inspector_collapsed;
         self.ui.left_width = restored.left_width;
         self.ui.right_width = restored.right_width;
+        self.ui.shell_asset_library_height = restored.shell_asset_library_height;
         self.session.workspace = next;
         self.mark_dirty();
     }
@@ -1434,6 +1640,7 @@ impl AppState {
 
     /// Checkpoint de undo ANTES de mutar o projeto + evento.
     pub fn checkpoint(&mut self, label: &str) {
+        self.project.project.history_selection = self.session.selection.assets.clone();
         self.project.checkpoint(label);
         self.mark_dirty();
     }
@@ -1451,7 +1658,9 @@ impl AppState {
             return true;
         }
         let cur = self.project.project.clone();
-        if let Some(prev) = self.project.undo.undo(cur) {
+        let bytes = cur.estimated_bytes();
+        if let Some(prev) = self.project.undo.undo_sized(cur, bytes) {
+            self.session.selection.assets = prev.history_selection.clone();
             self.project.palette = prev.palette.clone();
             self.project.project = prev;
             self.project.is_dirty = !self.project.undo.is_clean();
@@ -1477,7 +1686,9 @@ impl AppState {
             return true;
         }
         let cur = self.project.project.clone();
-        if let Some(next) = self.project.undo.redo(cur) {
+        let bytes = cur.estimated_bytes();
+        if let Some(next) = self.project.undo.redo_sized(cur, bytes) {
+            self.session.selection.assets = next.history_selection.clone();
             self.project.palette = next.palette.clone();
             self.project.project = next;
             self.project.is_dirty = !self.project.undo.is_clean();
@@ -1503,7 +1714,33 @@ impl AppState {
     pub fn sync_selection(&mut self) {
         self.session
             .sync_selection(&self.project.project, &mut self.events);
+        self.project.project.history_selection = self.session.selection.assets.clone();
         self.mark_dirty();
+    }
+
+    /// Shared object selection authority for Parts, viewport and automation.
+    pub fn select_object(&mut self, index: Option<usize>, extend: bool) {
+        if self.modal.is_some() || self.mesh_preview.is_some() || self.paint_stroke.is_some() { return; }
+        let Some(index) = index.filter(|&i| self.project.assets.get(i).is_some_and(|a| a.visible && !a.locked)) else {
+            if !extend {
+                self.project.active = usize::MAX;
+                self.session.selection = Selection::default();
+                self.sync_selection();
+            }
+            return;
+        };
+        let id = self.project.assets[index].id;
+        if !extend { self.session.selection.assets.clear(); }
+        if extend && self.session.selection.assets.contains(&id) {
+            self.session.selection.assets.retain(|selected| *selected != id);
+            self.project.active = self.session.selection.assets.last().and_then(|last|
+                self.project.assets.iter().position(|a| a.id == *last)).unwrap_or(usize::MAX);
+        } else {
+            self.session.selection.assets.push(id);
+            self.project.active = index;
+        }
+        self.session.selection.asset = self.project.active().map(|a| a.id);
+        self.sync_selection();
     }
 
     /// Retorna o domínio de seleção e interação ativo (P3D-015).
@@ -1535,6 +1772,92 @@ impl AppState {
     ///
     /// `EditMode` é derivado deste estado — não existe escrita separada de modo.
     pub fn set_selection_domain(&mut self, domain: SelectionDomain) {
+        let previous = self.session.selection_domain;
+        let source = if previous == SelectionDomain::Object {
+            self.session.last_component_domain
+        } else {
+            previous
+        };
+        if domain.is_component()
+            && source != domain
+            && let Some(mesh) = self.project.active_mesh_mut()
+        {
+            match source {
+                SelectionDomain::Vertex => match domain {
+                    SelectionDomain::Edge => {
+                        mesh.selected_edges = mesh
+                            .edges_unique()
+                            .into_iter()
+                            .filter(|&(a, b)| {
+                                mesh.verts[a as usize].selected && mesh.verts[b as usize].selected
+                            })
+                            .collect();
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        for vertex in &mut mesh.verts {
+                            vertex.selected = false;
+                        }
+                        let selected_edges: Vec<_> = mesh.selected_edges.iter().copied().collect();
+                        for (a, b) in selected_edges {
+                            mesh.verts[a as usize].selected = true;
+                            mesh.verts[b as usize].selected = true;
+                        }
+                    }
+                    SelectionDomain::Face => {
+                        mesh.sync_face_selection_from_verts();
+                        mesh.selected_edges.clear();
+                        mesh.sync_vert_selection_from_faces();
+                    }
+                    _ => {}
+                },
+                SelectionDomain::Edge => match domain {
+                    SelectionDomain::Vertex => {
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        mesh.selected_edges.clear();
+                    }
+                    SelectionDomain::Face => {
+                        for face in &mut mesh.faces {
+                            face.selected = !face.verts.is_empty()
+                                && (0..face.verts.len()).all(|i| {
+                                    let a = face.verts[i];
+                                    let b = face.verts[(i + 1) % face.verts.len()];
+                                    mesh.selected_edges.contains(&(a.min(b), a.max(b)))
+                                });
+                        }
+                        mesh.selected_edges.clear();
+                        mesh.sync_vert_selection_from_faces();
+                    }
+                    _ => {}
+                },
+                SelectionDomain::Face => match domain {
+                    SelectionDomain::Vertex => {
+                        mesh.sync_vert_selection_from_faces();
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        mesh.selected_edges.clear();
+                    }
+                    SelectionDomain::Edge => {
+                        mesh.selected_edges.clear();
+                        for face in mesh.faces.iter().filter(|face| face.selected) {
+                            for i in 0..face.verts.len() {
+                                let a = face.verts[i];
+                                let b = face.verts[(i + 1) % face.verts.len()];
+                                mesh.selected_edges.insert((a.min(b), a.max(b)));
+                            }
+                        }
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        for vertex in &mut mesh.verts {
+                            vertex.selected = false;
+                        }
+                        for &(a, b) in &mesh.selected_edges {
+                            mesh.verts[a as usize].selected = true;
+                            mesh.verts[b as usize].selected = true;
+                        }
+                    }
+                    _ => {}
+                },
+                SelectionDomain::Object => {}
+            }
+        }
+        self.session.tools.hover = HoverTarget::None;
         self.session.selection_domain = domain;
         if domain.is_component() {
             self.session.last_component_domain = domain;
@@ -1562,6 +1885,19 @@ impl AppState {
 
     /// Calcula a posição no espaço de mundo do pivô selecionado (P3D-027).
     pub fn calculate_pivot(&self, pivot: PivotPoint) -> glam::Vec3 {
+        if self.selection_domain() == SelectionDomain::Object && pivot != PivotPoint::Cursor3D {
+            let points: Vec<_> = self.project.assets.iter()
+                .filter(|a| !a.locked && (self.session.selection.assets.contains(&a.id) || self.project.active().is_some_and(|active| active.id == a.id)))
+                .flat_map(|a| a.mesh.verts.iter().map(|v| v.vec())).collect();
+            if !points.is_empty() {
+                if pivot == PivotPoint::BoundingBoxCenter {
+                    let min = points.iter().copied().fold(glam::Vec3::splat(f32::INFINITY), glam::Vec3::min);
+                    let max = points.iter().copied().fold(glam::Vec3::splat(f32::NEG_INFINITY), glam::Vec3::max);
+                    return (min + max) * 0.5;
+                }
+                return points.iter().sum::<glam::Vec3>() / points.len() as f32;
+            }
+        }
         match pivot {
             PivotPoint::Cursor3D => glam::Vec3::from(self.cursor_3d),
             PivotPoint::BoundingBoxCenter => {
@@ -1611,6 +1947,9 @@ impl AppState {
             }
             crate::modal::ModalKind::Extrude => {
                 format!("Extrude {:.2} m", modal.value)
+            }
+            crate::modal::ModalKind::ExtrudeIndividual => {
+                format!("Extrude Individual {:.2} m", modal.value)
             }
             crate::modal::ModalKind::Inset => {
                 format!("Inset {:.2}", modal.value)
@@ -1676,6 +2015,15 @@ impl AppState {
 
     /// Pinta vértices próximos do ponto 3D (vertex paint).
     pub fn paint_at(&mut self, center: Vec3) {
+        self.paint_at_with_face(center, None)
+    }
+
+    /// Pinta respeitando `fill_scope` e `brush_lock`.
+    ///
+    /// `face_hint` é o índice da face sob o cursor, quando o chamador tem um:
+    /// sem ele os escopos por face caem no comportamento de raio em vez de
+    /// inventar uma face.
+    pub fn paint_at_with_face(&mut self, center: Vec3, face_hint: Option<usize>) {
         let before = self
             .session
             .tools
@@ -1689,15 +2037,103 @@ impl AppState {
             self.session.tools.paint_strength.clamp(0.0, 1.0),
         );
         let r2 = r * r;
-        if let Some(obj) = self.project.active_mut() {
-            for v in &mut obj.mesh.verts {
-                let d2 = (v.vec() - center).length_squared();
-                if d2 <= r2 {
-                    for (ch, cc) in v.color.iter_mut().zip(col.iter()) {
-                        *ch = *ch * (1.0 - k) + cc * k;
+        let scope = self.session.tools.fill_scope;
+        let lock = self.session.tools.brush_lock;
+
+        // Conjunto de vértices elegíveis pelo escopo. `None` = todos (raio decide).
+        let allowed: Option<Vec<bool>> = match scope {
+            crate::brush::FillScope::ConnectedPixels => None,
+            crate::brush::FillScope::Object => {
+                Some(vec![
+                    true;
+                    self.project.active_mesh().map_or(0, |m| m.verts.len())
+                ])
+            }
+            crate::brush::FillScope::Face => face_hint.and_then(|face| {
+                self.project.active_mesh().map(|mesh| {
+                    let mut mask = vec![false; mesh.verts.len()];
+                    if let Some(face) = mesh.faces.get(face) {
+                        for &vi in &face.verts {
+                            if let Some(slot) = mask.get_mut(vi as usize) {
+                                *slot = true;
+                            }
+                        }
                     }
-                    n += 1;
+                    mask
+                })
+            }),
+            crate::brush::FillScope::SelectedFaces => self.project.active_mesh().map(|mesh| {
+                let mut mask = vec![false; mesh.verts.len()];
+                for face in &mesh.faces {
+                    if face.selected {
+                        for &vi in &face.verts {
+                            if let Some(slot) = mask.get_mut(vi as usize) {
+                                *slot = true;
+                            }
+                        }
+                    }
                 }
+                mask
+            }),
+            crate::brush::FillScope::UvIsland => face_hint.and_then(|face| {
+                self.project.active_mesh().map(|mesh| {
+                    let mut mask = vec![false; mesh.verts.len()];
+                    let islands = mesh.uv_islands();
+                    if let Some(island) = islands.iter().find(|island| island.faces.contains(&face))
+                    {
+                        for &fi in &island.faces {
+                            if let Some(face) = mesh.faces.get(fi) {
+                                for &vi in &face.verts {
+                                    if let Some(slot) = mask.get_mut(vi as usize) {
+                                        *slot = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    mask
+                })
+            }),
+        };
+
+        // Trava de pincel: restringe a superfície alcançável a partir do primeiro
+        // toque do traço, sem bloquear o resto do fluxo.
+        let locked_face = match lock {
+            crate::brush::BrushLock::None => None,
+            crate::brush::BrushLock::FirstObject => Some(None),
+            crate::brush::BrushLock::FirstFace => Some(face_hint),
+            // Travar nas faces selecionadas é um escopo, não uma trava de
+            // primeiro toque: quem restringe é `fill_scope`, não o lock.
+            crate::brush::BrushLock::SelectedFaces => None,
+        };
+        if let Some(face) = locked_face {
+            self.session.tools.paint_lock_face.get_or_insert(face);
+        }
+        let lock_face = self.session.tools.paint_lock_face;
+
+        if let Some(obj) = self.project.active_mut() {
+            let mesh = &mut obj.mesh;
+            for (index, v) in mesh.verts.iter_mut().enumerate() {
+                if allowed.as_ref().is_some_and(|mask| !mask[index]) {
+                    continue;
+                }
+                let d2 = (v.vec() - center).length_squared();
+                let in_radius = scope == crate::brush::FillScope::Object
+                    || scope == crate::brush::FillScope::SelectedFaces
+                    || d2 <= r2;
+                if !in_radius {
+                    continue;
+                }
+                if let (Some(locked), Some(current)) = (lock_face, face_hint)
+                    && locked.is_some()
+                    && locked != Some(current)
+                {
+                    continue;
+                }
+                for (ch, cc) in v.color.iter_mut().zip(col.iter()) {
+                    *ch = *ch * (1.0 - k) + cc * k;
+                }
+                n += 1;
             }
         }
         if n > 0 {
@@ -1719,6 +2155,9 @@ impl AppState {
         }
         if self.session.tools.paint_stroke.is_none() {
             self.session.tools.paint_stroke = Some(self.project.project.clone());
+            // A trava de pincel vale por traço: o próximo traço pode começar em
+            // outra superfície.
+            self.session.tools.paint_lock_face = None;
         }
     }
 
@@ -1778,6 +2217,134 @@ impl AppState {
             return true;
         }
         false
+    }
+
+    /// Limite canônico do nome de ativo exibido no Outliner e nos painéis.
+    pub const fn asset_name_max_len() -> usize {
+        ASSET_NAME_MAX_LEN
+    }
+
+    /// Aplica uma operação booleana entre o ativo (A) e o operando (B).
+    ///
+    /// O resultado substitui a malha de A e B é removido da cena, que é o
+    /// comportamento canônico de Fuse/Cut sem o modificador Keep Parts.
+    pub fn apply_boolean(
+        &mut self,
+        op: petunia_mesh::boolean::BooleanOp,
+    ) -> Result<usize, petunia_mesh::boolean::BooleanError> {
+        use petunia_mesh::boolean::{BooleanError, boolean_meshes};
+        let operand_id = self
+            .session
+            .tools
+            .boolean_operand
+            .ok_or(BooleanError::InvalidInput("no operand selected"))?;
+        let active_index = self.project.active;
+        let operand_index = self
+            .project
+            .assets
+            .iter()
+            .position(|asset| asset.id == operand_id)
+            .ok_or(BooleanError::InvalidInput("operand no longer exists"))?;
+        if operand_index == active_index {
+            return Err(BooleanError::InvalidInput("operand is the active asset"));
+        }
+        // O provedor booleano exige triângulos fechados; a topologia de quads
+        // do Petunia é preservada em tudo o mais, então triangulamos só as cópias
+        // que entram no kernel.
+        let mut a = self.project.assets[active_index].mesh.clone();
+        let mut b = self.project.assets[operand_index].mesh.clone();
+        a.triangulate();
+        b.triangulate();
+        let result = boolean_meshes(&a, &b, op)?;
+        let verts = result.verts.len();
+
+        self.checkpoint(match op {
+            petunia_mesh::boolean::BooleanOp::Union => "fuse",
+            petunia_mesh::boolean::BooleanOp::Difference => "cut",
+            petunia_mesh::boolean::BooleanOp::Intersection => "intersect",
+        });
+        if let Some(asset) = self.project.assets.get_mut(active_index) {
+            asset.mesh = result;
+        }
+        // Keep Parts mantém B na cena; sem o modificador ele é consumido, e
+        // remover antes do ativo desloca o índice.
+        if !self.session.tools.boolean_keep_parts {
+            self.project.assets.remove(operand_index);
+            if operand_index < active_index {
+                self.project.active = active_index - 1;
+            }
+        }
+        self.session.tools.boolean_operand = None;
+        self.sync_selection();
+        self.emit_mesh_changed();
+        self.mark_dirty();
+        Ok(verts)
+    }
+
+    /// **Join**: funde o operando no ativo como um único objeto, sem kernel
+    /// booleano — a topologia dos dois é preservada lado a lado.
+    pub fn join_active_with_operand(&mut self) -> Result<usize, &'static str> {
+        let operand_id = self
+            .session
+            .tools
+            .boolean_operand
+            .ok_or("Choose a boolean operand first")?;
+        let active_index = self.project.active;
+        let operand_index = self
+            .project
+            .assets
+            .iter()
+            .position(|asset| asset.id == operand_id)
+            .ok_or("The boolean operand no longer exists")?;
+        if operand_index == active_index {
+            return Err("The boolean operand cannot be the active object");
+        }
+        let other = self.project.assets[operand_index].mesh.clone();
+        let added = other.verts.len();
+        self.checkpoint("join");
+        if let Some(asset) = self.project.assets.get_mut(active_index) {
+            asset.mesh.join(&other);
+        }
+        self.project.assets.remove(operand_index);
+        if operand_index < active_index {
+            self.project.active = active_index - 1;
+        }
+        self.session.tools.boolean_operand = None;
+        self.sync_selection();
+        self.emit_mesh_changed();
+        self.mark_dirty();
+        Ok(added)
+    }
+
+    /// Renomeia o ativo ativo (P3D-093).
+    ///
+    /// Retorna `Ok(true)` quando o nome mudou — uma única entrada de undo — e
+    /// `Ok(false)` quando o nome pedido já era o atual, para que confirmar sem
+    /// editar não empilhe histórico. Espaços nas pontas são removidos antes da
+    /// validação, então `"  Cube  "` vira `"Cube"` e `"   "` é recusado.
+    pub fn rename_active_asset(&mut self, name: &str) -> Result<bool, AssetRenameError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(AssetRenameError::EmptyName);
+        }
+        if trimmed.chars().count() > ASSET_NAME_MAX_LEN {
+            return Err(AssetRenameError::NameTooLong);
+        }
+        let index = self.project.active;
+        let Some(asset) = self.project.assets.get(index) else {
+            return Err(AssetRenameError::NoActiveAsset);
+        };
+        if asset.name == trimmed {
+            return Ok(false);
+        }
+        let previous = asset.name.clone();
+        self.checkpoint(&format!("rename: {trimmed}"));
+        if let Some(asset) = self.project.assets.get_mut(index) {
+            asset.name = trimmed.to_string();
+        }
+        self.set_status(format!("Renamed '{previous}' to '{trimmed}'"));
+        self.mark_dirty();
+        Ok(true)
     }
 
     /// Centraliza e enquadra a câmera 3D na geometria selecionada (ou em todo o modelo ativo).

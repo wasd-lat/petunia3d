@@ -175,12 +175,18 @@ impl CommandDispatcher {
     }
 
     /// Alias for a registered command id (keymap/MCP/Lua dialects).
+    ///
+    /// The metadata clone gets the alias id: sem isso o catálogo publicado lista
+    /// duas linhas com o mesmo `CommandId` (uma para o dono, outra para o slot
+    /// do alias) e a contagem de comandos registrados mente.
     pub fn alias(&mut self, from: impl Into<String>, to: &str) {
         let from = from.into();
         if let Some(cmd) = self.registry.get(to).cloned() {
             self.registry.insert(from.clone(), cmd);
         }
         if let Some(meta) = self.metadata.get(to).cloned() {
+            let mut meta = meta;
+            meta.id = from.clone();
             self.metadata.insert(from, meta);
         }
     }
@@ -221,10 +227,17 @@ impl CommandDispatcher {
     }
 
     pub fn dispatch(state: &mut AppState, cmd: &dyn Command) -> Result<(), CommandError> {
+        cmd.can_execute(state).map_err(|reason| CommandError::Execution(reason.into()))?;
+        if cmd.is_destructive() && (state.modal.is_some() || state.mesh_preview.is_some() || state.paint_stroke.is_some()) {
+            return Err(CommandError::Execution("Confirm or cancel the active operation first".into()));
+        }
+        state.project.project.history_selection = state.session.selection.assets.clone();
+        let original_selection = state.session.selection.clone();
         let original = cmd.is_destructive().then(|| state.project.project.clone());
         if let Err(error) = cmd.execute(state) {
             if let Some(original) = original {
                 state.project.project = original;
+                state.session.selection = original_selection;
                 state.sync_selection();
             }
             return Err(error);
@@ -239,7 +252,8 @@ impl CommandDispatcher {
             state.mark_document_dirty();
         }
         state.sync_selection();
-        state.emit_mesh_changed();
+        if cmd.is_destructive() { state.emit_mesh_changed(); }
+        else { state.project.project.bump_selection(); }
         state.mark_dirty();
         Ok(())
     }
@@ -665,6 +679,46 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "model.fuse",
+                "Fuse",
+                "Combine the active object with the boolean operand into one",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            BooleanOpCmd::new(petunia_mesh::boolean::BooleanOp::Union),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "model.cut",
+                "Cut",
+                "Subtract the boolean operand from the active object",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            BooleanOpCmd::new(petunia_mesh::boolean::BooleanOp::Difference),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "model.join",
+                "Join",
+                "Merge the operand into the active object keeping both topologies",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            JoinObjectsCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "model.intersect",
+                "Intersect",
+                "Keep only the volume shared with the boolean operand",
+                CommandCategory::Model,
+            )
+            .with_docs(DocsTopic::Modeling),
+            BooleanOpCmd::new(petunia_mesh::boolean::BooleanOp::Intersection),
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.bevel",
                 "Bevel Edges",
                 "Bevel selected mesh edges",
@@ -747,7 +801,7 @@ impl CommandDispatcher {
             CommandMetadata::new(
                 "model.connect",
                 "Connect Loops",
-                "Bridge two selected faces with connecting quads",
+                "Connect two faces or boundary loops with quads and triangles",
                 CommandCategory::Model,
             )
             .with_docs(DocsTopic::Modeling),
@@ -1269,6 +1323,8 @@ impl Command for DeleteAssetCmd {
         let idx = self.asset_index.unwrap_or(state.project.active);
         if idx >= state.project.assets.len() {
             Err("No active asset to delete")
+        } else if state.project.assets[idx].locked {
+            Err("Object is locked")
         } else {
             Ok(())
         }
@@ -1280,14 +1336,7 @@ impl Command for DeleteAssetCmd {
             return Err(CommandError::InvalidAssetIndex(idx));
         }
 
-        state.project.assets.remove(idx);
-        if state.project.assets.is_empty() {
-            state
-                .project
-                .assets
-                .push(Asset::new("Cube", Mesh::cube(2.0)));
-        }
-        state.project.active = state.project.active.min(state.project.assets.len() - 1);
+        state.project.remove(idx);
         state.set_status("Asset deleted");
         Ok(())
     }
@@ -1304,8 +1353,10 @@ impl Command for DeleteSelectionCmd {
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         if state.edit_mode() == EditMode::Object {
-            if state.project.assets.is_empty() {
+            if state.project.active().is_none() {
                 Err("No active asset to delete")
+            } else if state.is_active_locked() {
+                Err("Object is locked")
             } else {
                 Ok(())
             }
@@ -1318,8 +1369,14 @@ impl Command for DeleteSelectionCmd {
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         if state.edit_mode() == EditMode::Object {
-            let cmd = DeleteAssetCmd { asset_index: None };
-            return cmd.execute(state);
+            let selected = state.session.selection.assets.clone();
+            if selected.is_empty() { return DeleteAssetCmd { asset_index: None }.execute(state); }
+            state.project.assets.retain(|asset| !selected.contains(&asset.id) || asset.locked);
+            state.project.active = usize::MAX;
+            state.session.selection.assets.clear();
+            state.sync_selection();
+            state.set_status("Deleted selected objects");
+            return Ok(());
         }
 
         let Some(mesh) = state.project.active_mesh_mut() else {
@@ -1342,7 +1399,7 @@ impl Command for DuplicateSelectionCmd {
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         if state.edit_mode() == EditMode::Object {
-            if state.project.assets.is_empty() {
+            if state.project.active().is_none() {
                 Err("No active asset to duplicate")
             } else {
                 Ok(())
@@ -1356,8 +1413,15 @@ impl Command for DuplicateSelectionCmd {
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         if state.edit_mode() == EditMode::Object {
-            let cmd = DuplicateAssetCmd { asset_index: None };
-            return cmd.execute(state);
+            let selected = &state.session.selection.assets;
+            let copies: Vec<_> = state.project.assets.iter().filter(|asset| selected.contains(&asset.id)).map(|asset| asset.duplicate()).collect();
+            if copies.is_empty() { return DuplicateAssetCmd { asset_index: None }.execute(state); }
+            state.session.selection.assets = copies.iter().map(|asset| asset.id).collect();
+            state.project.assets.extend(copies);
+            state.project.active = state.project.assets.len() - 1;
+            state.sync_selection();
+            state.set_status("Duplicated selected objects");
+            return Ok(());
         }
 
         let Some(mesh) = state.project.active_mesh_mut() else {
@@ -1383,7 +1447,7 @@ impl Command for SelectAllCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.project.active_mesh().is_none() {
+        if state.selection_domain() != crate::SelectionDomain::Object && state.project.active_mesh().is_none() {
             Err("No active mesh")
         } else {
             Ok(())
@@ -1391,6 +1455,12 @@ impl Command for SelectAllCmd {
     }
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        if state.selection_domain() == crate::SelectionDomain::Object {
+            state.session.selection.assets = state.project.assets.iter().filter(|a| a.visible && !a.locked).map(|a| a.id).collect();
+            state.project.active = state.session.selection.assets.last().and_then(|id| state.project.assets.iter().position(|a| a.id == *id)).unwrap_or(usize::MAX);
+            state.sync_selection();
+            return Ok(());
+        }
         let Some(mesh) = state.project.active_mesh_mut() else {
             return Err(CommandError::NoActiveAsset);
         };
@@ -1414,7 +1484,7 @@ impl Command for ClearSelectionCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.project.active_mesh().is_none() {
+        if state.selection_domain() != crate::SelectionDomain::Object && state.project.active_mesh().is_none() {
             Err("No active mesh")
         } else {
             Ok(())
@@ -1422,6 +1492,10 @@ impl Command for ClearSelectionCmd {
     }
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        if state.selection_domain() == crate::SelectionDomain::Object {
+            state.select_object(None, false);
+            return Ok(());
+        }
         let Some(mesh) = state.project.active_mesh_mut() else {
             return Err(CommandError::NoActiveAsset);
         };
@@ -1445,7 +1519,7 @@ impl Command for InvertSelectionCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.project.active_mesh().is_none() {
+        if state.selection_domain() != crate::SelectionDomain::Object && state.project.active_mesh().is_none() {
             Err("No active mesh")
         } else {
             Ok(())
@@ -1453,6 +1527,14 @@ impl Command for InvertSelectionCmd {
     }
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        if state.selection_domain() == crate::SelectionDomain::Object {
+            let selected = &state.session.selection.assets;
+            let ids: Vec<_> = state.project.assets.iter().filter(|a| a.visible && !a.locked && !selected.contains(&a.id)).map(|a| a.id).collect();
+            state.project.active = ids.last().and_then(|id| state.project.assets.iter().position(|a| a.id == *id)).unwrap_or(usize::MAX);
+            state.session.selection.assets = ids;
+            state.sync_selection();
+            return Ok(());
+        }
         let Some(mesh) = state.project.active_mesh_mut() else {
             return Err(CommandError::NoActiveAsset);
         };
@@ -2430,6 +2512,116 @@ impl Command for KnifeToolCmd {
     }
 }
 
+/// Operação booleana entre o ativo e o operando escolhido (Fuse/Cut/Intersect).
+#[derive(Debug, Clone, Copy)]
+pub struct BooleanOpCmd {
+    pub op: petunia_mesh::boolean::BooleanOp,
+}
+
+impl BooleanOpCmd {
+    pub const fn new(op: petunia_mesh::boolean::BooleanOp) -> Self {
+        Self { op }
+    }
+
+    const fn label_for(self) -> &'static str {
+        match self.op {
+            petunia_mesh::boolean::BooleanOp::Union => "fuse",
+            petunia_mesh::boolean::BooleanOp::Difference => "cut",
+            petunia_mesh::boolean::BooleanOp::Intersection => "intersect",
+        }
+    }
+}
+
+impl Command for BooleanOpCmd {
+    fn label(&self) -> &'static str {
+        self.label_for()
+    }
+
+    /// Sem checkpoint do dispatcher: `apply_boolean` captura a transação única.
+    /// Com os dois, cada operação empilharia duas entradas de undo.
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.project.active_mesh().is_none() {
+            return Err("No active mesh");
+        }
+        let Some(operand) = state.session.tools.boolean_operand else {
+            return Err("Choose a boolean operand first");
+        };
+        if !state.project.assets.iter().any(|asset| asset.id == operand) {
+            return Err("The boolean operand no longer exists");
+        }
+        if state
+            .project
+            .active()
+            .is_some_and(|asset| asset.id == operand)
+        {
+            return Err("The boolean operand cannot be the active object");
+        }
+        Ok(())
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        match state.apply_boolean(self.op) {
+            Ok(verts) => {
+                state.set_status(format!(
+                    "{}: result with {verts} vertices",
+                    self.label_for()
+                ));
+                Ok(())
+            }
+            Err(error) => Err(CommandError::Execution(error.to_string())),
+        }
+    }
+}
+
+/// **Join**: funde o operando no ativo preservando as duas topologias.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct JoinObjectsCmd;
+
+impl Command for JoinObjectsCmd {
+    fn label(&self) -> &'static str {
+        "join"
+    }
+
+    /// Sem checkpoint do dispatcher: `join_active_with_operand` captura a única.
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.project.active_mesh().is_none() {
+            return Err("No active mesh");
+        }
+        let Some(operand) = state.session.tools.boolean_operand else {
+            return Err("Choose a boolean operand first");
+        };
+        if !state.project.assets.iter().any(|asset| asset.id == operand) {
+            return Err("The boolean operand no longer exists");
+        }
+        if state
+            .project
+            .active()
+            .is_some_and(|asset| asset.id == operand)
+        {
+            return Err("The boolean operand cannot be the active object");
+        }
+        Ok(())
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        match state.join_active_with_operand() {
+            Ok(verts) => {
+                state.set_status(format!("Join: {verts} vertices merged"));
+                Ok(())
+            }
+            Err(reason) => Err(CommandError::Execution(reason.to_string())),
+        }
+    }
+}
+
 /// Comando para aplicação de inset nas faces selecionadas.
 #[derive(Debug, Clone)]
 pub struct InsetFacesCmd {
@@ -2980,14 +3172,20 @@ impl Command for ConnectLoopsCmd {
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         let mesh = state.project.active_mesh().ok_or("No active mesh")?;
         let n = mesh.faces.iter().filter(|f| f.selected).count();
-        if n == 2 {
+        if n == 2 || !mesh.selected_edges.is_empty() {
             Ok(())
         } else {
-            Err("Select exactly two faces")
+            Err("Select two faces or two boundary edge loops")
         }
     }
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        if state.selection_domain() == crate::SelectionDomain::Edge {
+            let mesh = state.project.active_mesh_mut().ok_or(CommandError::NoActiveAsset)?;
+            mesh.connect_selected_edges().map_err(CommandError::Execution)?;
+            state.set_status("Connected selected boundaries");
+            return Ok(());
+        }
         let faces: Vec<usize> = state
             .project
             .active_mesh()

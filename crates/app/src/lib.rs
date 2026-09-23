@@ -207,9 +207,12 @@ impl Core {
         if let Ok(s) = std::env::var("PETUNIA_SHADE") {
             match s.to_lowercase().as_str() {
                 "wire" => self.state.shading = petunia_render::Shading::Wireframe,
-                "smooth" => self.state.shading = petunia_render::Shading::Smooth,
-                "unlit" => self.state.shading = petunia_render::Shading::Unlit,
-                "textured" => self.state.textured = true,
+                "material" | "textured" => {
+                    self.state.shading = petunia_render::Shading::MaterialPreview;
+                    self.state.textured = true;
+                }
+                "rendered" => self.state.shading = petunia_render::Shading::Rendered,
+                "solid" => self.state.shading = petunia_render::Shading::Solid,
                 _ => {}
             }
         }
@@ -1055,7 +1058,12 @@ impl WgpuApp {
             self.core.state.show_xray,
             self.core.state.show_triangulation,
             self.core.state.textured,
+            self.core.state.show_wireframe_overlay,
+            self.core.state.selection_domain(),
+            self.core.state.session.tools.hover,
         );
+        gfx.renderer3d
+            .set_xray_opacity(self.core.state.session.xray_opacity);
         gfx.renderer3d
             .set_overlays(self.core.state.show_overlays, self.core.state.show_grid);
         gfx.renderer3d

@@ -175,6 +175,50 @@ pub mod text_id {
     pub const UI_REDOCK: TextId = TextId::new("ui.redock");
     pub const UI_AT_3D_CURSOR: TextId = TextId::new("ui.at_3d_cursor");
 
+    // Chrome do shell Slint: títulos de painel, botões e dicas de status.
+    pub const UI_PARTS: TextId = TextId::new("ui.parts");
+    pub const UI_PROJECT_ASSET_LIBRARY: TextId = TextId::new("ui.project_asset_library");
+    pub const UI_SAVE_ACTIVE_AS_ASSET: TextId = TextId::new("ui.save_active_as_asset");
+    pub const UI_STATUS_HINT: TextId = TextId::new("ui.status_hint");
+    pub const UI_UNWRAP_MESH: TextId = TextId::new("ui.unwrap_mesh");
+    pub const UI_PACK_ISLANDS: TextId = TextId::new("ui.pack_islands");
+    pub const UI_ACTIVE_BRUSH_COLOR: TextId = TextId::new("ui.active_brush_color");
+    pub const UI_ALBEDO_BASE_COLOR: TextId = TextId::new("ui.albedo_base_color");
+    pub const UI_THEME: TextId = TextId::new("ui.theme");
+    pub const UI_PLACE_IN_SCENE: TextId = TextId::new("ui.place_in_scene");
+
+    // Diálogo de recuperação de autosave (P3D-002).
+    pub const UI_RECOVERY_TITLE: TextId = TextId::new("ui.recovery_title");
+    pub const UI_RECOVERY_BODY: TextId = TextId::new("ui.recovery_body");
+    pub const UI_RECOVERY_RECOVER: TextId = TextId::new("ui.recovery_recover");
+    pub const UI_RECOVERY_KEEP: TextId = TextId::new("ui.recovery_keep");
+    pub const UI_RECOVERY_DISCARD: TextId = TextId::new("ui.recovery_discard");
+    pub const ACTIONS_APPLY: TextId = TextId::new("actions.apply");
+    pub const ACTIONS_CANCEL: TextId = TextId::new("actions.cancel");
+    pub const ACTIONS_DELETE: TextId = TextId::new("actions.delete");
+    pub const ACTIONS_DUPLICATE: TextId = TextId::new("actions.duplicate");
+
+    // Barra de menus do shell e itens que ela publica. As chaves de locale já
+    // existiam; o que faltava era o vínculo tipado que o shell consome.
+    pub const MENU_FILE: TextId = TextId::new("menu.file");
+    pub const MENU_EDIT: TextId = TextId::new("menu.edit");
+    pub const MENU_VIEW: TextId = TextId::new("menu.view");
+    pub const MENU_WINDOW: TextId = TextId::new("menu.window");
+    pub const MENU_COMMAND_PALETTE: TextId = TextId::new("menu.command_palette");
+    pub const MENU_PREFERENCES: TextId = TextId::new("menu.preferences");
+    pub const FILE_NEW: TextId = TextId::new("file.new");
+    pub const FILE_OPEN_PROJECT: TextId = TextId::new("file.open_project");
+    pub const FILE_SAVE: TextId = TextId::new("file.save");
+    pub const FILE_SAVE_AS: TextId = TextId::new("file.save_as");
+    pub const FILE_IMPORT_OBJ: TextId = TextId::new("file.import_obj");
+    pub const EDIT_UNDO: TextId = TextId::new("edit.undo");
+    pub const EDIT_REDO: TextId = TextId::new("edit.redo");
+    pub const VIEW_FRAME: TextId = TextId::new("view.frame");
+    pub const VIEW_FRAME_ALL: TextId = TextId::new("view.frame_all");
+    pub const VIEW_TOGGLE_PROJECTION: TextId = TextId::new("camera.projection");
+    pub const VIEW_RESET_CAMERA: TextId = TextId::new("camera.reset");
+    pub const VIEW_TOGGLE_WIREFRAME: TextId = TextId::new("shading.wire");
+
     pub const UV_TITLE: TextId = TextId::new("uv.title");
     pub const UV_SELECTED: TextId = TextId::new("uv.selected");
     pub const UV_FACES: TextId = TextId::new("uv.faces");
@@ -290,6 +334,43 @@ pub mod text_id {
         UI_FLOATING_INSPECTOR,
         UI_REDOCK,
         UI_AT_3D_CURSOR,
+        UI_PARTS,
+        UI_PROJECT_ASSET_LIBRARY,
+        UI_SAVE_ACTIVE_AS_ASSET,
+        UI_STATUS_HINT,
+        UI_UNWRAP_MESH,
+        UI_PACK_ISLANDS,
+        UI_ACTIVE_BRUSH_COLOR,
+        UI_ALBEDO_BASE_COLOR,
+        UI_THEME,
+        UI_PLACE_IN_SCENE,
+        UI_RECOVERY_TITLE,
+        UI_RECOVERY_BODY,
+        UI_RECOVERY_RECOVER,
+        UI_RECOVERY_KEEP,
+        UI_RECOVERY_DISCARD,
+        ACTIONS_APPLY,
+        ACTIONS_CANCEL,
+        ACTIONS_DELETE,
+        ACTIONS_DUPLICATE,
+        MENU_FILE,
+        MENU_EDIT,
+        MENU_VIEW,
+        MENU_WINDOW,
+        MENU_COMMAND_PALETTE,
+        MENU_PREFERENCES,
+        FILE_NEW,
+        FILE_OPEN_PROJECT,
+        FILE_SAVE,
+        FILE_SAVE_AS,
+        FILE_IMPORT_OBJ,
+        EDIT_UNDO,
+        EDIT_REDO,
+        VIEW_FRAME,
+        VIEW_FRAME_ALL,
+        VIEW_TOGGLE_PROJECTION,
+        VIEW_RESET_CAMERA,
+        VIEW_TOGGLE_WIREFRAME,
         UV_TITLE,
         UV_SELECTED,
         UV_FACES,

@@ -176,9 +176,10 @@ pub fn draw(
     };
     let mut value = match kind {
         ModalKind::Move if !matches!(constraint, ModalConstraint::Axis(_)) => translation.length(),
-        ModalKind::Move | ModalKind::Extrude | ModalKind::PushPull => {
-            projected_distance(state, rect, pivot, axis, delta, units)
-        }
+        ModalKind::Move
+        | ModalKind::Extrude
+        | ModalKind::ExtrudeIndividual
+        | ModalKind::PushPull => projected_distance(state, rect, pivot, axis, delta, units),
         ModalKind::Rotate => {
             match (
                 plane_point(state, rect, anchor, pivot, axis),
@@ -487,6 +488,7 @@ fn draw_modal_hud(painter: &egui::Painter, rect: Rect, info: ModalHudInfo<'_>) {
         ModalKind::Rotate => "Rotacionar",
         ModalKind::Scale => "Escalar",
         ModalKind::Extrude => "Extrusão",
+        ModalKind::ExtrudeIndividual => "Extrusão individual",
         ModalKind::Inset => "Inserção",
         ModalKind::Bevel => "Chanfro",
         ModalKind::PushPull => "Push/Pull",
