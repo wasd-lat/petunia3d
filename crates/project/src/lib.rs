@@ -555,6 +555,10 @@ pub struct Project {
     pub name: String,
     pub assets: Vec<Asset>,
     pub active: usize,
+    /// Transient selection context carried by in-memory undo snapshots. The
+    /// document file keeps selection in the editor session, not authored data.
+    #[serde(skip)]
+    pub history_selection: Vec<Uuid>,
     #[serde(default = "default_palette")]
     pub palette: Vec<[f32; 3]>,
     #[serde(default)]
@@ -608,6 +612,7 @@ impl Default for Project {
             name: default_project_name(),
             assets: Vec::new(),
             active: 0,
+            history_selection: Vec::new(),
             palette: default_palette(),
             collections: Vec::new(),
             annotations: Vec::new(),
@@ -684,6 +689,7 @@ impl Project {
             name: default_project_name(),
             assets: vec![cube],
             active: 0,
+            history_selection: Vec::new(),
             palette: default_palette(),
             collections: Vec::new(),
             annotations: Vec::new(),
@@ -815,13 +821,15 @@ impl Project {
     }
 
     pub fn remove(&mut self, i: usize) {
-        if self.assets.len() > 1 && i < self.assets.len() {
-            self.assets.remove(i);
-            if i < self.active && self.active > 0 {
-                self.active -= 1;
-            } else {
-                self.active = self.active.min(self.assets.len() - 1);
-            }
+        if i >= self.assets.len() { return; }
+        let removed = self.assets.remove(i);
+        self.history_selection.retain(|id| *id != removed.id);
+        if self.assets.is_empty() || self.active == usize::MAX {
+            self.active = usize::MAX;
+        } else if i < self.active {
+            self.active -= 1;
+        } else {
+            self.active = self.active.min(self.assets.len() - 1);
         }
     }
 
@@ -940,12 +948,9 @@ impl Project {
                 a.material_id = Some(fallback_mat_id);
             }
         }
-        if self.assets.is_empty() {
-            let mut cube = Asset::new("Cube", Mesh::cube(2.0));
-            cube.material_id = Some(fallback_mat_id);
-            self.assets.push(cube);
-        }
-        self.active = self.active.min(self.assets.len() - 1);
+        // An empty document and an explicitly cleared object selection are valid.
+        if self.assets.is_empty() { self.active = usize::MAX; }
+        else if self.active != usize::MAX { self.active = self.active.min(self.assets.len() - 1); }
     }
 }
 

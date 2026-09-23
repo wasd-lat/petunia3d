@@ -87,6 +87,9 @@ pub struct ModalOp {
     pub value: f32,
     /// Absolute XYZ delta, Euler XYZ degrees, or per-axis scale factors.
     pub components: Vec3,
+    /// Frozen per-point pivots for the Individual Origins policy.
+    pivots: Option<Vec<Vec3>>,
+    individual_origins: bool,
     original: Project,
     selection: Selection,
     source: Mesh,
@@ -127,6 +130,36 @@ fn axis(index: usize) -> Vec3 {
     }
 }
 
+/// Connected selected elements share an individual pivot. Loose selected points
+/// retain their own position; an object uses its complete geometric center.
+fn individual_pivots(mesh: &Mesh, object: bool) -> Vec<Vec3> {
+    if object {
+        let center = mesh.verts.iter().map(|v| v.vec()).sum::<Vec3>() / mesh.verts.len().max(1) as f32;
+        return vec![center; mesh.verts.len()];
+    }
+    let mut neighbors = vec![Vec::new(); mesh.verts.len()];
+    for (a, b) in mesh.edges_unique() {
+        let (a, b) = (a as usize, b as usize);
+        if mesh.verts[a].selected && mesh.verts[b].selected {
+            neighbors[a].push(b); neighbors[b].push(a);
+        }
+    }
+    let mut pivots: Vec<_> = mesh.verts.iter().map(|v| v.vec()).collect();
+    let mut visited = vec![false; mesh.verts.len()];
+    for seed in 0..mesh.verts.len() {
+        if visited[seed] || !mesh.verts[seed].selected { continue; }
+        let mut stack = vec![seed]; let mut group = Vec::new();
+        while let Some(index) = stack.pop() {
+            if visited[index] { continue; }
+            visited[index] = true; group.push(index);
+            stack.extend(neighbors[index].iter().copied().filter(|&i| !visited[i]));
+        }
+        let center = group.iter().map(|&i| mesh.verts[i].vec()).sum::<Vec3>() / group.len() as f32;
+        for index in group { pivots[index] = center; }
+    }
+    pivots
+}
+
 impl AppState {
     pub fn begin_modal(&mut self, kind: ModalKind) -> Result<(), ModalError> {
         if self.modal.is_some() || self.mesh_preview.is_some() || self.paint_stroke.is_some() {
@@ -135,6 +168,7 @@ impl AppState {
         if self.is_active_locked() {
             return Err(ModalError::ActiveLocked);
         }
+        self.sync_selection();
         let mesh = self.project.active_mesh().ok_or(ModalError::NoActiveMesh)?;
         if !valid_mesh(mesh) {
             return Err(ModalError::InvalidMesh);
@@ -203,8 +237,12 @@ impl AppState {
             _ => ModalConstraint::Free,
         };
         let pivot = self.calculate_pivot(self.session.pivot_point);
+        let individual_origins = transform && self.session.pivot_point == crate::PivotPoint::IndividualOrigins;
+        let pivots = individual_origins.then(|| individual_pivots(&source, self.edit_mode() == EditMode::Object));
         self.modal = Some(ModalOp {
             kind,
+            pivots,
+            individual_origins,
             constraint: initial_constraint,
             pivot,
             normal,
@@ -328,10 +366,11 @@ impl AppState {
                 let rotation = Quat::from_axis_angle(normal, value.to_radians());
                 let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
                 components = Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees());
-                for vertex in &mut mesh.verts {
+                for (index, vertex) in mesh.verts.iter_mut().enumerate() {
+                    let pivot = modal.pivots.as_ref().map_or(modal.pivot, |pivots| pivots[index]);
                     if vertex.selected {
                         vertex.pos =
-                            (modal.pivot + rotation * (vertex.vec() - modal.pivot)).to_array();
+                            (pivot + rotation * (vertex.vec() - pivot)).to_array();
                     } else if use_proportional {
                         let dist = (vertex.vec() - modal.pivot).length();
                         let weight = crate::proportional::calculate_falloff_weight(
@@ -340,7 +379,7 @@ impl AppState {
                             self.session.proportional_settings.falloff,
                         );
                         if weight > 0.0 {
-                            let rotated = modal.pivot + rotation * (vertex.vec() - modal.pivot);
+                            let rotated = pivot + rotation * (vertex.vec() - pivot);
                             vertex.pos = vertex.vec().lerp(rotated, weight).to_array();
                         }
                     }
@@ -353,10 +392,11 @@ impl AppState {
                     ModalConstraint::Plane(i) => Vec3::splat(value) + axis(i) * (1.0 - value),
                 };
                 components = factors;
-                for vertex in &mut mesh.verts {
+                for (index, vertex) in mesh.verts.iter_mut().enumerate() {
+                    let pivot = modal.pivots.as_ref().map_or(modal.pivot, |pivots| pivots[index]);
                     if vertex.selected {
                         vertex.pos =
-                            (modal.pivot + (vertex.vec() - modal.pivot) * factors).to_array();
+                            (pivot + (vertex.vec() - pivot) * factors).to_array();
                     } else if use_proportional {
                         let dist = (vertex.vec() - modal.pivot).length();
                         let weight = crate::proportional::calculate_falloff_weight(
@@ -365,7 +405,7 @@ impl AppState {
                             self.session.proportional_settings.falloff,
                         );
                         if weight > 0.0 {
-                            let scaled = modal.pivot + (vertex.vec() - modal.pivot) * factors;
+                            let scaled = pivot + (vertex.vec() - pivot) * factors;
                             vertex.pos = vertex.vec().lerp(scaled, weight).to_array();
                         }
                     }
@@ -413,11 +453,12 @@ impl AppState {
             components.y.to_radians(),
             components.z.to_radians(),
         );
-        for vertex in mesh.verts.iter_mut().filter(|v| v.selected) {
+        for (index, vertex) in mesh.verts.iter_mut().enumerate().filter(|(_, v)| v.selected) {
+            let pivot = modal.pivots.as_ref().map_or(modal.pivot, |pivots| pivots[index]);
             vertex.pos = match modal.kind {
                 ModalKind::Move => vertex.vec() + components,
-                ModalKind::Rotate => modal.pivot + rotation * (vertex.vec() - modal.pivot),
-                ModalKind::Scale => modal.pivot + components * (vertex.vec() - modal.pivot),
+                ModalKind::Rotate => pivot + rotation * (vertex.vec() - pivot),
+                ModalKind::Scale => pivot + components * (vertex.vec() - pivot),
                 _ => return Err(ModalError::InvalidInput),
             }
             .to_array();
@@ -444,7 +485,7 @@ impl AppState {
             return Err(ModalError::InvalidMesh);
         }
         let modal = self.modal.as_ref().ok_or(ModalError::NoActiveOperation)?;
-        let changed = !same_geometry(&mesh, &modal.source);
+        let mut changed = !same_geometry(&mesh, &modal.source);
         // Preserve selection flags for object transforms and identity previews.
         if (!changed
             || (self.edit_mode() == EditMode::Object
@@ -462,11 +503,33 @@ impl AppState {
             }
             mesh.selected_edges = original.selected_edges.clone();
         }
-        let active = self
-            .project
-            .active_mesh_mut()
-            .ok_or(ModalError::NoActiveMesh)?;
+        let others: Vec<_> = if self.edit_mode() == EditMode::Object && matches!(modal.kind, ModalKind::Move | ModalKind::Rotate | ModalKind::Scale) {
+            let active_id = modal.original.active().map(|asset| asset.id);
+            let rotation = Quat::from_euler(EulerRot::XYZ, components.x.to_radians(), components.y.to_radians(), components.z.to_radians());
+            modal.original.assets.iter().filter(|asset| !asset.locked && Some(asset.id) != active_id && modal.selection.assets.contains(&asset.id))
+                .map(|asset| {
+                    let mut other = asset.mesh.clone();
+                    let pivot = if modal.individual_origins {
+                        other.verts.iter().map(|v| v.vec()).sum::<Vec3>() / other.verts.len().max(1) as f32
+                    } else { modal.pivot };
+                    for vertex in &mut other.verts {
+                        vertex.pos = match modal.kind {
+                            ModalKind::Move => vertex.vec() + components,
+                            ModalKind::Rotate => pivot + rotation * (vertex.vec() - pivot),
+                            ModalKind::Scale => pivot + components * (vertex.vec() - pivot),
+                            _ => vertex.vec(),
+                        }.to_array();
+                    }
+                    (asset.id, other)
+                }).collect()
+        } else { Vec::new() };
+        if others.iter().any(|(_, mesh)| !valid_mesh(mesh)) { return Err(ModalError::InvalidMesh); }
+        changed |= others.iter().any(|(id, mesh)| modal.original.assets.iter().find(|asset| asset.id == *id).is_some_and(|asset| !same_geometry(mesh, &asset.mesh)));
+        let active = self.project.active_mesh_mut().ok_or(ModalError::NoActiveMesh)?;
         *active = mesh;
+        for (id, mesh) in others {
+            if let Some(asset) = self.project.assets.iter_mut().find(|asset| asset.id == id) { asset.mesh = mesh; }
+        }
         if let Some(modal) = self.modal.as_mut() {
             modal.value = value;
             modal.components = components;
@@ -484,7 +547,8 @@ impl AppState {
         if modal.changed {
             self.project
                 .undo
-                .checkpoint(modal.kind.label(), &modal.original);
+                .checkpoint_sized(modal.kind.label(), &modal.original, modal.original.estimated_bytes());
+            self.mark_document_dirty();
         } else {
             self.project.project = modal.original;
             self.session.selection = modal.selection;

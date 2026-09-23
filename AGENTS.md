@@ -167,3 +167,11 @@ entre o modelo da sessão e essas configurações.
 
 A escolha de modelo não altera os requisitos de qualidade, segurança,
 conformidade, testes e revisão definidos neste arquivo.
+
+## 7. Destino de publicação autorizado
+
+O repositório de trabalho é **`wasd-lat/petunia3d`**. O usuário autorizou
+publicar nele e pediu **commit e push após cada alteração concluída**.
+Use a conexão autenticada da conta `wasd-lat` quando houver múltiplas contas.
+Verifique o conteúdo remoto após publicar e identifique claramente checkpoints
+que ainda aguardam testes; publicação não substitui os critérios de aceite.

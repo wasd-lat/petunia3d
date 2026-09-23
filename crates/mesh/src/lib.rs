@@ -180,30 +180,13 @@ impl Mesh {
         c / f.verts.len().max(1) as f32
     }
 
-    /// Raycast contra a malha (Möller–Trumbore, quads como 2 tris).
+    /// Raycast against the render triangulation, including concave n-gons.
     /// Retorna `(face, t, ponto)` mais próximo, se houver.
     pub fn ray_hit(&self, origin: Vec3, dir: Vec3) -> Option<(usize, f32, Vec3)> {
         let mut best: Option<(usize, f32)> = None;
         for (fi, f) in self.faces.iter().enumerate() {
-            let idx = &f.verts;
-            if idx.len() < 3 {
-                continue;
-            }
-            let tris: [(u32, u32, u32); 2] = if idx.len() >= 4 {
-                [(idx[0], idx[1], idx[2]), (idx[0], idx[2], idx[3])]
-            } else {
-                [(idx[0], idx[1], idx[2]), (u32::MAX, u32::MAX, u32::MAX)]
-            };
-            for (a, b, c) in tris {
-                if a == u32::MAX {
-                    continue;
-                }
-                if (a as usize) >= self.verts.len()
-                    || (b as usize) >= self.verts.len()
-                    || (c as usize) >= self.verts.len()
-                {
-                    continue;
-                }
+            for corners in self.face_triangle_corners(fi) {
+                let [a, b, c] = corners.map(|corner| f.verts[corner]);
                 if let Some(t) = triangulate::ray_tri(
                     origin,
                     dir,
@@ -236,6 +219,7 @@ pub mod primitives;
 pub mod profile_geo;
 pub mod topology;
 pub mod triangulate;
+mod connect;
 pub mod uv;
 pub mod uv_tools;
 pub mod uv_xatlas;
@@ -254,7 +238,7 @@ impl Mesh {
     /// and picking; a fan can otherwise make empty space selectable.
     pub fn face_triangle_corners(&self, face_index: usize) -> Vec<[usize; 3]> {
         let Some(face) = self.faces.get(face_index) else { return Vec::new(); };
-        if face.verts.len() < 3 || face.verts.iter().any(|&v| v as usize >= self.verts.len()) {
+        if face.verts.len() < 3 || face.verts.iter().any(|&v| v as usize >= self.verts.len() || !self.verts[v as usize].vec().is_finite()) {
             return Vec::new();
         }
         if face.verts.len() == 3 { return vec![[0, 1, 2]]; }

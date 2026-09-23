@@ -835,6 +835,8 @@ impl EditorSession {
         let mut sel = Selection::default();
         if let Some(a) = project.assets.get(project.active) {
             sel.asset = Some(a.id);
+            sel.assets = self.selection.assets.iter().copied().filter(|id| project.assets.iter().any(|asset| asset.id == *id)).collect();
+            if !sel.assets.contains(&a.id) { sel.assets = vec![a.id]; }
             sel.verts = a
                 .mesh
                 .verts
@@ -1638,6 +1640,7 @@ impl AppState {
 
     /// Checkpoint de undo ANTES de mutar o projeto + evento.
     pub fn checkpoint(&mut self, label: &str) {
+        self.project.project.history_selection = self.session.selection.assets.clone();
         self.project.checkpoint(label);
         self.mark_dirty();
     }
@@ -1655,7 +1658,9 @@ impl AppState {
             return true;
         }
         let cur = self.project.project.clone();
-        if let Some(prev) = self.project.undo.undo(cur) {
+        let bytes = cur.estimated_bytes();
+        if let Some(prev) = self.project.undo.undo_sized(cur, bytes) {
+            self.session.selection.assets = prev.history_selection.clone();
             self.project.palette = prev.palette.clone();
             self.project.project = prev;
             self.project.is_dirty = !self.project.undo.is_clean();
@@ -1681,7 +1686,9 @@ impl AppState {
             return true;
         }
         let cur = self.project.project.clone();
-        if let Some(next) = self.project.undo.redo(cur) {
+        let bytes = cur.estimated_bytes();
+        if let Some(next) = self.project.undo.redo_sized(cur, bytes) {
+            self.session.selection.assets = next.history_selection.clone();
             self.project.palette = next.palette.clone();
             self.project.project = next;
             self.project.is_dirty = !self.project.undo.is_clean();
@@ -1707,7 +1714,33 @@ impl AppState {
     pub fn sync_selection(&mut self) {
         self.session
             .sync_selection(&self.project.project, &mut self.events);
+        self.project.project.history_selection = self.session.selection.assets.clone();
         self.mark_dirty();
+    }
+
+    /// Shared object selection authority for Parts, viewport and automation.
+    pub fn select_object(&mut self, index: Option<usize>, extend: bool) {
+        if self.modal.is_some() || self.mesh_preview.is_some() || self.paint_stroke.is_some() { return; }
+        let Some(index) = index.filter(|&i| self.project.assets.get(i).is_some_and(|a| a.visible && !a.locked)) else {
+            if !extend {
+                self.project.active = usize::MAX;
+                self.session.selection = Selection::default();
+                self.sync_selection();
+            }
+            return;
+        };
+        let id = self.project.assets[index].id;
+        if !extend { self.session.selection.assets.clear(); }
+        if extend && self.session.selection.assets.contains(&id) {
+            self.session.selection.assets.retain(|selected| *selected != id);
+            self.project.active = self.session.selection.assets.last().and_then(|last|
+                self.project.assets.iter().position(|a| a.id == *last)).unwrap_or(usize::MAX);
+        } else {
+            self.session.selection.assets.push(id);
+            self.project.active = index;
+        }
+        self.session.selection.asset = self.project.active().map(|a| a.id);
+        self.sync_selection();
     }
 
     /// Retorna o domínio de seleção e interação ativo (P3D-015).
@@ -1852,6 +1885,19 @@ impl AppState {
 
     /// Calcula a posição no espaço de mundo do pivô selecionado (P3D-027).
     pub fn calculate_pivot(&self, pivot: PivotPoint) -> glam::Vec3 {
+        if self.selection_domain() == SelectionDomain::Object && pivot != PivotPoint::Cursor3D {
+            let points: Vec<_> = self.project.assets.iter()
+                .filter(|a| !a.locked && (self.session.selection.assets.contains(&a.id) || self.project.active().is_some_and(|active| active.id == a.id)))
+                .flat_map(|a| a.mesh.verts.iter().map(|v| v.vec())).collect();
+            if !points.is_empty() {
+                if pivot == PivotPoint::BoundingBoxCenter {
+                    let min = points.iter().copied().fold(glam::Vec3::splat(f32::INFINITY), glam::Vec3::min);
+                    let max = points.iter().copied().fold(glam::Vec3::splat(f32::NEG_INFINITY), glam::Vec3::max);
+                    return (min + max) * 0.5;
+                }
+                return points.iter().sum::<glam::Vec3>() / points.len() as f32;
+            }
+        }
         match pivot {
             PivotPoint::Cursor3D => glam::Vec3::from(self.cursor_3d),
             PivotPoint::BoundingBoxCenter => {

@@ -22,6 +22,7 @@ hardness_decrease = "Shift+["
 hardness_increase = "Shift+]"
 
 [model]
+box_select = "B"
 select_vertex = "1"
 select_edge = "2"
 select_face = "3"

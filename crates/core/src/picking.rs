@@ -39,6 +39,21 @@ pub fn pick_mesh(
     mode: SelectMode,
     xray: bool,
 ) -> Option<PickHit> {
+    pick_mesh_filtered(mesh, camera, viewport_pixels, cursor_ndc, mode, xray, |_| true)
+}
+
+/// Same component picker with an additional scene visibility predicate. It is
+/// evaluated for each candidate, so an occluded near candidate cannot hide a
+/// visible candidate inside the same pixel tolerance.
+pub fn pick_mesh_filtered(
+    mesh: &Mesh,
+    camera: &Camera,
+    viewport_pixels: Vec2,
+    cursor_ndc: Vec2,
+    mode: SelectMode,
+    xray: bool,
+    visible: impl Fn(Vec3) -> bool,
+) -> Option<PickHit> {
     if !viewport_pixels.is_finite()
         || viewport_pixels.min_element() <= 0.0
         || !cursor_ndc.is_finite()
@@ -55,7 +70,7 @@ pub fn pick_mesh(
         let (origin, direction) = ray(inverse, cursor_ndc)?;
         return nearest_face(&triangles, origin, direction).and_then(|(face, distance)| {
             let position = origin + direction * distance;
-            project(matrix, position).map(|_| PickHit {
+            project(matrix, position).filter(|_| xray || visible(position)).map(|_| PickHit {
                 component: PickComponent::Face(face),
                 position,
             })
@@ -71,7 +86,7 @@ pub fn pick_mesh(
         if pixel_distance > tolerance {
             return;
         }
-        if !xray && occluded(&triangles, inverse, ndc.truncate(), position) {
+        if !xray && (occluded(&triangles, inverse, ndc.truncate(), position) || !visible(position)) {
             return;
         }
         // Pixel distance gives predictable targeting; depth breaks overlapping ties.
@@ -179,37 +194,9 @@ fn clip_depth(matrix: Mat4, mut a: Vec3, mut b: Vec3) -> Option<(Vec3, Vec3)> {
 fn triangles(mesh: &Mesh) -> Vec<Triangle> {
     let mut result = Vec::new();
     for (face_index, face) in mesh.faces.iter().enumerate() {
-        let Some(points) = face
-            .verts
-            .iter()
-            .map(|&index| mesh.verts.get(index as usize).map(|vertex| vertex.vec()))
-            .collect::<Option<Vec<_>>>()
-        else {
-            continue;
-        };
-        if points.len() < 3 || points.iter().any(|point| !point.is_finite()) {
-            continue;
-        }
-        let normal = triangulate::face_normal_of(&mesh.verts, &face.verts).abs();
-        let projected: Vec<_> = points
-            .iter()
-            .map(|point| {
-                if normal.x >= normal.y && normal.x >= normal.z {
-                    [point.y, point.z]
-                } else if normal.y >= normal.z {
-                    [point.x, point.z]
-                } else {
-                    [point.x, point.y]
-                }
-            })
-            .collect();
-        // Ear clipping also handles concave polygons without selecting empty notches.
-        let Ok(indices) = triangulate::ear_clip(&projected) else {
-            continue;
-        };
-        result.extend(indices.into_iter().map(|[a, b, c]| Triangle {
+        result.extend(mesh.face_triangle_corners(face_index).into_iter().map(|corners| Triangle {
             face: face_index,
-            points: [points[a], points[b], points[c]],
+            points: corners.map(|corner| mesh.verts[face.verts[corner] as usize].vec()),
         }));
     }
     result

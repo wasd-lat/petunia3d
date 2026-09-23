@@ -14,6 +14,7 @@ reset_camera = "Home"
 rename = "Ctrl+F2"
 
 [model]
+box_select = "B"
 select_vertex = "F1"
 select_edge = "F2"
 select_face = "F3"

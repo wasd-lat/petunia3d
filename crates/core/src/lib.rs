@@ -16,6 +16,7 @@ pub mod modal;
 pub mod modal_feedback;
 pub mod module;
 pub mod picking;
+pub mod transform_projection;
 pub mod primitive_session;
 pub mod project_service;
 pub mod proportional;

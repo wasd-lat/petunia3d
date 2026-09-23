@@ -311,93 +311,148 @@ component ColorSwatch inherits Rectangle {
 component NumericField inherits Rectangle {
     in property <string> label: "X";
     in property <float> value: 0.0;
+    in property <float> step: 0.1;
     in property <color> label-color: DesignTokens.axis-x;
     callback scrubbed(float, bool);
     callback scrub-started;
     callback scrub-finished;
-    callback text-committed(string);
+    callback scrub-cancelled(float);
+    callback text-committed(string) -> bool;
     property <bool> editing: false;
+    property <bool> invalid: false;
+    property <string> draft;
 
     accessible-role: spinbox;
     accessible-label: root.label;
     accessible-value: Math.round(root.value * 100) / 100;
-
+    forward-focus: field-focus;
     height: 24px;
     border-radius: 4px;
     background: touch.pressed ? DesignTokens.surface-hover : DesignTokens.surface-raised;
     border-width: 1px;
-    border-color: touch.pressed ? DesignTokens.accent : DesignTokens.border;
+    border-color: root.invalid ? DesignTokens.danger : (root.editing || touch.is-scrubbing || field-focus.has-focus ? DesignTokens.accent : DesignTokens.border);
 
-    HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 6px;
-        spacing: 4px;
-        alignment: center;
-
-        Text {
-            text: root.label;
-            color: root.label-color;
-            font-size: 10px;
-            font-weight: 700;
-            vertical-alignment: center;
-            width: 10px;
+    field-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape && touch.is-scrubbing {
+                touch.cancel-gesture();
+                return accept;
+            }
+            if !root.editing && (event.text == Key.Return || event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                root.draft = root.value;
+                root.invalid = false;
+                root.editing = true;
+                return accept;
+            }
+            reject
         }
-
-        if !root.editing: Text {
-            text: Math.round(root.value * 100) / 100;
-            color: DesignTokens.text-primary;
-            font-size: 11px;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            horizontal-stretch: 1;
-        }
-
-        if root.editing: TextInput {
-            text: root.value;
-            color: DesignTokens.text-primary;
-            font-size: 11px;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
-            init => { self.focus(); }
-            key-pressed(event) => {
-                if event.text == Key.Escape {
-                    root.editing = false;
-                    return accept;
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 6px;
+            spacing: 4px;
+            alignment: center;
+            Text {
+                text: root.label;
+                color: root.label-color;
+                font-size: 10px;
+                font-weight: 700;
+                vertical-alignment: center;
+                width: root.label == "" ? 0px : 10px;
+            }
+            if !root.editing: Text {
+                text: Math.round(root.value * 100) / 100;
+                color: DesignTokens.text-primary;
+                font-size: 11px;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                horizontal-stretch: 1;
+            }
+            if root.editing: TextInput {
+                text <=> root.draft;
+                color: DesignTokens.text-primary;
+                font-size: 11px;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                init => { self.focus(); self.select-all(); }
+                edited => { root.invalid = false; }
+                changed has-focus => {
+                    if !self.has-focus && root.editing {
+                        root.editing = false;
+                        root.invalid = !root.text-committed(self.text);
+                    }
                 }
-                if event.text == Key.UpArrow || event.text == Key.DownArrow {
-                    root.scrubbed(event.text == Key.UpArrow ? 1 : -1, event.modifiers.shift);
-                    self.text = root.value;
-                    return accept;
+                key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        root.editing = false;
+                        root.invalid = false;
+                        field-focus.focus();
+                        return accept;
+                    }
+                    if event.text == Key.UpArrow || event.text == Key.DownArrow {
+                        // Arrow edits stay in the draft until Enter or focus loss.
+                        self.text = self.text.to-float() + (event.text == Key.UpArrow ? 1 : -1) * root.step * (event.modifiers.shift ? 0.1 : 1);
+                        return accept;
+                    }
+                    reject
                 }
-                reject
-            }
-            accepted => {
-                root.text-committed(self.text);
-                root.editing = false;
-            }
-        }
-    }
-
-    touch := TouchArea {
-        enabled: !root.editing;
-        property <length> start-x;
-        property <bool> is-fine: false;
-        pointer-event(event) => {
-            is-fine = event.modifiers.shift;
-            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                start-x = self.mouse-x;
-                root.scrub-started();
-            } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
-                root.scrub-finished();
+                accepted => {
+                    root.invalid = !root.text-committed(self.text);
+                    if !root.invalid { root.editing = false; field-focus.focus(); }
+                }
             }
         }
-        moved => {
-            if self.pressed {
-                root.scrubbed((self.mouse-x - start-x) / 1px, is-fine);
-                start-x = self.mouse-x;
+        touch := TouchArea {
+            enabled: !root.editing;
+            property <length> start-x;
+            property <length> last-x;
+            property <float> original-value;
+            property <bool> is-fine: false;
+            property <bool> is-scrubbing: false;
+            property <bool> was-drag: false;
+            property <bool> cancelled: false;
+            function cancel-gesture() {
+                if is-scrubbing { root.scrub-cancelled(original-value); }
+                is-scrubbing = false;
+                cancelled = true;
+                was-drag = true;
+            }
+            pointer-event(event) => {
+                is-fine = event.modifiers.shift;
+                if event.kind == PointerEventKind.cancel || (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                    self.cancel-gesture();
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    field-focus.focus();
+                    start-x = self.mouse-x;
+                    last-x = self.mouse-x;
+                    original-value = root.value;
+                    was-drag = false;
+                    cancelled = false;
+                    root.invalid = false;
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                    if is-scrubbing { root.scrub-finished(); }
+                    is-scrubbing = false;
+                }
+            }
+            moved => {
+                if self.pressed && !cancelled {
+                    if !is-scrubbing && Math.abs(self.mouse-x - start-x) > 3px {
+                        is-scrubbing = true;
+                        was-drag = true;
+                        root.scrub-started();
+                    }
+                    if is-scrubbing {
+                        root.scrubbed((self.mouse-x - last-x) / 1px, is-fine);
+                        last-x = self.mouse-x;
+                    }
+                }
+            }
+            clicked => {
+                if !was-drag {
+                    root.draft = root.value;
+                    root.editing = true;
+                }
             }
         }
-        clicked => { root.editing = true; }
     }
 }
 
@@ -409,7 +464,9 @@ component Vector3Field inherits HorizontalLayout {
     callback scrubbed(int, float, bool);
     callback scrub-started;
     callback scrub-finished;
-    callback text-committed(int, string);
+    callback text-committed(int, string) -> bool;
+    callback scrub-cancelled;
+    in property <float> step: 0.1;
 
     spacing: 6px;
     alignment: center;
@@ -430,7 +487,9 @@ component Vector3Field inherits HorizontalLayout {
         scrubbed(delta, fine) => { root.scrubbed(0, delta, fine); }
         scrub-started => { root.scrub-started(); }
         scrub-finished => { root.scrub-finished(); }
-        text-committed(text) => { root.text-committed(0, text); }
+        text-committed(text) => { root.text-committed(0, text) }
+        scrub-cancelled(_value) => { root.scrub-cancelled(); }
+        step: root.step;
     }
     NumericField {
         label: "Y";
@@ -440,7 +499,9 @@ component Vector3Field inherits HorizontalLayout {
         scrubbed(delta, fine) => { root.scrubbed(1, delta, fine); }
         scrub-started => { root.scrub-started(); }
         scrub-finished => { root.scrub-finished(); }
-        text-committed(text) => { root.text-committed(1, text); }
+        text-committed(text) => { root.text-committed(1, text) }
+        scrub-cancelled(_value) => { root.scrub-cancelled(); }
+        step: root.step;
     }
     NumericField {
         label: "Z";
@@ -450,7 +511,9 @@ component Vector3Field inherits HorizontalLayout {
         scrubbed(delta, fine) => { root.scrubbed(2, delta, fine); }
         scrub-started => { root.scrub-started(); }
         scrub-finished => { root.scrub-finished(); }
-        text-committed(text) => { root.text-committed(2, text); }
+        text-committed(text) => { root.text-committed(2, text) }
+        scrub-cancelled(_value) => { root.scrub-cancelled(); }
+        step: root.step;
     }
 }
 
@@ -567,7 +630,11 @@ export component PetuniaSlintShell inherits Window {
     in-out property <float> xray-opacity: 0.42;
     in-out property <bool> shading-popover-open: false;
     property <bool> tool-properties-collapsed: false;
+    in-out property <string> operation-preview-commands: "";
     in-out property <bool> operation-hud-active: false;
+    in-out property <bool> transform-instant-active: false;
+    property <bool> precision-mode: false;
+    property <bool> snap-mode: false;
     in-out property <string> operation-hud-title: "";
     in-out property <[string]> operation-hud-lines: [];
     in-out property <string> operation-hud-subject: "";
@@ -597,6 +664,12 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> view-gizmo-z-commands: "";
     in-out property <length> view-gizmo-origin-x: 0px;
     in-out property <length> view-gizmo-origin-y: 0px;
+    in-out property <length> view-gizmo-x-end-x: 54px;
+    in-out property <length> view-gizmo-x-end-y: 54px;
+    in-out property <length> view-gizmo-y-end-x: 54px;
+    in-out property <length> view-gizmo-y-end-y: 54px;
+    in-out property <length> view-gizmo-z-end-x: 54px;
+    in-out property <length> view-gizmo-z-end-y: 54px;
     callback view-axis-clicked(string);
     in-out property <bool> add-menu-open: false;
     in-out property <bool> context-menu-open: false;
@@ -687,14 +760,16 @@ export component PetuniaSlintShell inherits Window {
     callback transform-scrubbed(string, int, float, bool);
     callback transform-scrub-started(string);
     callback transform-scrub-finished;
-    callback transform-text-committed(string, int, string);
+    callback transform-text-committed(string, int, string) -> bool;
+    callback transform-scrub-cancelled;
     callback viewport-orbit(float, float);
     callback viewport-pan(float, float);
     callback viewport-zoom(float);
     callback viewport-resized(float, float);
     callback viewport-select(float, float, bool);
+    callback viewport-box-select(float, float, float, float, bool, bool);
     callback viewport-transform-begin(string, float, float);
-    callback viewport-transform-update(float, float);
+    callback viewport-transform-update(float, float, bool, bool);
     callback viewport-transform-end;
     callback viewport-paint-begin(float, float);
     callback viewport-paint-update(float, float);
@@ -702,12 +777,12 @@ export component PetuniaSlintShell inherits Window {
     callback add-menu-changed(bool);
     callback tool-modal-scrubbed(float, bool);
     callback tool-modal-hovered(float);
-    callback tool-modal-text-committed(string);
+    callback tool-modal-text-committed(string) -> bool;
     callback tool-modal-apply;
     callback tool-activation-set(string);
     callback tool-modal-cancel;
     callback loop-cut-scrubbed(float);
-    callback loop-cut-slide-committed(string);
+    callback loop-cut-slide-committed(string) -> bool;
     callback loop-cut-count-committed(string);
     callback uv-editor-clicked(float, float, bool);
     callback uv-moved(float, float);
@@ -743,7 +818,7 @@ export component PetuniaSlintShell inherits Window {
     callback menu-toggled(string);
     callback menu-item-invoked(string);
     callback open-project-requested;
-    callback scene-select(string);
+    callback scene-select(string, bool);
     callback scene-toggle-visibility(string);
     callback scene-toggle-lock(string);
     callback theme-changed(string);
@@ -809,13 +884,24 @@ export component PetuniaSlintShell inherits Window {
     changed width => { root.compact-shell = self.width < 1100px; }
 
     root-focus := FocusScope {
+        init => { self.focus(); }
+        key-released(event) => {
+            root.precision-mode = event.modifiers.shift;
+            root.snap-mode = event.modifiers.control;
+            reject
+        }
         key-pressed(event) => {
+            root.precision-mode = event.modifiers.shift;
+            root.snap-mode = event.modifiers.control;
             if event.text == Key.Escape {
+                viewport-touch.clear-gesture();
                 root.escape-requested();
                 return accept;
             }
             if !root.command-search-visible && !root.settings-visible && event.text != Key.Tab {
-                root.shortcut-requested(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt);
+                root.shortcut-requested(
+                    event.text == Key.Return ? "Enter" : event.text == Key.Backspace ? "Backspace" : event.text == Key.Delete ? "Delete" : event.text == Key.Home ? "Home" : event.text,
+                    event.modifiers.control, event.modifiers.shift, event.modifiers.alt);
                 return accept;
             }
             reject
@@ -1045,6 +1131,12 @@ export component PetuniaSlintShell inherits Window {
                                 clicked => { root.active-tool-changed("cut"); }
                             }
                             ToolButton {
+                                icon: IconSet.SquareDashed;
+                                semantic-label: "Box Select";
+                                active: active-tool == "box_select";
+                                clicked => { root.active-tool-changed("box_select"); }
+                            }
+                            ToolButton {
                                 icon: IconSet.Maximize2;
                                 semantic-label: "Frame Selection";
                                 active: false;
@@ -1150,7 +1242,7 @@ export component PetuniaSlintShell inherits Window {
                     if selection-overlay-visible: Path {
                         fit: ImageFit.preserve;
                         fill: transparent;
-                        stroke: selection-overlay-accent ? DesignTokens.text-muted : DesignTokens.selection;
+                        stroke: DesignTokens.text-muted;
                         stroke-width: 1px;
                         commands: root.selection-unselected-outline-commands;
                     }
@@ -1174,9 +1266,19 @@ export component PetuniaSlintShell inherits Window {
                         commands: root.selection-point-commands;
                     }
 
+                    Path {
+                        fit: ImageFit.preserve;
+                        commands: root.operation-preview-commands;
+                        fill: transparent;
+                        stroke: DesignTokens.accent;
+                        stroke-width: 2px;
+                    }
+
                     viewport-touch := TouchArea {
                         property <length> last-x;
                         property <length> last-y;
+                        property <bool> is-box-select: false;
+                        property <bool> subtract-selection: false;
                         property <bool> is-orbit: false;
                         property <bool> is-pan: false;
                         property <bool> moved-since-down: false;
@@ -1190,6 +1292,20 @@ export component PetuniaSlintShell inherits Window {
                         property <bool> is-gizmo-drag: false;
                         property <bool> tool-drag-fine: false;
                         property <string> local-kind: "";
+
+                        function clear-gesture() {
+                            self.is-box-select = false;
+                            self.is-transform = false;
+                            self.pending-transform = false;
+                            self.is-tool-drag = false;
+                            self.is-loop-drag = false;
+                            self.is-slice-drag = false;
+                            self.is-gizmo-drag = false;
+                            self.is-painting = false;
+                            self.is-orbit = false;
+                            self.is-pan = false;
+                            self.moved-since-down = true;
+                        }
 
                         function transform-tool() -> string {
                             if root.active-workspace != "MODEL" {
@@ -1208,7 +1324,13 @@ export component PetuniaSlintShell inherits Window {
                         }
 
                         pointer-event(event) => {
-                            if event.kind == PointerEventKind.down {
+                            root.precision-mode = event.modifiers.shift;
+                            root.snap-mode = event.modifiers.control;
+                            if event.kind == PointerEventKind.cancel || (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                                self.clear-gesture();
+                                root.escape-requested();
+                            } else if event.kind == PointerEventKind.down {
+                                root-focus.focus();
                                 last-x = self.mouse-x;
                                 last-y = self.mouse-y;
                                 moved-since-down = false;
@@ -1226,6 +1348,9 @@ export component PetuniaSlintShell inherits Window {
                                 } else if event.button == PointerEventButton.left && event.modifiers.alt {
                                     is-orbit = true;
                                     is-pan = false;
+                                } else if event.button == PointerEventButton.left && root.active-tool == "box_select" && !event.modifiers.alt {
+                                    is-box-select = true;
+                                    subtract-selection = event.modifiers.control;
                                 } else if event.button == PointerEventButton.left
                                     && !event.modifiers.shift
                                     && !event.modifiers.alt {
@@ -1234,6 +1359,8 @@ export component PetuniaSlintShell inherits Window {
                                     if root.gizmo-hover-axis >= 0 {
                                         is-gizmo-drag = true;
                                         root.gizmo-drag-begin(self.mouse-x / 1px, self.mouse-y / 1px);
+                                    } else if root.transform-instant-active {
+                                        // The pending keyboard operation consumes the click.
                                     } else if root.active-workspace == "PAINT" {
                                         is-painting = true;
                                         root.viewport-paint-begin(self.mouse-x / 1px, self.mouse-y / 1px);
@@ -1256,6 +1383,12 @@ export component PetuniaSlintShell inherits Window {
                                     }
                                 }
                             } else if event.kind == PointerEventKind.up {
+                                if is-box-select {
+                                    if moved-since-down {
+                                        root.viewport-box-select(last-x / self.width, last-y / self.height, self.mouse-x / self.width, self.mouse-y / self.height, extend-selection, subtract-selection);
+                                    }
+                                    is-box-select = false;
+                                }
                                 is-orbit = false;
                                 is-pan = false;
                                 if is-transform {
@@ -1300,9 +1433,13 @@ export component PetuniaSlintShell inherits Window {
                                     root.viewport-hover-clear();
                                 }
                             }
-                            if is-gizmo-drag {
+                            if is-box-select {
+                                if abs(self.mouse-x - last-x) > 4px || abs(self.mouse-y - last-y) > 4px { moved-since-down = true; }
+                            } else if root.transform-instant-active && !self.pressed {
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
+                            } else if is-gizmo-drag {
                                 moved-since-down = true;
-                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
                             } else if root.tool-modal-active && root.tool-activation == "instant" && !self.pressed {
                                 root.tool-modal-hovered((self.mouse-y - last-y) / 1px);
                                 last-x = self.mouse-x;
@@ -1319,7 +1456,7 @@ export component PetuniaSlintShell inherits Window {
                                 last-y = self.mouse-y;
                             } else if is-transform {
                                 moved-since-down = true;
-                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
                             } else if pending-transform && self.pressed
                                 && (self.mouse-x - last-x > 4px || last-x - self.mouse-x > 4px
                                     || self.mouse-y - last-y > 4px || last-y - self.mouse-y > 4px) {
@@ -1327,7 +1464,7 @@ export component PetuniaSlintShell inherits Window {
                                 is-transform = true;
                                 moved-since-down = true;
                                 root.viewport-transform-begin(local-kind, last-x / 1px, last-y / 1px);
-                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
                             } else if is-painting {
                                 moved-since-down = true;
                                 root.viewport-paint-update(self.mouse-x / 1px, self.mouse-y / 1px);
@@ -1343,7 +1480,7 @@ export component PetuniaSlintShell inherits Window {
                                 last-y = self.mouse-y;
                             } else if is-slice-drag {
                                 moved-since-down = true;
-                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px, root.precision-mode, root.snap-mode);
                             }
                         }
 
@@ -1355,9 +1492,23 @@ export component PetuniaSlintShell inherits Window {
                         }
 
                         scroll-event(event) => {
-                            root.viewport-zoom(event.delta-y / 1px);
+                            if root.loop-cut-active {
+                                root.loop-cut-count-committed("\{root.loop-cut-cuts + (event.delta-y > 0px ? 1 : -1)}");
+                            } else {
+                                root.viewport-zoom(event.delta-y / 1px);
+                            }
                             accept
                         }
+                    }
+
+                    if viewport-touch.is-box-select: Rectangle {
+                        x: min(viewport-touch.last-x, viewport-touch.mouse-x);
+                        y: min(viewport-touch.last-y, viewport-touch.mouse-y);
+                        width: abs(viewport-touch.mouse-x - viewport-touch.last-x);
+                        height: abs(viewport-touch.mouse-y - viewport-touch.last-y);
+                        background: DesignTokens.accent.transparentize(0.9);
+                        border-color: DesignTokens.accent;
+                        border-width: 1px;
                     }
 
                     // Barra da viewport (P3D-076): visão à esquerda, domínio de
@@ -1582,50 +1733,23 @@ export component PetuniaSlintShell inherits Window {
                             stroke-width: 2px;
                             fill: transparent;
                         }
-                        Text {
-                            x: 66px;
-                            y: 12px;
-                            text: "X";
-                            color: DesignTokens.axis-x;
-                            font-size: 10px;
-                            font-weight: 700;
-                        }
-                        Text {
-                            x: 20px;
-                            y: 0px;
-                            text: "Y";
-                            color: DesignTokens.axis-y;
-                            font-size: 10px;
-                            font-weight: 700;
-                        }
-                        Text {
-                            x: 44px;
-                            y: 30px;
-                            text: "Z";
-                            color: DesignTokens.axis-z;
-                            font-size: 10px;
-                            font-weight: 700;
-                        }
-                        TouchArea {
-                            x: 48px;
-                            y: 24px;
-                            width: 60px;
-                            height: 36px;
-                            clicked => { root.view-axis-clicked("x"); }
-                        }
-                        TouchArea {
-                            x: 24px;
-                            y: 0px;
-                            width: 60px;
-                            height: 36px;
-                            clicked => { root.view-axis-clicked("y"); }
-                        }
-                        TouchArea {
-                            x: 36px;
-                            y: 12px;
-                            width: 60px;
-                            height: 36px;
-                            clicked => { root.view-axis-clicked("z"); }
+                        for axis in [
+                            { id: "x", label: "X", x: root.view-gizmo-x-end-x, y: root.view-gizmo-x-end-y, tint: DesignTokens.axis-x },
+                            { id: "y", label: "Y", x: root.view-gizmo-y-end-x, y: root.view-gizmo-y-end-y, tint: DesignTokens.axis-y },
+                            { id: "z", label: "Z", x: root.view-gizmo-z-end-x, y: root.view-gizmo-z-end-y, tint: DesignTokens.axis-z },
+                        ]: Rectangle {
+                            x: axis.x - 10px;
+                            y: axis.y - 10px;
+                            width: 20px;
+                            height: 20px;
+                            border-radius: 10px;
+                            background: DesignTokens.surface-raised;
+                            border-width: 1px;
+                            border-color: axis.tint;
+                            accessible-role: button;
+                            accessible-label: axis.label;
+                            Text { text: axis.label; color: axis.tint; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.view-axis-clicked(axis.id); } }
                         }
                     }
 
@@ -2012,17 +2136,20 @@ export component PetuniaSlintShell inherits Window {
                                         scrubbed(axis, delta, fine) => { root.transform-scrubbed("pos", axis, delta, fine); }
                                         scrub-started => { root.transform-scrub-started("pos"); }
                                         scrub-finished => { root.transform-scrub-finished(); }
-                                        text-committed(axis, text) => { root.transform-text-committed("pos", axis, text); }
+                                        text-committed(axis, text) => { root.transform-text-committed("pos", axis, text) }
+                                        scrub-cancelled => { root.transform-scrub-cancelled(); }
                                     }
                                     Vector3Field {
                                         row-label: "Rotation";
+                                        step: 1;
                                         x-value: root.rot-x;
                                         y-value: root.rot-y;
                                         z-value: root.rot-z;
                                         scrubbed(axis, delta, fine) => { root.transform-scrubbed("rot", axis, delta, fine); }
                                         scrub-started => { root.transform-scrub-started("rot"); }
                                         scrub-finished => { root.transform-scrub-finished(); }
-                                        text-committed(axis, text) => { root.transform-text-committed("rot", axis, text); }
+                                        text-committed(axis, text) => { root.transform-text-committed("rot", axis, text) }
+                                        scrub-cancelled => { root.transform-scrub-cancelled(); }
                                     }
                                     Vector3Field {
                                         row-label: "Scale";
@@ -2032,7 +2159,8 @@ export component PetuniaSlintShell inherits Window {
                                         scrubbed(axis, delta, fine) => { root.transform-scrubbed("scale", axis, delta, fine); }
                                         scrub-started => { root.transform-scrub-started("scale"); }
                                         scrub-finished => { root.transform-scrub-finished(); }
-                                        text-committed(axis, text) => { root.transform-text-committed("scale", axis, text); }
+                                        text-committed(axis, text) => { root.transform-text-committed("scale", axis, text) }
+                                        scrub-cancelled => { root.transform-scrub-cancelled(); }
                                     }
                                 }
                             }
@@ -3055,7 +3183,9 @@ export component PetuniaSlintShell inherits Window {
                                 alignment: center;
 
                                 TouchArea {
-                                    clicked => { root.scene-select(item.id); }
+                                    property <bool> extend: false;
+                                    pointer-event(event) => { self.extend = event.modifiers.shift; }
+                                    clicked => { root.scene-select(item.id, self.extend); }
                                     horizontal-stretch: 1;
 
                                     pointer-event(event) => {
@@ -3202,8 +3332,10 @@ export component PetuniaSlintShell inherits Window {
                         label: "";
                         value: root.tool-modal-value;
                         horizontal-stretch: 1;
-                        scrubbed(delta, fine) => { root.tool-modal-scrubbed(delta, fine); }
-                        text-committed(text) => { root.tool-modal-text-committed(text); }
+                        step: root.tool-modal-step;
+                        scrubbed(delta, fine) => { root.tool-modal-text-committed("\{root.tool-modal-value + delta * root.tool-modal-step * (fine ? 0.1 : 1)}"); }
+                        scrub-cancelled(value) => { root.tool-modal-text-committed("\{value}"); }
+                        text-committed(text) => { root.tool-modal-text-committed(text) }
                     }
                 }
 
@@ -3244,8 +3376,10 @@ export component PetuniaSlintShell inherits Window {
                         label: "";
                         value: root.loop-cut-slide;
                         horizontal-stretch: 1;
-                        scrubbed(delta, _fine) => { root.loop-cut-scrubbed(delta); }
-                        text-committed(text) => { root.loop-cut-slide-committed(text); }
+                        step: 0.01;
+                        scrubbed(delta, fine) => { root.loop-cut-slide-committed("\{root.loop-cut-slide + delta * (fine ? 0.001 : 0.01)}"); }
+                        scrub-cancelled(value) => { root.loop-cut-slide-committed("\{value}"); }
+                        text-committed(text) => { root.loop-cut-slide-committed(text) }
                     }
                 }
 
@@ -3815,7 +3949,7 @@ export component PetuniaSlintShell inherits Window {
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
-                                        TouchArea { clicked => { root.scene-select(item.id); } }
+                                        TouchArea { clicked => { root.scene-select(item.id, false); } }
                                     }
 
                                     Rectangle {
@@ -3826,7 +3960,7 @@ export component PetuniaSlintShell inherits Window {
                                         IconDisplay { icon: IconSet.Copy; size: 12px; stroke: DesignTokens.text-secondary; }
                                         TouchArea {
                                             clicked => {
-                                                root.scene-select(item.id);
+                                                root.scene-select(item.id, false);
                                                 root.duplicate-requested();
                                             }
                                         }

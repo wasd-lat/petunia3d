@@ -24,6 +24,8 @@ pub struct CutSession {
     pub ring: Option<LoopRing>,
     /// Quantidade de cortes paralelos no Loop Cut (1 a 32).
     pub cuts: usize,
+    /// Knife segments previewed since the transaction began.
+    pub segments: usize,
     /// Flag indicando se a sessão está no estágio de deslizamento interativo (slide).
     pub sliding: bool,
 }
@@ -37,6 +39,7 @@ impl CutSession {
             edge_start: None,
             ring: None,
             cuts: 1,
+            segments: 0,
             sliding: false,
         }
     }

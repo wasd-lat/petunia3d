@@ -8,7 +8,23 @@
 - Current implementation status: **Conformidade em revisão**. A alegação histórica de Waves 0–10 totalmente concluídas não certifica o frontend Slint. Ver [plano de paridade](docs/development/viewport-parity-plan.md) e [matriz de gaps](docs/development/viewport-gap-matrix.md). Checkpoints de 22/09/2026 permanecem sem testes por orientação do usuário até o fim da implementação.
 - **Frontend de produção**: `petunia_ui_slint` (Slint 1.18) — shell declarativo, 55 testes unitários, bridge de intents, viewport WGPU/software fallback. UI egui (`crates/ui/`) arquivada como legado de transição (`--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`).
 - Context methodology: **Lean Progressive Context (LPC)**
-- Last updated: `2026-09-22`
+- Last updated: `2026-09-23`
+
+### Retomada e publicação de 23/09/2026
+
+O ambiente retomado contém o checkpoint `53ec324` e alterações posteriores
+preservadas na árvore de trabalho. Os hashes locais `4364977` e `956eca0`,
+informados na conversa anterior, não estão disponíveis nos objetos nem no
+reflog desse ambiente. O primeiro checkpoint foi publicado pela integração
+GitHub como `522b1f1`, com a árvore de arquivos idêntica à original.
+
+O estado disponível inclui seleção múltipla/retangular, transformações
+projetadas, campos numéricos transacionais, histórico com identidades de estado
+e o algoritmo ampliado de Connect. Handles de plano/livre, escolha do anel de
+Loop Cut por hover e clipping completo do fallback software não estão presentes
+nesta retomada e permanecem pendentes no plano. Não se alega recuperação integral
+dos dois commits ausentes. Testes e compilação continuam adiados por orientação
+do usuário.
 
 ## Current status
 

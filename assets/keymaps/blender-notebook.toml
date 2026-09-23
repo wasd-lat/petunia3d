@@ -11,6 +11,7 @@ save_project = "Ctrl+S"
 cycle_mode = "Tab"
 
 [model]
+box_select = "B"
 transform = "G"
 rotate = "R"
 scale = "S"
