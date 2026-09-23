@@ -358,6 +358,19 @@ component NumericField inherits Rectangle {
             font-size: 11px;
             horizontal-stretch: 1;
             vertical-alignment: center;
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.editing = false;
+                    return accept;
+                }
+                if event.text == Key.UpArrow || event.text == Key.DownArrow {
+                    root.scrubbed(event.text == Key.UpArrow ? 1 : -1, event.modifiers.shift);
+                    self.text = root.value;
+                    return accept;
+                }
+                reject
+            }
             accepted => {
                 root.text-committed(self.text);
                 root.editing = false;
@@ -366,6 +379,7 @@ component NumericField inherits Rectangle {
     }
 
     touch := TouchArea {
+        enabled: !root.editing;
         property <length> start-x;
         property <bool> is-fine: false;
         pointer-event(event) => {
@@ -496,6 +510,8 @@ component InspectorSection inherits Rectangle {
 }
 
 export component PetuniaSlintShell inherits Window {
+    out property <float> viewport-region-width: viewport-region.width / 1px;
+    out property <float> viewport-region-height: viewport-region.height / 1px;
     title: "Petunia3D";
     preferred-width: 1280px;
     preferred-height: 800px;
@@ -550,6 +566,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> shading-mode: "solid";
     in-out property <float> xray-opacity: 0.42;
     in-out property <bool> shading-popover-open: false;
+    property <bool> tool-properties-collapsed: false;
     in-out property <bool> operation-hud-active: false;
     in-out property <string> operation-hud-title: "";
     in-out property <[string]> operation-hud-lines: [];
@@ -690,6 +707,7 @@ export component PetuniaSlintShell inherits Window {
     callback tool-activation-set(string);
     callback tool-modal-cancel;
     callback loop-cut-scrubbed(float);
+    callback loop-cut-slide-committed(string);
     callback loop-cut-count-committed(string);
     callback uv-editor-clicked(float, float, bool);
     callback uv-moved(float, float);
@@ -786,6 +804,8 @@ export component PetuniaSlintShell inherits Window {
     }
 
     changed command-search-visible => { root.command-selection = 0; }
+    changed tool-modal-active => { if (root.tool-modal-active) { root.tool-properties-collapsed = false; } }
+    changed loop-cut-active => { if (root.loop-cut-active) { root.tool-properties-collapsed = false; } }
     changed width => { root.compact-shell = self.width < 1100px; }
 
     root-focus := FocusScope {
@@ -1098,6 +1118,7 @@ export component PetuniaSlintShell inherits Window {
 
                 viewport-region := Rectangle {
                     horizontal-stretch: 1;
+                    clip: true;
                     background: DesignTokens.canvas;
                     border-width: 1px;
                     border-color: DesignTokens.border;
@@ -1124,26 +1145,30 @@ export component PetuniaSlintShell inherits Window {
                         vertical-alignment: center;
                     }
 
-                    // Contorno da seleção por cima da imagem: o renderer não
-                    // desenha seleção, então o shell projeta e desenha aqui.
+                    // Coordenadas já projetadas em pixels da viewport. Não
+                    // normalizar os paths à caixa do item (fit padrão).
                     if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
                         fill: transparent;
                         stroke: selection-overlay-accent ? DesignTokens.text-muted : DesignTokens.selection;
                         stroke-width: 1px;
                         commands: root.selection-unselected-outline-commands;
                     }
                     if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
                         fill: transparent;
                         stroke: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
                         stroke-width: 1.5px;
                         commands: root.selection-outline-commands;
                     }
                     if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
                         fill: DesignTokens.text-muted;
                         stroke: transparent;
                         commands: root.selection-unselected-point-commands;
                     }
                     if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
                         fill: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
                         stroke: transparent;
                         commands: root.selection-point-commands;
@@ -1157,6 +1182,7 @@ export component PetuniaSlintShell inherits Window {
                         property <bool> moved-since-down: false;
                         property <bool> extend-selection: false;
                         property <bool> is-transform: false;
+                        property <bool> pending-transform: false;
                         property <bool> is-painting: false;
                         property <bool> is-tool-drag: false;
                         property <bool> is-loop-drag: false;
@@ -1188,6 +1214,7 @@ export component PetuniaSlintShell inherits Window {
                                 moved-since-down = false;
                                 extend-selection = event.modifiers.shift;
                                 is-transform = false;
+                                pending-transform = false;
                                 if event.button == PointerEventButton.middle {
                                     if event.modifiers.shift {
                                         is-pan = true;
@@ -1222,8 +1249,9 @@ export component PetuniaSlintShell inherits Window {
                                     } else {
                                         local-kind = self.transform-tool();
                                         if local-kind != "" {
-                                            is-transform = true;
-                                            root.viewport-transform-begin(local-kind, self.mouse-x / 1px, self.mouse-y / 1px);
+                                            // A ferramenta só inicia uma operação após um
+                                            // arrasto real; um clique continua selecionando.
+                                            pending-transform = true;
                                         }
                                     }
                                 }
@@ -1234,12 +1262,15 @@ export component PetuniaSlintShell inherits Window {
                                     root.viewport-transform-end();
                                     is-transform = false;
                                 }
+                                pending-transform = false;
                                 if is-painting {
                                     root.viewport-paint-end(self.mouse-x / 1px, self.mouse-y / 1px);
                                     is-painting = false;
                                 }
                                 if is-tool-drag {
-                                    root.tool-modal-apply();
+                                    if moved-since-down {
+                                        root.tool-modal-apply();
+                                    }
                                     is-tool-drag = false;
                                 }
                                 if is-loop-drag {
@@ -1288,6 +1319,14 @@ export component PetuniaSlintShell inherits Window {
                                 last-y = self.mouse-y;
                             } else if is-transform {
                                 moved-since-down = true;
+                                root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
+                            } else if pending-transform && self.pressed
+                                && (self.mouse-x - last-x > 4px || last-x - self.mouse-x > 4px
+                                    || self.mouse-y - last-y > 4px || last-y - self.mouse-y > 4px) {
+                                pending-transform = false;
+                                is-transform = true;
+                                moved-since-down = true;
+                                root.viewport-transform-begin(local-kind, last-x / 1px, last-y / 1px);
                                 root.viewport-transform-update(self.mouse-x / 1px, self.mouse-y / 1px);
                             } else if is-painting {
                                 moved-since-down = true;
@@ -1462,34 +1501,40 @@ export component PetuniaSlintShell inherits Window {
                         // cursor clareia, os demais esmaecem durante o arrasto.
                         Path {
                             commands: root.gizmo-x-commands;
+                            fit: ImageFit.preserve;
                             stroke: root.gizmo-handle-color(0, DesignTokens.axis-x);
                             stroke-width: root.gizmo-handle-width(0);
                             fill: transparent;
                         }
                         Path {
                             commands: root.gizmo-y-commands;
+                            fit: ImageFit.preserve;
                             stroke: root.gizmo-handle-color(1, DesignTokens.axis-y);
                             stroke-width: root.gizmo-handle-width(1);
                             fill: transparent;
                         }
                         Path {
                             commands: root.gizmo-z-commands;
+                            fit: ImageFit.preserve;
                             stroke: root.gizmo-handle-color(2, DesignTokens.axis-z);
                             stroke-width: root.gizmo-handle-width(2);
                             fill: transparent;
                         }
                         Path {
                             commands: root.gizmo-x-arrow-commands;
+                            fit: ImageFit.preserve;
                             stroke: transparent;
                             fill: root.gizmo-handle-color(0, DesignTokens.axis-x);
                         }
                         Path {
                             commands: root.gizmo-y-arrow-commands;
+                            fit: ImageFit.preserve;
                             stroke: transparent;
                             fill: root.gizmo-handle-color(1, DesignTokens.axis-y);
                         }
                         Path {
                             commands: root.gizmo-z-arrow-commands;
+                            fit: ImageFit.preserve;
                             stroke: transparent;
                             fill: root.gizmo-handle-color(2, DesignTokens.axis-z);
                         }
@@ -1509,26 +1554,30 @@ export component PetuniaSlintShell inherits Window {
                     // orientação da câmera como Blender, C4D e Maya. Clicar num
                     // eixo alinha a visão a ele.
                     Rectangle {
-                        x: view-gizmo-origin-x - 30px;
-                        y: view-gizmo-origin-y - 30px;
+                        x: view-gizmo-origin-x - 54px;
+                        y: view-gizmo-origin-y - 54px;
                         width: 108px;
-                        height: 60px;
+                        height: 108px;
+                        clip: true;
                         background: transparent;
 
                         Path {
                             commands: root.view-gizmo-x-commands;
+                            fit: ImageFit.preserve;
                             stroke: DesignTokens.axis-x;
                             stroke-width: 2px;
                             fill: transparent;
                         }
                         Path {
                             commands: root.view-gizmo-y-commands;
+                            fit: ImageFit.preserve;
                             stroke: DesignTokens.axis-y;
                             stroke-width: 2px;
                             fill: transparent;
                         }
                         Path {
                             commands: root.view-gizmo-z-commands;
+                            fit: ImageFit.preserve;
                             stroke: DesignTokens.axis-z;
                             stroke-width: 2px;
                             fill: transparent;
@@ -2059,12 +2108,6 @@ export component PetuniaSlintShell inherits Window {
                                             vertical-alignment: center;
                                         }
                                     }
-                                    Slider {
-                                        minimum: 0.1;
-                                        maximum: 100;
-                                        value: root.brush-size;
-                                        changed(value) => { root.brush-size-changed(value); }
-                                    }
                                     TouchArea {
                                         clicked => { root.duplicate-requested(); }
                                     }
@@ -2091,12 +2134,6 @@ export component PetuniaSlintShell inherits Window {
                                             font-weight: 600;
                                             vertical-alignment: center;
                                         }
-                                    }
-                                    Slider {
-                                        minimum: 0;
-                                        maximum: 1;
-                                        value: root.brush-opacity;
-                                        changed(value) => { root.brush-opacity-changed(value); }
                                     }
                                     TouchArea {
                                         clicked => { root.delete-requested(); }
@@ -3109,7 +3146,7 @@ export component PetuniaSlintShell inherits Window {
             x: parent.width - self.width - 16px;
             y: parent.height - self.height - 16px;
             width: 236px;
-            height: tool-properties-layout.preferred-height + 34px;
+            height: root.tool-properties-collapsed ? 40px : tool-properties-layout.preferred-height + 34px;
             border-radius: 8px;
             background: DesignTokens.surface-raised;
             border-width: 1px;
@@ -3122,14 +3159,32 @@ export component PetuniaSlintShell inherits Window {
                 padding: 10px;
                 spacing: 8px;
 
-                Text {
-                    text: tool-modal-active ? tool-modal-title : "Loop Cut";
-                    color: DesignTokens.text-primary;
-                    font-size: 12px;
-                    font-weight: 700;
+                HorizontalLayout {
+                    height: 20px;
+                    Text {
+                        text: tool-modal-active ? tool-modal-title : "Loop Cut";
+                        color: DesignTokens.text-primary;
+                        font-size: 12px;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 20px;
+                        height: 20px;
+                        accessible-role: button;
+                        accessible-label: root.tool-properties-collapsed ? "Expand tool properties" : "Collapse tool properties";
+                        IconDisplay {
+                            icon: root.tool-properties-collapsed ? IconSet.ChevronDown : IconSet.ChevronUp;
+                            size: 13px;
+                            stroke: DesignTokens.text-secondary;
+                        }
+                        TouchArea { clicked => { root.tool-properties-collapsed = !root.tool-properties-collapsed; } }
+                    }
                 }
 
                 tool-properties-layout := VerticalLayout {
+                    visible: !root.tool-properties-collapsed;
                     spacing: 6px;
 
                 if tool-modal-active: HorizontalLayout {
@@ -3190,11 +3245,11 @@ export component PetuniaSlintShell inherits Window {
                         value: root.loop-cut-slide;
                         horizontal-stretch: 1;
                         scrubbed(delta, _fine) => { root.loop-cut-scrubbed(delta); }
-                        text-committed(text) => { root.loop-cut-count-committed(text); }
+                        text-committed(text) => { root.loop-cut-slide-committed(text); }
                     }
                 }
 
-                HorizontalLayout {
+                if loop-cut-active: HorizontalLayout {
                     spacing: 6px;
                     height: 28px;
 
@@ -3241,7 +3296,7 @@ export component PetuniaSlintShell inherits Window {
                     }
                 }
 
-                HorizontalLayout {
+                if loop-cut-active: HorizontalLayout {
                     spacing: 6px;
                     height: 28px;
 

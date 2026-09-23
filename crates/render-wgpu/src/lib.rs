@@ -36,6 +36,35 @@ struct SelectionVertex {
     color: [f32; 4],
 }
 
+/// Cruz orientada para a tela. O raio é em pixels lógicos do target WGPU,
+/// independente do zoom e da profundidade do vértice.
+fn append_point_marker(
+    lines: &mut Vec<SelectionVertex>,
+    point: Vec3,
+    camera: &Camera,
+    viewport_height: u32,
+    radius_px: f32,
+    color: [f32; 4],
+) {
+    let perspective_scale = if camera.proj == petunia_core::Projection::Perspective {
+        ((point - camera.eye()).dot(camera.forward()) / camera.distance.max(0.01)).max(0.01)
+    } else {
+        1.0
+    };
+    let radius = camera.visible_height() * perspective_scale * radius_px
+        / viewport_height.max(1) as f32;
+    for axis in [camera.right(), camera.up()] {
+        lines.push(SelectionVertex {
+            pos: (point - axis * radius).to_array(),
+            color,
+        });
+        lines.push(SelectionVertex {
+            pos: (point + axis * radius).to_array(),
+            color,
+        });
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
@@ -122,6 +151,8 @@ pub struct Renderer {
     line_count: u32,
     selection_tri_pipeline: wgpu::RenderPipeline,
     selection_line_pipeline: wgpu::RenderPipeline,
+    selection_tri_xray_pipeline: wgpu::RenderPipeline,
+    selection_line_xray_pipeline: wgpu::RenderPipeline,
     /// Preenchimento translúcido das faces selecionadas (depth test, sem write).
     selection_tri_vb: Option<wgpu::Buffer>,
     selection_tri_count: u32,
@@ -141,6 +172,7 @@ pub struct Renderer {
     grid_step: f32,
     /// Último alvo de preselection desenhado.
     last_hover: petunia_core::HoverTarget,
+    last_selection_view_proj: Option<[f32; 16]>,
     mesh_rebuilds: u64,
     skipped_frames: u64,
 }
@@ -680,9 +712,9 @@ impl Renderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
         })];
-        let selection_tri_pipeline =
+        let selection_pipeline = |label, topology, xray| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("simple3d-selection-tri-pipe"),
+                label: Some(label),
                 layout: Some(&selection_layout),
                 vertex: wgpu::VertexState {
                     module: &selection_shader,
@@ -700,57 +732,23 @@ impl Renderer {
                     })],
                     compilation_options: Default::default(),
                 }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    cull_mode: None,
-                    ..Default::default()
-                },
+                primitive: wgpu::PrimitiveState { topology, cull_mode: None, ..Default::default() },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth24Plus,
                     depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    depth_compare: Some(if xray { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::LessEqual }),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
                 multisample: Default::default(),
                 multiview_mask: None,
                 cache: None,
-            });
-        let selection_line_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("simple3d-selection-line-pipe"),
-                layout: Some(&selection_layout),
-                vertex: wgpu::VertexState {
-                    module: &selection_shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &selection_attrs,
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &selection_shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::LineList,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth24Plus,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: Default::default(),
-                multiview_mask: None,
-                cache: None,
-            });
+            })
+        };
+        let selection_tri_pipeline = selection_pipeline("selection-tri", wgpu::PrimitiveTopology::TriangleList, false);
+        let selection_line_pipeline = selection_pipeline("selection-line", wgpu::PrimitiveTopology::LineList, false);
+        let selection_tri_xray_pipeline = selection_pipeline("selection-tri-xray", wgpu::PrimitiveTopology::TriangleList, true);
+        let selection_line_xray_pipeline = selection_pipeline("selection-line-xray", wgpu::PrimitiveTopology::LineList, true);
 
         // refs: layout do grupo 1 (params + textura + sampler)
         let ref_tex_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1019,6 +1017,8 @@ impl Renderer {
             line_count: 0,
             selection_tri_pipeline,
             selection_line_pipeline,
+            selection_tri_xray_pipeline,
+            selection_line_xray_pipeline,
             selection_tri_vb: None,
             selection_tri_count: 0,
             selection_line_vb: None,
@@ -1034,6 +1034,7 @@ impl Renderer {
             last_domain: None,
             grid_step: 1.0,
             last_hover: petunia_core::HoverTarget::None,
+            last_selection_view_proj: None,
             mesh_rebuilds: 0,
             skipped_frames: 0,
         }
@@ -1110,16 +1111,15 @@ impl Renderer {
         puffin::profile_function!();
         self.xray = xray;
         // Trocar de domínio muda a camada de seleção, não só a malha.
-        if self.last_domain != Some(edit_domain) {
-            self.last_domain = Some(edit_domain);
-            self.last_fingerprint = None;
-        }
+        let domain_changed = self.last_domain != Some(edit_domain);
+        self.last_domain = Some(edit_domain);
         // Preselection entra no fingerprint: mover o mouse sobre a geometria
         // precisa redesenhar a camada, mas nada mais.
-        if self.last_hover != hover {
-            self.last_hover = hover;
-            self.last_fingerprint = None;
-        }
+        let hover_changed = self.last_hover != hover;
+        self.last_hover = hover;
+        let selection_view_proj = camera.view_proj().to_cols_array();
+        let camera_changed = self.last_selection_view_proj != Some(selection_view_proj);
+        self.last_selection_view_proj = Some(selection_view_proj);
         // Grid adaptativo: reconstrói só quando a escala visível cruza um degrau.
         let wanted_step = adaptive_grid_step(camera.visible_height());
         if (wanted_step - self.grid_step).abs() > f32::EPSILON {
@@ -1183,6 +1183,9 @@ impl Renderer {
         let mesh_changed = self.last_fingerprint.map(|f| f.mesh) != Some(fp.mesh);
         let refs_changed = self.last_fingerprint.map(|f| f.refs_layout) != Some(fp.refs_layout);
         if !mesh_changed && !refs_changed {
+            if hover_changed || camera_changed || domain_changed {
+                self.update_selection_layer(device, scene, camera, edit_domain, hover);
+            }
             self.skipped_frames += 1;
             return;
         }
@@ -1321,156 +1324,7 @@ impl Renderer {
                 }
             }
         }
-        // Camada de seleção: geometria própria, com depth test no render. Só o
-        // ativo contribui, e só o domínio atual — um vértice selecionado não
-        // pode virar face pintada, que era a contaminação antiga.
-        let mut sel_tri: Vec<SelectionVertex> = Vec::new();
-        let mut sel_line: Vec<SelectionVertex> = Vec::new();
-        if let Some(asset) = scene.assets.get(scene.active) {
-            let mesh = asset.evaluated_mesh();
-            let domain = edit_domain;
-            // Seleção: laranja quente com alpha, como Blender/C4D. Legível
-            // sobre qualquer shading porque o shader não aplica luz.
-            let face_color = [1.0f32, 0.55, 0.15, 0.32];
-            let edge_color = [1.0f32, 0.62, 0.20, 1.0];
-            let point_color = [1.0f32, 0.78, 0.35, 1.0];
-            let marker = 0.035f32 * scene.assets.len().max(1) as f32;
-
-            if domain == petunia_core::SelectionDomain::Face {
-                for face in mesh.faces.iter().filter(|face| face.selected) {
-                    if face.verts.len() < 3 {
-                        continue;
-                    }
-                    let p0 = mesh.verts[face.verts[0] as usize].vec();
-                    for i in 1..face.verts.len() - 1 {
-                        let p1 = mesh.verts[face.verts[i] as usize].vec();
-                        let p2 = mesh.verts[face.verts[i + 1] as usize].vec();
-                        for point in [p0, p1, p2] {
-                            sel_tri.push(SelectionVertex {
-                                pos: point.to_array(),
-                                color: face_color,
-                            });
-                        }
-                    }
-                }
-            }
-
-            if domain == petunia_core::SelectionDomain::Edge {
-                for &(a, b) in &mesh.selected_edges {
-                    let (Some(va), Some(vb)) =
-                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
-                    else {
-                        continue;
-                    };
-                    sel_line.push(SelectionVertex {
-                        pos: va.pos,
-                        color: edge_color,
-                    });
-                    sel_line.push(SelectionVertex {
-                        pos: vb.pos,
-                        color: edge_color,
-                    });
-                }
-            }
-
-            if domain == petunia_core::SelectionDomain::Vertex {
-                for vertex in mesh.verts.iter().filter(|vertex| vertex.selected) {
-                    // Cruz 3D: três segmentos curtos, legíveis de qualquer ângulo.
-                    for axis in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z] {
-                        let point = vertex.vec();
-                        sel_line.push(SelectionVertex {
-                            pos: (point - axis * marker).to_array(),
-                            color: point_color,
-                        });
-                        sel_line.push(SelectionVertex {
-                            pos: (point + axis * marker).to_array(),
-                            color: point_color,
-                        });
-                    }
-                }
-            }
-        }
-        // Preselection: mesma linguagem da seleção, porém mais fraca — o
-        // usuário vê o que vai clicar sem confundir com o que já selecionou.
-        let hover_line = [0.62f32, 0.72, 0.88, 0.85];
-        let hover_tri = [0.62f32, 0.72, 0.88, 0.18];
-        if let Some(asset) = scene.assets.get(scene.active) {
-            let mesh = asset.evaluated_mesh();
-            match hover {
-                petunia_core::HoverTarget::Vertex(index) => {
-                    if let Some(vertex) = mesh.verts.get(index as usize) {
-                        let marker = 0.030f32 * scene.assets.len().max(1) as f32;
-                        for axis in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z] {
-                            let point = vertex.vec();
-                            sel_line.push(SelectionVertex {
-                                pos: (point - axis * marker).to_array(),
-                                color: hover_line,
-                            });
-                            sel_line.push(SelectionVertex {
-                                pos: (point + axis * marker).to_array(),
-                                color: hover_line,
-                            });
-                        }
-                    }
-                }
-                petunia_core::HoverTarget::Edge(a, b) => {
-                    if let (Some(va), Some(vb)) =
-                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
-                    {
-                        sel_line.push(SelectionVertex {
-                            pos: va.pos,
-                            color: hover_line,
-                        });
-                        sel_line.push(SelectionVertex {
-                            pos: vb.pos,
-                            color: hover_line,
-                        });
-                    }
-                }
-                petunia_core::HoverTarget::Face(index) => {
-                    if let Some(face) = mesh.faces.get(index) {
-                        if face.verts.len() >= 3 {
-                            let p0 = mesh.verts[face.verts[0] as usize].vec();
-                            for i in 1..face.verts.len() - 1 {
-                                let p1 = mesh.verts[face.verts[i] as usize].vec();
-                                let p2 = mesh.verts[face.verts[i + 1] as usize].vec();
-                                for point in [p0, p1, p2] {
-                                    sel_tri.push(SelectionVertex {
-                                        pos: point.to_array(),
-                                        color: hover_tri,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-                petunia_core::HoverTarget::Object(_) | petunia_core::HoverTarget::None => {}
-            }
-        }
-        self.selection_tri_count = sel_tri.len() as u32;
-        self.selection_tri_vb = if sel_tri.is_empty() {
-            None
-        } else {
-            Some(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("simple3d-selection-tri"),
-                    contents: bytemuck::cast_slice(&sel_tri),
-                    usage: wgpu::BufferUsages::VERTEX,
-                }),
-            )
-        };
-        self.selection_line_count = sel_line.len() as u32;
-        self.selection_line_vb = if sel_line.is_empty() {
-            None
-        } else {
-            Some(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("simple3d-selection-line"),
-                    contents: bytemuck::cast_slice(&sel_line),
-                    usage: wgpu::BufferUsages::VERTEX,
-                }),
-            )
-        };
+        self.update_selection_layer(device, scene, camera, edit_domain, hover);
 
         self.mesh_count = mv.len() as u32;
         self.mesh_ranges = mesh_ranges;
@@ -1539,6 +1393,191 @@ impl Renderer {
             )
         };
         let _ = queue;
+    }
+
+    /// Atualiza somente os buffers de seleção e preselection. Mover o cursor
+    /// não reconstrói a malha, texturas ou referências da cena.
+    fn update_selection_layer(
+        &mut self,
+        device: &wgpu::Device,
+        scene: &Project,
+        camera: &Camera,
+        edit_domain: petunia_core::SelectionDomain,
+        hover: petunia_core::HoverTarget,
+    ) {
+        // Camada de seleção: geometria própria, com depth test no render. Só o
+        // ativo contribui, e só o domínio atual — um vértice selecionado não
+        // pode virar face pintada, que era a contaminação antiga.
+        let mut sel_tri: Vec<SelectionVertex> = Vec::new();
+        let mut sel_line: Vec<SelectionVertex> = Vec::new();
+        if let Some(asset) = scene.assets.get(scene.active) {
+            let mesh = asset.evaluated_mesh();
+            let domain = edit_domain;
+            // Seleção: laranja quente com alpha, como Blender/C4D. Legível
+            // sobre qualquer shading porque o shader não aplica luz.
+            let face_color = [1.0f32, 0.55, 0.15, 0.32];
+            let edge_color = [1.0f32, 0.62, 0.20, 1.0];
+            let point_color = [1.0f32, 0.78, 0.35, 1.0];
+
+            if domain == petunia_core::SelectionDomain::Edge {
+                let guide_color = [0.62, 0.66, 0.74, 0.58];
+                for (a, b) in mesh.edges_unique() {
+                    if mesh.selected_edges.contains(&(a, b)) {
+                        continue;
+                    }
+                    let (Some(start), Some(end)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    else {
+                        continue;
+                    };
+                    sel_line.push(SelectionVertex {
+                        pos: start.pos,
+                        color: guide_color,
+                    });
+                    sel_line.push(SelectionVertex {
+                        pos: end.pos,
+                        color: guide_color,
+                    });
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Vertex {
+                let guide_color = [0.62, 0.66, 0.74, 0.72];
+                for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
+                    append_point_marker(
+                        &mut sel_line,
+                        vertex.vec(),
+                        camera,
+                        self.depth_size.1,
+                        2.5,
+                        guide_color,
+                    );
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Face {
+                for (fi, face) in mesh.faces.iter().enumerate().filter(|(_, face)| face.selected) {
+                    if face.verts.len() < 3 {
+                        continue;
+                    }
+                    for corners in mesh.face_triangle_corners(fi) {
+                        let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                        for point in [p0, p1, p2] {
+                            sel_tri.push(SelectionVertex {
+                                pos: point.to_array(),
+                                color: face_color,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Edge {
+                for &(a, b) in &mesh.selected_edges {
+                    let (Some(va), Some(vb)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    else {
+                        continue;
+                    };
+                    sel_line.push(SelectionVertex {
+                        pos: va.pos,
+                        color: edge_color,
+                    });
+                    sel_line.push(SelectionVertex {
+                        pos: vb.pos,
+                        color: edge_color,
+                    });
+                }
+            }
+
+            if domain == petunia_core::SelectionDomain::Vertex {
+                for vertex in mesh.verts.iter().filter(|vertex| vertex.selected) {
+                    append_point_marker(
+                        &mut sel_line,
+                        vertex.vec(),
+                        camera,
+                        self.depth_size.1,
+                        4.0,
+                        point_color,
+                    );
+                }
+            }
+        }
+        // Preselection: mesma linguagem da seleção, porém mais fraca — o
+        // usuário vê o que vai clicar sem confundir com o que já selecionou.
+        let hover_line = [0.62f32, 0.72, 0.88, 0.85];
+        let hover_tri = [0.62f32, 0.72, 0.88, 0.18];
+        if let Some(asset) = scene.assets.get(scene.active) {
+            let mesh = asset.evaluated_mesh();
+            match hover {
+                petunia_core::HoverTarget::Vertex(index) => {
+                    if let Some(vertex) = mesh.verts.get(index as usize) {
+                        append_point_marker(
+                            &mut sel_line,
+                            vertex.vec(),
+                            camera,
+                            self.depth_size.1,
+                            5.0,
+                            hover_line,
+                        );
+                    }
+                }
+                petunia_core::HoverTarget::Edge(a, b) => {
+                    if let (Some(va), Some(vb)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    {
+                        sel_line.push(SelectionVertex {
+                            pos: va.pos,
+                            color: hover_line,
+                        });
+                        sel_line.push(SelectionVertex {
+                            pos: vb.pos,
+                            color: hover_line,
+                        });
+                    }
+                }
+                petunia_core::HoverTarget::Face(index) => {
+                    if let Some(face) = mesh.faces.get(index) {
+                        if face.verts.len() >= 3 {
+                            for corners in mesh.face_triangle_corners(index) {
+                                let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                                for point in [p0, p1, p2] {
+                                    sel_tri.push(SelectionVertex {
+                                        pos: point.to_array(),
+                                        color: hover_tri,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                petunia_core::HoverTarget::Object(_) | petunia_core::HoverTarget::None => {}
+            }
+        }
+        self.selection_tri_count = sel_tri.len() as u32;
+        self.selection_tri_vb = if sel_tri.is_empty() {
+            None
+        } else {
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("simple3d-selection-tri"),
+                    contents: bytemuck::cast_slice(&sel_tri),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            )
+        };
+        self.selection_line_count = sel_line.len() as u32;
+        self.selection_line_vb = if sel_line.is_empty() {
+            None
+        } else {
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("simple3d-selection-line"),
+                    contents: bytemuck::cast_slice(&sel_line),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+            )
+        };
     }
 
     fn ensure_ref_textures(
@@ -1845,12 +1884,12 @@ impl Renderer {
         // depth test. Fica depois da geometria e antes das arestas para que o
         // wireframe permaneça legível por cima da seleção.
         if let Some(vb) = &self.selection_tri_vb {
-            pass.set_pipeline(&self.selection_tri_pipeline);
+            pass.set_pipeline(if self.xray { &self.selection_tri_xray_pipeline } else { &self.selection_tri_pipeline });
             pass.set_vertex_buffer(0, vb.slice(..));
             pass.draw(0..self.selection_tri_count, 0..1);
         }
         if let Some(vb) = &self.selection_line_vb {
-            pass.set_pipeline(&self.selection_line_pipeline);
+            pass.set_pipeline(if self.xray { &self.selection_line_xray_pipeline } else { &self.selection_line_pipeline });
             pass.set_vertex_buffer(0, vb.slice(..));
             pass.draw(0..self.selection_line_count, 0..1);
         }

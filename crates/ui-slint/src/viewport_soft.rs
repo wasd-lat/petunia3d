@@ -1,16 +1,29 @@
-//! Renderizador 3D em software puro (CPU Rasterizer) para fallback de alta fidelidade.
-//!
-//! Permite visualização 3D completa (Grid, Sombreado Difuso, Wireframe, Vértices,
-//! Projeção Persp/Ortho e Câmera Interativa) em qualquer ambiente onde o WGPU não
-//! esteja disponível ou encontre falhas de driver.
+//! CPU fallback with the same selection, shading and depth contracts as WGPU.
 
 use glam::{Mat4, Vec3, Vec4};
-use petunia_core::{Camera, SelectionDomain, Workspace};
-use petunia_project::Project;
+use petunia_core::{Camera, HoverTarget, SelectionDomain, Workspace};
+use petunia_project::{Canvas, Project};
+use petunia_render::{Shading, scene};
 
 use crate::{PetuniaViewport, ViewportRenderState};
 
-/// Viewport 3D rasterizado via CPU com Z-buffer e iluminação direcional.
+#[derive(Clone, Copy)]
+struct ScreenVertex {
+    x: f32,
+    y: f32,
+    z: f32,
+    inv_w: f32,
+}
+
+struct Surface<'a> {
+    colors: [[f32; 3]; 3],
+    uv: [[f32; 2]; 3],
+    texture: Option<&'a Canvas>,
+    tint: Option<([f32; 3], f32)>,
+    opacity: f32,
+    depth_write: bool,
+}
+
 pub struct Software3dViewport {
     pub width: u32,
     pub height: u32,
@@ -22,327 +35,256 @@ pub struct Software3dViewport {
 
 impl Software3dViewport {
     pub fn new(width: u32, height: u32) -> Self {
-        let w = width.max(1);
-        let h = height.max(1);
-        let count = (w * h) as usize;
+        let (width, height) = (width.max(1), height.max(1));
         Self {
-            width: w,
-            height: h,
+            width, height,
             workspace: Workspace::Model,
             selection_domain: SelectionDomain::Object,
-            depth_buffer: vec![1.0; count],
-            color_buffer: vec![0; count * 4],
+            depth_buffer: vec![1.0; (width * height) as usize],
+            color_buffer: vec![0; (width * height * 4) as usize],
         }
     }
 
-    fn clear(&mut self, bg: [u8; 4]) {
-        self.depth_buffer.fill(1.0);
-        let count = (self.width * self.height) as usize;
-        if self.color_buffer.len() != count * 4 {
-            self.color_buffer.resize(count * 4, 0);
-        }
-        for chunk in self.color_buffer.as_chunks_mut::<4>().0 {
-            chunk.copy_from_slice(&bg);
-        }
-    }
-
-    #[inline]
-    fn project_point(&self, p: Vec3, vp: &Mat4) -> Option<(f32, f32, f32)> {
-        let clip = *vp * Vec4::new(p.x, p.y, p.z, 1.0);
-        if clip.w <= 0.05 {
+    fn project_clip(&self, p: Vec4) -> Option<ScreenVertex> {
+        if !p.is_finite() || p.w <= 1.0e-5 || p.z < 0.0 || p.z > p.w {
             return None;
         }
-        let inv_w = 1.0 / clip.w;
-        let ndc_x = clip.x * inv_w;
-        let ndc_y = clip.y * inv_w;
-        let ndc_z = clip.z * inv_w;
-
-        let screen_x = (ndc_x + 1.0) * 0.5 * (self.width as f32);
-        let screen_y = (1.0 - ndc_y) * 0.5 * (self.height as f32);
-        Some((screen_x, screen_y, ndc_z))
+        let inv_w = p.w.recip();
+        Some(ScreenVertex {
+            x: (p.x * inv_w + 1.0) * 0.5 * self.width as f32,
+            y: (1.0 - p.y * inv_w) * 0.5 * self.height as f32,
+            z: p.z * inv_w,
+            inv_w,
+        })
     }
 
-    fn draw_line_2d(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4]) {
-        let mut x0 = x0;
-        let mut y0 = y0;
-        let dx = (x1 - x0).abs();
-        let dy = -(y1 - y0).abs();
-        let sx = if x0 < x1 { 1 } else { -1 };
-        let sy = if y0 < y1 { 1 } else { -1 };
-        let mut err = dx + dy;
+    fn project_point(&self, p: Vec3, vp: &Mat4) -> Option<ScreenVertex> {
+        self.project_clip(*vp * p.extend(1.0))
+    }
 
-        let w = self.width as i32;
-        let h = self.height as i32;
+    fn blend_pixel(&mut self, index: usize, color: [f32; 3], alpha: f32) {
+        let offset = index * 4;
+        let alpha = alpha.clamp(0.0, 1.0);
+        for (channel, value) in color.iter().enumerate() {
+            let old = self.color_buffer[offset + channel] as f32 / 255.0;
+            self.color_buffer[offset + channel] = ((old * (1.0 - alpha) + value * alpha).clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+        self.color_buffer[offset + 3] = 255;
+    }
 
-        loop {
-            if x0 >= 0 && x0 < w && y0 >= 0 && y0 < h {
-                let idx = ((y0 as u32 * self.width + x0 as u32) * 4) as usize;
-                if idx + 4 <= self.color_buffer.len() {
-                    self.color_buffer[idx..idx + 4].copy_from_slice(&color);
-                }
+    fn line(&mut self, a: ScreenVertex, b: ScreenVertex, color: [f32; 3], alpha: f32, through: bool) {
+        // Clip to the visible rectangle before stepping. A near-plane edge
+        // must not make the CPU walk millions of off-screen pixels.
+        let delta = [b.x - a.x, b.y - a.y];
+        let mut lo: f32 = 0.0;
+        let mut hi: f32 = 1.0;
+        for (p, q) in [(-delta[0], a.x), (delta[0], self.width as f32 - 1.0 - a.x),
+                       (-delta[1], a.y), (delta[1], self.height as f32 - 1.0 - a.y)] {
+            if p.abs() < 1.0e-6 {
+                if q < 0.0 { return; }
+            } else if p < 0.0 {
+                lo = lo.max(q / p);
+            } else {
+                hi = hi.min(q / p);
             }
-            if x0 == x1 && y0 == y1 {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 >= dy {
-                err += dy;
-                x0 += sx;
-            }
-            if e2 <= dx {
-                err += dx;
-                y0 += sy;
+        }
+        if lo > hi { return; }
+        let steps = ((delta[0].abs().max(delta[1].abs()) * (hi - lo)).ceil() as u32).max(1);
+        for step in 0..=steps {
+            let t = lo + (hi - lo) * step as f32 / steps as f32;
+            let x = (a.x + delta[0] * t).round() as i32;
+            let y = (a.y + delta[1] * t).round() as i32;
+            if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 { continue; }
+            let index = y as usize * self.width as usize + x as usize;
+            let z = a.z + (b.z - a.z) * t;
+            if through || z <= self.depth_buffer[index] + 2.0e-4 {
+                self.blend_pixel(index, color, alpha);
             }
         }
     }
 
-    fn draw_triangle_3d(
-        &mut self,
-        p0: (f32, f32, f32),
-        p1: (f32, f32, f32),
-        p2: (f32, f32, f32),
-        color: [u8; 4],
-    ) {
-        let (x0, y0, z0) = p0;
-        let (x1, y1, z1) = p1;
-        let (x2, y2, z2) = p2;
-
-        // Área 2D orientada
-        let area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-        if area.abs() < 1e-4 {
-            return;
+    fn world_line(&mut self, a: Vec3, b: Vec3, vp: &Mat4, color: [f32; 3], through: bool) {
+        let mut a = *vp * a.extend(1.0);
+        let mut b = *vp * b.extend(1.0);
+        // Homogeneous clipping at the near plane preserves grid lines that
+        // cross the camera, instead of dropping the entire segment.
+        if a.z < 0.0 && b.z < 0.0 { return; }
+        if a.z < 0.0 { a = a.lerp(b, (-a.z / (b.z - a.z)).clamp(0.0, 1.0)); }
+        if b.z < 0.0 { b = b.lerp(a, (-b.z / (a.z - b.z)).clamp(0.0, 1.0)); }
+        if let (Some(a), Some(b)) = (self.project_clip(a), self.project_clip(b)) {
+            self.line(a, b, color, 1.0, through);
         }
+    }
 
-        let min_x = (x0.min(x1).min(x2).floor() as i32).clamp(0, self.width as i32 - 1);
-        let max_x = (x0.max(x1).max(x2).ceil() as i32).clamp(0, self.width as i32 - 1);
-        let min_y = (y0.min(y1).min(y2).floor() as i32).clamp(0, self.height as i32 - 1);
-        let max_y = (y0.max(y1).max(y2).ceil() as i32).clamp(0, self.height as i32 - 1);
-
-        let inv_area = 1.0 / area;
-
+    fn triangle(&mut self, p: [ScreenVertex; 3], surface: &Surface<'_>) {
+        let [a, b, c] = p;
+        let area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+        if area.abs() < 1.0e-5 { return; }
+        let min_x = a.x.min(b.x).min(c.x).floor().max(0.0) as u32;
+        let max_x = a.x.max(b.x).max(c.x).ceil().min(self.width as f32 - 1.0) as u32;
+        let min_y = a.y.min(b.y).min(c.y).floor().max(0.0) as u32;
+        let max_y = a.y.max(b.y).max(c.y).ceil().min(self.height as f32 - 1.0) as u32;
+        if min_x >= self.width || min_y >= self.height { return; }
         for y in min_y..=max_y {
-            let fy = y as f32 + 0.5;
             for x in min_x..=max_x {
-                let fx = x as f32 + 0.5;
-
-                let w0 = ((x1 - fx) * (y2 - fy) - (x2 - fx) * (y1 - fy)) * inv_area;
-                let w1 = ((x2 - fx) * (y0 - fy) - (x0 - fx) * (y2 - fy)) * inv_area;
+                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let w0 = ((b.x - fx) * (c.y - fy) - (c.x - fx) * (b.y - fy)) / area;
+                let w1 = ((c.x - fx) * (a.y - fy) - (a.x - fx) * (c.y - fy)) / area;
                 let w2 = 1.0 - w0 - w1;
-
-                if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
-                    let z = w0 * z0 + w1 * z1 + w2 * z2;
-                    let pixel_idx = (y as u32 * self.width + x as u32) as usize;
-
-                    if pixel_idx < self.depth_buffer.len() && z < self.depth_buffer[pixel_idx] {
-                        self.depth_buffer[pixel_idx] = z;
-                        let color_idx = pixel_idx * 4;
-                        if color_idx + 4 <= self.color_buffer.len() {
-                            self.color_buffer[color_idx..color_idx + 4].copy_from_slice(&color);
-                        }
+                if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 { continue; }
+                let z = w0 * a.z + w1 * b.z + w2 * c.z;
+                let index = (y * self.width + x) as usize;
+                if z >= self.depth_buffer[index] || !(0.0..=1.0).contains(&z) { continue; }
+                let weights = [w0 * a.inv_w, w1 * b.inv_w, w2 * c.inv_w];
+                let sum = weights.iter().sum::<f32>();
+                if sum <= 0.0 { continue; }
+                let weights = weights.map(|w| w / sum);
+                let mut color = [0.0; 3];
+                for (channel, value) in color.iter_mut().enumerate() {
+                    *value = (0..3).map(|i| surface.colors[i][channel] * weights[i]).sum();
+                }
+                if let Some(texture) = surface.texture {
+                    let uv: [f32; 2] = std::array::from_fn(|axis| (0..3).map(|i| surface.uv[i][axis] * weights[i]).sum());
+                    let tx = (uv[0].rem_euclid(1.0) * texture.w as f32) as u32;
+                    let ty = ((1.0 - uv[1].rem_euclid(1.0)) * texture.h as f32) as u32;
+                    if let Some(pixel) = texture.get(tx.min(texture.w - 1), ty.min(texture.h - 1)) {
+                        for channel in 0..3 { color[channel] *= pixel[channel] as f32 / 255.0; }
                     }
                 }
+                if let Some((tint, strength)) = surface.tint {
+                    for channel in 0..3 { color[channel] = color[channel] * (1.0 - strength) + tint[channel] * strength; }
+                }
+                self.blend_pixel(index, color, surface.opacity);
+                if surface.depth_write { self.depth_buffer[index] = z; }
             }
         }
     }
 
-    fn draw_grid(&mut self, vp: &Mat4) {
-        let grid_size = 6.0;
-        let step = 1.0;
-        let mut coord: f32 = -grid_size;
-        let grid_color = [45, 48, 55, 255];
-        let axis_x_color = [220, 60, 60, 255];
-        let axis_z_color = [60, 100, 230, 255];
-
-        while coord <= grid_size + 1e-4 {
-            let is_x_axis = coord.abs() < 1e-4;
-            let line_color = if is_x_axis { axis_x_color } else { grid_color };
-            if let (Some(a), Some(b)) = (
-                self.project_point(Vec3::new(-grid_size, 0.0, coord), vp),
-                self.project_point(Vec3::new(grid_size, 0.0, coord), vp),
-            ) {
-                self.draw_line_2d(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, line_color);
+    fn marker(&mut self, p: ScreenVertex, radius: i32, color: [f32; 3], through: bool) {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dy * dy > radius * radius { continue; }
+                let (x, y) = (p.x.round() as i32 + dx, p.y.round() as i32 + dy);
+                if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 { continue; }
+                let index = y as usize * self.width as usize + x as usize;
+                if through || p.z <= self.depth_buffer[index] + 2.0e-4 {
+                    self.blend_pixel(index, color, 1.0);
+                }
             }
-
-            let is_z_axis = coord.abs() < 1e-4;
-            let line_color = if is_z_axis { axis_z_color } else { grid_color };
-            if let (Some(a), Some(b)) = (
-                self.project_point(Vec3::new(coord, 0.0, -grid_size), vp),
-                self.project_point(Vec3::new(coord, 0.0, grid_size), vp),
-            ) {
-                self.draw_line_2d(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, line_color);
-            }
-
-            coord += step;
         }
     }
 }
 
 impl PetuniaViewport for Software3dViewport {
     fn resize(&mut self, width: u32, height: u32) {
-        let w = width.max(1);
-        let h = height.max(1);
-        if self.width != w || self.height != h {
-            self.width = w;
-            self.height = h;
-            let count = (w * h) as usize;
-            self.depth_buffer.resize(count, 1.0);
-            self.color_buffer.resize(count * 4, 0);
-        }
+        self.width = width.max(1);
+        self.height = height.max(1);
+        self.depth_buffer.resize((self.width * self.height) as usize, 1.0);
+        self.color_buffer.resize((self.width * self.height * 4) as usize, 0);
     }
 
     fn update(&mut self, _dt_seconds: f32) {}
+    fn set_workspace(&mut self, workspace: Workspace) { self.workspace = workspace; }
+    fn set_selection_domain(&mut self, domain: SelectionDomain) { self.selection_domain = domain; }
+    fn draws_component_guides(&self) -> bool { true }
 
-    fn set_workspace(&mut self, workspace: Workspace) {
-        self.workspace = workspace;
-    }
-
-    fn set_selection_domain(&mut self, domain: SelectionDomain) {
-        self.selection_domain = domain;
-    }
-
-    fn render_frame(
-        &mut self,
-        project: &Project,
-        camera: &Camera,
-        state: ViewportRenderState,
-    ) -> Option<slint::Image> {
-        let bg_color = [24, 25, 28, 255];
-        self.clear(bg_color);
-
+    fn render_frame(&mut self, project: &Project, camera: &Camera, state: ViewportRenderState) -> Option<slint::Image> {
+        self.depth_buffer.fill(1.0);
+        for pixel in self.color_buffer.chunks_exact_mut(4) { pixel.copy_from_slice(&[24, 25, 28, 255]); }
         let vp = camera.view_proj();
-        self.draw_grid(&vp);
-
-        let light_dir = Vec3::new(0.4, 0.9, 0.6).normalize();
-
-        for (asset_idx, asset) in project.assets.iter().enumerate() {
-            if !asset.visible {
-                continue;
+        let through = state.xray || state.shading == Shading::Wireframe;
+        if state.show_grid {
+            let step = 10.0f32.powf((camera.visible_height().max(0.001) / 20.0).log10().floor());
+            for (a, b, color) in scene::grid_lines_custom(step * 50.0, step, 0.8, false, 30.0) {
+                self.world_line(Vec3::from_array(a), Vec3::from_array(b), &vp, color, true);
             }
-            let is_active = project.active == asset_idx;
-            let base_color = if is_active {
-                [180, 185, 195]
-            } else {
-                [140, 145, 155]
-            };
+        }
+        let meshes: Vec<_> = project.assets.iter().enumerate().filter(|(_, a)| a.visible)
+            .map(|(index, asset)| (index, asset, asset.evaluated_mesh())).collect();
+        let scene_light = if state.shading.uses_scene_light() { project.active_light() } else { None };
+        let light_dir = scene_light.map_or(Vec3::from_array(scene::LIGHT_DIR).normalize(), |light| Vec3::from_array(light.normalized_direction()));
+        let ambient = if scene_light.is_some() { scene::LIGHT_AMBIENT * 0.35 } else { scene::LIGHT_AMBIENT };
+        let diffuse = scene::LIGHT_DIFFUSE * scene_light.map_or(1.0, |light| light.intensity.clamp(0.0, 8.0));
+        let light_color = scene_light.map_or([1.0; 3], |light| light.color);
 
-            // Rasterização de faces
-            if state.shading != petunia_render::Shading::Wireframe {
-                for face in &asset.mesh.faces {
-                    if face.verts.len() < 3 {
-                        continue;
-                    }
-
-                    // Cálculo de normal da face
-                    let p0 = asset.mesh.verts[face.verts[0] as usize].vec();
-                    let p1 = asset.mesh.verts[face.verts[1] as usize].vec();
-                    let p2 = asset.mesh.verts[face.verts[2] as usize].vec();
-                    let normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
-
-                    let diff = normal.dot(light_dir).max(0.0);
-                    let light = 0.35 + 0.65 * diff;
-
-                    let shaded_color = [
-                        (base_color[0] as f32 * light).min(255.0) as u8,
-                        (base_color[1] as f32 * light).min(255.0) as u8,
-                        (base_color[2] as f32 * light).min(255.0) as u8,
-                        255,
-                    ];
-
-                    // Triangulação em leque
-                    for i in 1..(face.verts.len() - 1) {
-                        let v0 = asset.mesh.verts[face.verts[0] as usize].vec();
-                        let v1 = asset.mesh.verts[face.verts[i] as usize].vec();
-                        let v2 = asset.mesh.verts[face.verts[i + 1] as usize].vec();
-
-                        if let (Some(sp0), Some(sp1), Some(sp2)) = (
-                            self.project_point(v0, &vp),
-                            self.project_point(v1, &vp),
-                            self.project_point(v2, &vp),
-                        ) {
-                            self.draw_triangle_3d(sp0, sp1, sp2, shaded_color);
-                        }
-                    }
-                }
-            }
-
-            // Wireframe das arestas do ativo
-            let edge_color = if is_active {
-                [40, 42, 48, 255]
-            } else {
-                [30, 32, 36, 255]
-            };
-
-            if state.shading == petunia_render::Shading::Wireframe || state.show_wireframe_overlay {
-                for face in &asset.mesh.faces {
-                    let flen = face.verts.len();
-                    for i in 0..flen {
-                        let idx_a = face.verts[i] as usize;
-                        let idx_b = face.verts[(i + 1) % flen] as usize;
-                        let v0 = asset.mesh.verts[idx_a].vec();
-                        let v1 = asset.mesh.verts[idx_b].vec();
-
-                        if let (Some(sp0), Some(sp1)) =
-                            (self.project_point(v0, &vp), self.project_point(v1, &vp))
-                        {
-                            self.draw_line_2d(
-                                sp0.0 as i32,
-                                sp0.1 as i32,
-                                sp1.0 as i32,
-                                sp1.1 as i32,
-                                edge_color,
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Vértices selecionados em modo Point
-            if self.selection_domain == SelectionDomain::Vertex && is_active {
-                for vert in &asset.mesh.verts {
-                    if !vert.selected {
-                        continue;
-                    }
-                    let Some(sp) = self.project_point(vert.vec(), &vp) else {
-                        continue;
+        if state.shading.fills_faces() {
+            // Sort transparency globally, so overlapping objects do not depend
+            // on their order in the Parts list.
+            let mut faces: Vec<_> = meshes.iter().enumerate().flat_map(|(mi, (_, _, mesh))|
+                mesh.faces.iter().enumerate().map(move |(fi, _)| (mi, fi))).collect();
+            if state.xray {
+                faces.sort_by(|&(ma, fa), &(mb, fb)| {
+                    let depth = |mi: usize, fi: usize| {
+                        let mesh = &meshes[mi].2;
+                        let face = &mesh.faces[fi];
+                        let center = face.verts.iter().map(|&v| mesh.verts[v as usize].vec()).sum::<Vec3>() / face.verts.len().max(1) as f32;
+                        (center - camera.eye()).length_squared()
                     };
-                    let cx = sp.0 as i32;
-                    let cy = sp.1 as i32;
-                    let yellow = [255, 220, 30, 255];
-                    for dy in -2..=2 {
-                        for dx in -2..=2 {
-                            let px = cx + dx;
-                            let py = cy + dy;
-                            if px >= 0
-                                && px < self.width as i32
-                                && py >= 0
-                                && py < self.height as i32
-                            {
-                                let idx = ((py as u32 * self.width + px as u32) * 4) as usize;
-                                if idx + 4 <= self.color_buffer.len() {
-                                    self.color_buffer[idx..idx + 4].copy_from_slice(&yellow);
-                                }
-                            }
-                        }
-                    }
+                    depth(mb, fb).total_cmp(&depth(ma, fa))
+                });
+            }
+            for (mi, fi) in faces {
+                let (asset_index, asset, mesh) = &meshes[mi];
+                let face = &mesh.faces[fi];
+                let material = asset.material(project);
+                let texture = if state.shading.samples_material() {
+                    material.and_then(|m| m.albedo_texture.as_ref()).or(asset.texture.as_ref())
+                } else { None };
+                let base = if state.shading.samples_material() {
+                    material.map_or(asset.base_color, |m| [m.base_color[0], m.base_color[1], m.base_color[2]])
+                } else { [0.72, 0.74, 0.78] };
+                let lambert = mesh.face_normal(fi).dot(light_dir).max(0.0);
+                let tint = if *asset_index == project.active && state.selection_domain == SelectionDomain::Face {
+                    if face.selected { Some((scene::SELECT_COLOR, 0.32)) }
+                    else if state.hover == HoverTarget::Face(fi) { Some(([0.62, 0.72, 0.88], 0.2)) }
+                    else { None }
+                } else { None };
+                for tri in mesh.face_triangle_corners(fi) {
+                    let positions = tri.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                    let [Some(a), Some(b), Some(c)] = positions.map(|p| self.project_point(p, &vp)) else { continue; };
+                    let colors = tri.map(|i| std::array::from_fn(|channel| {
+                        let vertex = &mesh.verts[face.verts[i] as usize];
+                        let paint = if state.shading.samples_material() && material.is_none() { vertex.color[channel] / [0.75, 0.75, 0.78][channel] } else { 1.0 };
+                        let emission = if state.shading.samples_material() { material.map_or(0.0, |m| m.emission_color[channel] * m.emission_strength) } else { 0.0 };
+                        base[channel] * paint * (ambient + diffuse * lambert * light_color[channel]) + emission
+                    }));
+                    self.triangle([a, b, c], &Surface {
+                        colors, uv: tri.map(|i| face.uv.get(i).copied().unwrap_or_default()), texture, tint,
+                        opacity: if state.xray { state.xray_opacity.clamp(0.1, 0.9) } else { 1.0 },
+                        depth_write: !state.xray,
+                    });
                 }
             }
         }
 
-        let mut pixel_buffer =
-            slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(self.width, self.height);
-        let dest = pixel_buffer.make_mut_slice();
-        for (i, pixel) in self.color_buffer.as_chunks::<4>().0.iter().enumerate() {
-            if i < dest.len() {
-                dest[i] = slint::Rgba8Pixel {
-                    r: pixel[0],
-                    g: pixel[1],
-                    b: pixel[2],
-                    a: pixel[3],
-                };
+        // All opaque surfaces must be in the depth buffer before components.
+        for (asset_index, _asset, mesh) in &meshes {
+            let active = *asset_index == project.active;
+            if state.show_wireframe_overlay || state.show_triangulation || state.shading == Shading::Wireframe || active && state.selection_domain == SelectionDomain::Edge {
+                for (a, b) in mesh.edges_unique() {
+                    let selected = active && state.selection_domain == SelectionDomain::Edge && mesh.selected_edges.contains(&(a, b));
+                    let hover = active && state.hover == HoverTarget::Edge(a, b);
+                    let color = if selected { scene::SELECT_EDGE_COLOR } else if hover { [0.62, 0.72, 0.88] } else { [0.32, 0.35, 0.40] };
+                    self.world_line(mesh.verts[a as usize].vec(), mesh.verts[b as usize].vec(), &vp, color, through);
+                }
+                if state.show_triangulation {
+                    for (a, b) in mesh.triangulation_wireframe() {
+                        self.world_line(Vec3::from_array(a), Vec3::from_array(b), &vp, [0.23, 0.26, 0.30], through);
+                    }
+                }
+            }
+            if active && state.selection_domain == SelectionDomain::Vertex {
+                for (index, vertex) in mesh.verts.iter().enumerate() {
+                    let Some(p) = self.project_point(vertex.vec(), &vp) else { continue; };
+                    let (radius, color) = if state.hover == HoverTarget::Vertex(index as u32) { (5, [0.62, 0.72, 0.88]) }
+                        else if vertex.selected { (4, [1.0, 0.78, 0.35]) } else { (2, [0.62, 0.66, 0.74]) };
+                    self.marker(p, radius, color, through);
+                }
             }
         }
-
-        Some(slint::Image::from_rgba8(pixel_buffer))
+        let mut pixels = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(self.width, self.height);
+        pixels.make_mut_bytes().copy_from_slice(&self.color_buffer);
+        Some(slint::Image::from_rgba8(pixels))
     }
 }
 

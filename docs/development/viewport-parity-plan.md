@@ -1,0 +1,82 @@
+# Petunia3D — plano de paridade de interface e implementação funcional
+
+Data da reconciliação: 22/09/2026. Base: `f94b888` em `main` de `wasd-lat/petunia3d`.
+Fontes: Livro Vivo (`docs/bible/`), dois anexos de especificação da interface,
+três capturas de defeitos, código e comportamento do executável. Referência de
+interação: [manual oficial do Blender](https://docs.blender.org/manual/en/latest/modeling/meshes/selecting/introduction.html).
+
+**Regra de estado:** `Concluído` exige comportamento integrado, teste com
+assertivas de resultado, regressão visual real, cancelamento/Undo aplicáveis e
+reprodução local. `Em teste` indica código corrigido mas ainda sem aceite. O
+registro é atualizado ao fim de cada implementação, junto com a tabela entregue
+ao usuário. Não se aceita somente presença de botão, callback ou teste de enum.
+
+Tamanho: P = até 2 dias, M = 3–5 dias, G = 1–2 semanas, XG = várias semanas de
+trabalho focado. Estimativas de esforço relativo, não compromisso de prazo.
+
+## Execução atual
+
+Por orientação explícita do usuário em 22/09/2026, executar os testes somente
+após terminar a implementação. Checkpoints podem ser publicados antes disso;
+eles são identificados como **não testados** e não alteram o critério de aceite.
+Nenhum resultado de testes de outra sessão é presumido válido neste ramo.
+Matriz detalhada: [viewport-gap-matrix.md](viewport-gap-matrix.md).
+
+## 1. Interface e viewport: paridade antes de novas funções
+
+| ID | Prioridade | Tam. | O que é / critério de aceite | Dep. | Estado e evidência |
+|---|---|---:|---|---|---|
+| I00 | P0 | M | Auditoria de estado, input, picking, seleção, render, HUD, Undo e screenshots nos dois backends; matriz COMPLIANT/PARTIAL/BROKEN/STUB/MISSING por fluxo. | — | Em andamento: falhas confirmadas no redraw ao mudar modo, hit test aproximado, callbacks cruzados e reconstrução da cena a cada hover. |
+| I01 | P0 | M | Estado único de domínio/ferramenta/operação, conversão de seleção coerente e redraw imediato; quatro domínios sem face laranja residual. | I00 | Em teste: transições e redraw alterados, falta execução da interface. |
+| I02 | P0 | G | Mesmo picking para hover e clique; raycast exato do objeto, alvos em pixels para vértice/aresta, oclusão, X-Ray, múltiplos objetos, Shift e área vazia. | I01 | Em teste: raycast, hover/clique compartilhados, Shift de componentes; seleção múltipla de objetos e validação visual pendentes. |
+| I03 | P0 | M | Feedback Object/Point/Edge/Face com ativa/hover/ocluída e tamanho fixo de tela; overlays sem diamantes nem volumes indevidos. | I02 | Implementado, não testado: paths em coordenadas preservadas; guias e seleção com profundidade em WGPU/software; tripé confinado em 108 px. |
+| I04 | P0 | G | Wire, Solid, Material e Rendered produzem resultados diferentes com material/textura/luz reais; fallback software honesto, paridade e testes de pixels. | I01 | Implementado, não testado: software diferencia Solid/Material/Rendered, amostra textura com UV em perspectiva e usa luz da cena; paridade de pixels pendente. |
+| I05 | P0 | M | X-Ray controla transparência, teste de profundidade e alcance de seleção em todos os domínios; opção independente de shading. | I02–I04 | Implementado, não testado: pipelines de seleção WGPU ignoram profundidade apenas com X-Ray; software aplica opacidade e seleção através; matriz completa pendente. |
+| I06 | P0 | M | Viewport mantém proporção, responde ao resize e DPI, entrada na coordenada correta, barra e Inspector legíveis de 480 px até 1920 px. | I01 | Parcial: inicialização usa tamanho real do layout; overlays acompanham câmera e resize; revisão responsiva pendente. |
+| I07 | P1 | M | Grade adaptativa, eixos, cursor, bounds e referências com profundidade/opacidade/hierarquia que não compete com a malha. | I04 | Parcial: grade adaptativa nova; revisão visual e configurações faltam. |
+| I08 | P1 | M | Orbit/pan/zoom/frame/ortográfica em torno do pivô, captura do mouse, foco e limiar de drag; clique não inicia transformação. | I02 | Em teste: limiar de drag do Move/Rotate/Scale alterado; smoke de mouse pendente. |
+| I09 | P1 | G | Gizmos com picking de handle, tamanho fixo, eixo/plano, hover/drag/lock e feedback legível em zoom e ângulos extremos. | I02,I08 | Parcial: gizmo projetado e testado em unidade; uso real não validado. |
+| I10 | P1 | G | Operações modais Move/Rotate/Scale/Extrude/Inset/Bevel/Loop Cut/Knife: preview derivado do original, número/eixo/snap, Enter, Esc e um checkpoint. | I01,I02,I09 | Parcial: vários caminhos existem; caixa numérica durante drag, box select e restrições ainda incompletos. |
+| I11 | P1 | M | HUD mostra valores reais, alvo, eixo e dica contextual; barra inferior acompanha o estado e não mente. | I10 | Parcial: HUD e status contextual novos, casos extremos sem smoke. |
+| I12 | P1 | M | Painel flutuante por ferramenta: campos corretos, Apply/Cancel, collapse/pin e teclado; não mostrar controles de outra ferramenta. | I10 | Parcial, não testado: Slide, visibilidade, collapse, foco, Escape e setas corrigidos; pin pendente. |
+| I13 | P1 | G | Design system Slint: shell viewport-first, painéis redimensionáveis, tipografia, ícones com legenda, touch/focus e acesso via teclado. | I06 | Parcial: shell e tokens existem; paridade visual/acessibilidade pendente. |
+| I14 | P1 | M | Regressão 4 domínios × 4 shadings × X-Ray, cenários das capturas, operações, Undo/Redo, resize e GPU/software. | I01–I13 | Pendente: testes atuais não certificam todas as combinações. |
+| I15 | P1 | M | Telemetria, render sob demanda e medição: hover sem triangulação/buffer de malha; UI responsiva em cena simples e densa. | I04,I14 | Implementado, não testado: hover/câmera/domínio atualizam buffers de seleção; navegação sincroniza apenas os overlays; benchmark pendente. |
+
+## 2. Funcionalidades do editor após a paridade de interface
+
+| ID | Prioridade | Tam. | O que é / critério de aceite | Dep. | Estado e evidência |
+|---|---|---:|---|---|---|
+| F01 | P1 | G | Referência → perfil 2D → forma 3D com preview/cancel/Undo, importação de imagem e transformação editável na viewport Slint. | I08–I14 | Pendente de certificação ponta a ponta. |
+| F02 | P1 | G | Primitivas, extrude individual/região, inset, round edge, push/pull, slice, knife e loop cut com topologia válida e entradas precisas. | I10 | Parcial: núcleo e vários fluxos UI ligados; critérios de qualidade topológica ainda abertos. |
+| F03 | P1 | G | Connect de loops abertos e contagens diferentes usando quads/triângulos, preview e preservação manifold. | I10,F02 | Lacuna confirmada no algoritmo de `connect_loops`. |
+| F04 | P1 | G | Paint on model: stroke contínuo, layers, fill por escopo, ferramentas Line/Rectangle, material visível no 3D, Undo por traço. | I04,I10 | Parcial: código recente cobre vários fluxos, sem validação visual real integrada. |
+| F05 | P1 | G | UV: unwrap/pacote real, editor 2D, seleção face/ilha, transformações, costuras, texel density e sincronismo com 3D. | I02,I10 | Parcial: picking 2D e transformações recentes; workspace completo não certificado. |
+| F06 | P1 | M | Abrir/salvar/importar/exportar com diálogos, modificações não salvas, autosave/recovery e erro recuperável; round-trip por fixture. | I13 | Parcial: bridge e serviços existem; validar no executável. |
+| F07 | P1 | G | Completar o contrato ZIP/JSON `.petunia`, manifest e recursos; preservar importação de Postcard legado e round-trip sem perda. | F06 | Parcial: ZIP/JSON e loader Postcard já existem na base; manifest e organização dos recursos precisam ser reconciliados. |
+| F08 | P2 | G | Biblioteca de assets de fato independente da cena: catálogo, busca, favoritos, filtros, drag/drop e aplicação; Undo e persistência. | I13,F06 | Parcial: Save Active cria asset de cena, não prova biblioteca completa. |
+| F09 | P2 | G | Inspector/contexto, materiais e propriedades reativos ao objeto/seleção/ferramenta, operações transacionais e campos editáveis. | I01,I12 | Parcial; revisão de cada comando visível pendente. |
+| F10 | P2 | G | Comandos/keymap/i18n/acessibilidade: sem ações vazias, foco via teclado, menus e busca com atalhos remapeáveis. | I13 | Parcial: catálogo e callbacks existem; auditoria fim a fim pendente. |
+| F11 | P2 | XG | Representação authoring com handles/topologia estáveis ou ADR que ajuste a promessa do Livro Vivo; serialização, Undo e plugins seguros. | F02,F07 | Divergência arquitetural confirmada; projeto de migração pendente. |
+| F12 | P2 | G | Undo por diffs/escopo, perf em malhas/texturas grandes e história transacional compartilhada com paint/UV/modificadores. | F02,F04,F05 | Parcial: checkpoints clonam projeto em diversos caminhos; medir antes da troca. |
+| F13 | P2 | M | Painéis de plugin, temas, overlays LIFO e API pública compatíveis com o shell Slint e baseline do Livro Vivo. | I13,F10 | Parcial: mecanismos presentes; integração UI não certificada. |
+| F14 | P1 | G | Gates workspace/Clippy/fmt/arquitetura/docs, smoke Linux/Windows, cenários visuais e teste com artista; registrar FPS e limites. | I14,F01–F13 | Pendente: nenhuma alegação de qualidade Blender/Plasticity antes da evidência. |
+
+## Evidências exigidas para fechar uma linha
+
+1. Um teste ou reprodução que falhava antes da correção e agora passa no caminho do executável.
+2. Captura de janela real nos cenários da especificação, incluindo troca de modo e X-Ray.
+3. Operação aplicável testada com confirmar, cancelar, Undo e Redo, com geometria idêntica após cancelar.
+4. Nenhuma divergência conhecida entre texto/ícone, interação, estado do domínio e frame renderizado.
+5. Resultado de `cargo fmt`, `cargo check`, testes relevantes, `cargo clippy` e gates documentais, com limitações honestas.
+
+## Registro de atualizações
+
+- 21/09/2026: reconciliação do commit `f94b888`. Correções I01/I02/I08/I12/I15 iniciadas;
+  estados permanecem **Em teste** até os gates e a reprodução visual.
+
+- 22/09/2026: implementação sem execução de testes conforme orientação do usuário.
+  Correção estrutural de `Path.fit`, guias X-Ray, fallback de shading, tamanho
+  inicial do layout e sincronização de overlays. Triangulação de polígonos
+  côncavos compartilhada entre render e picking; estatísticas contam n−2 tris.
+  Checkpoints publicados não representam aceite de qualidade.

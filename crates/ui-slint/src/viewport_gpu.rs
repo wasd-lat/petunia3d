@@ -221,6 +221,10 @@ impl PetuniaViewport for WgpuViewport {
         self.selection_domain = domain;
     }
 
+    fn draws_component_guides(&self) -> bool {
+        true
+    }
+
     fn render_frame(
         &mut self,
         project: &Project,
@@ -271,5 +275,29 @@ mod tests {
                 println!("WgpuViewport ignorado por falta de GPU física: {err}");
             }
         }
+    }
+
+    #[test]
+    fn hover_updates_selection_without_rebuilding_scene_geometry() {
+        let Ok(mut viewport) = WgpuViewport::try_create_default(320, 240) else {
+            // Os testes de domínio ainda executam em hosts sem Vulkan/Metal/DX.
+            return;
+        };
+        let project = Project::new();
+        let camera = Camera::default();
+        let state = ViewportRenderState::default();
+        viewport.render_frame(&project, &camera, state).unwrap();
+        let rebuilt = viewport.renderer.mesh_rebuilds();
+        viewport
+            .render_frame(
+                &project,
+                &camera,
+                ViewportRenderState {
+                    hover: petunia_core::HoverTarget::Face(0),
+                    ..state
+                },
+            )
+            .unwrap();
+        assert_eq!(viewport.renderer.mesh_rebuilds(), rebuilt);
     }
 }

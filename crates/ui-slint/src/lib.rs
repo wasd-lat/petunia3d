@@ -565,6 +565,10 @@ pub trait PetuniaViewport: Send {
     fn update(&mut self, dt_seconds: f32);
     fn set_workspace(&mut self, workspace: Workspace);
     fn set_selection_domain(&mut self, domain: SelectionDomain);
+    /// O backend desenha alvos não selecionados com depth test próprio.
+    fn draws_component_guides(&self) -> bool {
+        false
+    }
     fn render_frame(
         &mut self,
         _project: &Project,
@@ -619,6 +623,10 @@ impl PetuniaViewport for Box<dyn PetuniaViewport> {
 
     fn set_selection_domain(&mut self, domain: SelectionDomain) {
         (**self).set_selection_domain(domain);
+    }
+
+    fn draws_component_guides(&self) -> bool {
+        (**self).draws_component_guides()
     }
 
     fn render_frame(
@@ -1567,55 +1575,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if self.state.workspace == Workspace::Paint {
             return false;
         }
-        let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
-        let ndc_y = 1.0 - normalized_y.clamp(0.0, 1.0) * 2.0;
-        let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
-
-        let next = match self.state.selection_domain() {
-            SelectionDomain::Object => {
-                // Objeto: o mesmo teste do clique, sem alterar seleção.
-                let mut best: Option<(usize, f32)> = None;
-                for (index, asset) in self.state.project.assets.iter().enumerate() {
-                    if !asset.visible || asset.locked || asset.mesh.verts.is_empty() {
-                        continue;
-                    }
-                    let center = glam::Vec3::from_array(asset.mesh.selection_center());
-                    let along = (center - origin).dot(direction);
-                    if along < 0.0 {
-                        continue;
-                    }
-                    let distance = (center - (origin + direction * along)).length();
-                    let radius = asset
-                        .mesh
-                        .verts
-                        .iter()
-                        .map(|vertex| (vertex.vec() - center).length())
-                        .fold(0.0_f32, f32::max)
-                        .max(0.15);
-                    if distance <= radius && best.is_none_or(|(_, depth)| along < depth) {
-                        best = Some((index, along));
-                    }
-                }
-                best.map(|(index, _)| petunia_core::HoverTarget::Object(index))
-                    .unwrap_or(petunia_core::HoverTarget::None)
-            }
-            SelectionDomain::Vertex => match self.state.pick_vertex(origin, direction) {
-                Some((index, position)) if !self.is_occluded(origin, direction, position) => {
-                    petunia_core::HoverTarget::Vertex(index as u32)
-                }
-                _ => petunia_core::HoverTarget::None,
-            },
-            SelectionDomain::Edge => match self.state.pick_edge(origin, direction) {
-                Some((edge, position)) if !self.is_occluded(origin, direction, position) => {
-                    petunia_core::HoverTarget::Edge(edge.0, edge.1)
-                }
-                _ => petunia_core::HoverTarget::None,
-            },
-            SelectionDomain::Face => match pick_face_hit(&self.state, origin, direction) {
-                Some((face, _)) => petunia_core::HoverTarget::Face(face),
-                None => petunia_core::HoverTarget::None,
-            },
-        };
+        let next = self.pick_viewport_target(normalized_x, normalized_y);
 
         if next == self.state.session.tools.hover {
             return false;
@@ -1624,19 +1584,149 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// A preselection e o clique usam exatamente o mesmo hit test. Ponto e
+    /// aresta usam alvos em pixels lógicos, independentes da distância da
+    /// câmera; objetos e faces usam a superfície real, nunca uma esfera de
+    /// bounding que seleciona no vazio.
+    fn pick_viewport_target(&self, x: f32, y: f32) -> petunia_core::HoverTarget {
+        use petunia_core::HoverTarget as Target;
+
+        if !x.is_finite()
+            || !y.is_finite()
+            || !(0.0..=1.0).contains(&x)
+            || !(0.0..=1.0).contains(&y)
+        {
+            return Target::None;
+        }
+        let (width, height) = (self.viewport_size[0], self.viewport_size[1]);
+        if width <= 1.0 || height <= 1.0 {
+            return Target::None;
+        }
+        let (origin, direction) = self.state.session.camera.ray(x * 2.0 - 1.0, 1.0 - y * 2.0);
+
+        if self.state.selection_domain() == SelectionDomain::Object {
+            let mut best: Option<(usize, f32)> = None;
+            for (index, asset) in self.state.project.assets.iter().enumerate() {
+                if !asset.visible || asset.locked {
+                    continue;
+                }
+                let mesh = asset.evaluated_mesh();
+                for (fi, face) in mesh.faces.iter().enumerate() {
+                    for corners in mesh.face_triangle_corners(fi) {
+                        let [a, b, c] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                        if let Some(distance) = ray_triangle(origin, direction, a, b, c)
+                            && best.is_none_or(|(_, current)| distance < current)
+                        {
+                            best = Some((index, distance));
+                        }
+                    }
+                }
+            }
+            return best.map_or(Target::None, |(index, _)| Target::Object(index));
+        }
+
+        let Some(asset) = self.state.project.active() else {
+            return Target::None;
+        };
+        if !asset.visible || asset.locked {
+            return Target::None;
+        }
+        let mesh = &asset.mesh;
+        let view_proj = self.state.session.camera.view_proj();
+        let screen = |point: glam::Vec3| -> Option<[f32; 2]> {
+            let clip = view_proj * point.extend(1.0);
+            if clip.w <= 0.05 {
+                return None;
+            }
+            let ndc = clip.truncate() / clip.w;
+            if !ndc.is_finite() || ndc.z < 0.0 || ndc.z > 1.0 {
+                return None;
+            }
+            Some([(ndc.x * 0.5 + 0.5) * width, (0.5 - ndc.y * 0.5) * height])
+        };
+        let mouse = [x * width, y * height];
+        // Hit targets are intentionally larger than visible point/edge marks.
+        const POINT_RADIUS: f32 = 10.0;
+        const EDGE_RADIUS: f32 = 8.0;
+        match self.state.selection_domain() {
+            SelectionDomain::Vertex => {
+                let mut best: Option<(usize, f32, f32)> = None;
+                for (index, vertex) in mesh.verts.iter().enumerate() {
+                    let position = vertex.vec();
+                    let Some(pixel) = screen(position) else {
+                        continue;
+                    };
+                    let distance = (pixel[0] - mouse[0]).hypot(pixel[1] - mouse[1]);
+                    if distance > POINT_RADIUS || self.is_occluded(origin, direction, position) {
+                        continue;
+                    }
+                    let depth = (position - origin).dot(direction);
+                    if best.is_none_or(|(_, current_distance, current_depth)| {
+                        distance < current_distance - 0.5
+                            || ((distance - current_distance).abs() <= 0.5 && depth < current_depth)
+                    }) {
+                        best = Some((index, distance, depth));
+                    }
+                }
+                best.map_or(Target::None, |(index, _, _)| Target::Vertex(index as u32))
+            }
+            SelectionDomain::Edge => {
+                let mut best: Option<((u32, u32), f32, f32)> = None;
+                for (a, b) in mesh.edges_unique() {
+                    let (Some(va), Some(vb)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    else {
+                        continue;
+                    };
+                    let (Some(pa), Some(pb)) = (screen(va.vec()), screen(vb.vec())) else {
+                        continue;
+                    };
+                    let dx = pb[0] - pa[0];
+                    let dy = pb[1] - pa[1];
+                    let length_sq = dx * dx + dy * dy;
+                    if length_sq <= f32::EPSILON {
+                        continue;
+                    }
+                    let fraction = (((mouse[0] - pa[0]) * dx + (mouse[1] - pa[1]) * dy)
+                        / length_sq)
+                        .clamp(0.0, 1.0);
+                    let distance =
+                        (mouse[0] - pa[0] - fraction * dx).hypot(mouse[1] - pa[1] - fraction * dy);
+                    let position = va.vec().lerp(vb.vec(), fraction);
+                    if distance > EDGE_RADIUS || self.is_occluded(origin, direction, position) {
+                        continue;
+                    }
+                    let depth = (position - origin).dot(direction);
+                    if best.is_none_or(|(_, current_distance, current_depth)| {
+                        distance < current_distance - 0.5
+                            || ((distance - current_distance).abs() <= 0.5 && depth < current_depth)
+                    }) {
+                        best = Some(((a, b), distance, depth));
+                    }
+                }
+                best.map_or(Target::None, |((a, b), _, _)| Target::Edge(a, b))
+            }
+            SelectionDomain::Face => pick_face_hit(&self.state, origin, direction)
+                .map_or(Target::None, |(face, _)| Target::Face(face)),
+            SelectionDomain::Object => Target::None,
+        }
+    }
+
     /// Um componente está atrás de geometria frontal?
     ///
     /// Com X-Ray ligado nada é considerado ocluído: é exatamente o que o modo
     /// habilita para o usuário.
-    fn is_occluded(
-        &self,
-        origin: glam::Vec3,
-        direction: glam::Vec3,
-        position: glam::Vec3,
-    ) -> bool {
+    fn is_occluded(&self, origin: glam::Vec3, direction: glam::Vec3, position: glam::Vec3) -> bool {
         if self.state.session.show_xray {
             return false;
         }
+        // A tolerância de picking é em pixels. A oclusão deve testar o raio
+        // pelo candidato, não o raio deslocado sob o cursor.
+        let (origin, direction) = if self.state.session.camera.proj == petunia_core::Projection::Ortho {
+            (position - direction * (position - origin).dot(direction), direction)
+        } else {
+            (origin, (position - origin).normalize_or_zero())
+        };
         let target_depth = (position - origin).dot(direction);
         match pick_face_hit(&self.state, origin, direction) {
             Some((_, hit)) => {
@@ -2613,6 +2703,31 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.apply_loop_cut_preview()
     }
 
+    /// Campo numérico do Slide: não altera a quantidade de cortes.
+    pub fn set_loop_cut_slide(&mut self, slide: f32) -> bool {
+        if !slide.is_finite() || !(-1.0..=1.0).contains(&slide) {
+            self.state
+                .set_status("Loop Cut: slide must be between -1 and 1");
+            return false;
+        }
+        let Some(session) = self.loop_cut.as_mut() else {
+            return false;
+        };
+        if (session.slide - slide).abs() <= f32::EPSILON {
+            return false;
+        }
+        let previous = session.slide;
+        session.slide = slide;
+        if self.apply_loop_cut_preview() {
+            true
+        } else {
+            if let Some(session) = self.loop_cut.as_mut() {
+                session.slide = previous;
+            }
+            false
+        }
+    }
+
     /// Ajusta a quantidade de cortes paralelos (1..=32).
     pub fn set_loop_cut_count(&mut self, cuts: usize) -> bool {
         let Some(session) = self.loop_cut.as_mut() else {
@@ -2792,6 +2907,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     /// usuário realmente apontou. O corte é aplicado como uma única transação.
     pub fn knife_click(&mut self, normalized_x: f32, normalized_y: f32) -> bool {
         if self.state.session.tools.cut_session.is_none() {
+            return false;
+        }
+        if !normalized_x.is_finite() || !normalized_y.is_finite() {
             return false;
         }
         let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
@@ -3177,6 +3295,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
+        if !normalized_x.is_finite() || !normalized_y.is_finite() {
+            return;
+        }
         // No modo Instant um clique confirma a sessão paramétrica em vez de
         // trocar a seleção — é o equivalente ao Enter com o mouse.
         if self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
@@ -3187,9 +3308,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         // A faca consome o clique antes da seleção: com uma sessão de corte
         // aberta, clicar é escolher ponto de aresta, não selecionar.
-        if self.state.session.tools.cut_session.is_some()
-            && self.knife_click(normalized_x, normalized_y)
-        {
+        if self.state.session.tools.cut_session.is_some() {
+            self.knife_click(normalized_x, normalized_y);
             return;
         }
         let ndc_x = normalized_x.clamp(0.0, 1.0) * 2.0 - 1.0;
@@ -3233,92 +3353,73 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return;
         }
 
-        match self.state.selection_domain() {
-            SelectionDomain::Object => {
-                let mut best = None;
-                for (index, asset) in self.state.project.assets.iter().enumerate() {
-                    if !asset.visible || asset.locked || asset.mesh.verts.is_empty() {
-                        continue;
-                    }
-                    let center = glam::Vec3::from_array(asset.mesh.selection_center());
-                    let along = (center - origin).dot(direction);
-                    if along < 0.0 {
-                        continue;
-                    }
-                    let distance = (center - (origin + direction * along)).length();
-                    let radius = asset
-                        .mesh
-                        .verts
-                        .iter()
-                        .map(|vertex| (vertex.vec() - center).length())
-                        .fold(0.0_f32, f32::max)
-                        .max(0.15);
-                    if distance <= radius && best.is_none_or(|(_, depth)| along < depth) {
-                        best = Some((index, along));
-                    }
-                }
-                match best {
-                    Some((index, _)) => {
-                        self.state.project.active = index;
-                        self.state.session.selection.asset =
-                            Some(self.state.project.assets[index].id);
-                        let name = self.state.project.assets[index].name.clone();
-                        self.state.set_status(format!("Selected '{name}'"));
-                    }
-                    None => {
-                        self.state.set_status("Nothing under the cursor");
-                    }
-                }
+        use petunia_core::HoverTarget as Target;
+        match self.pick_viewport_target(normalized_x, normalized_y) {
+            Target::Object(index) => {
+                self.state.project.active = index;
+                self.state.session.selection.asset = Some(self.state.project.assets[index].id);
+                let name = self.state.project.assets[index].name.clone();
+                self.state.set_status(format!("Selected '{name}'"));
             }
-            SelectionDomain::Vertex => match self.state.pick_vertex(origin, direction) {
-                Some((index, _)) => {
-                    if let Some(mesh) = self.state.project.active_mesh_mut() {
-                        if !extend {
-                            mesh.deselect_all();
+            Target::Vertex(index) => {
+                if let Some(mesh) = self.state.project.active_mesh_mut() {
+                    if !extend {
+                        mesh.deselect_all();
+                    }
+                    if let Some(vertex) = mesh.verts.get_mut(index as usize) {
+                        vertex.selected = !extend || !vertex.selected;
+                    }
+                }
+                self.state.set_status(format!("Point {index} selected"));
+            }
+            Target::Edge(a, b) => {
+                if let Some(mesh) = self.state.project.active_mesh_mut() {
+                    if !extend {
+                        mesh.deselect_all();
+                    }
+                    if extend && mesh.selected_edges.contains(&(a, b)) {
+                        mesh.selected_edges.remove(&(a, b));
+                    } else {
+                        mesh.selected_edges.insert((a, b));
+                    }
+                    // Operações de malha usam os vértices das arestas selecionadas.
+                    // Recalcular impede que um Shift-click para desmarcar deixe
+                    // vértices invisivelmente selecionados.
+                    for vertex in &mut mesh.verts {
+                        vertex.selected = false;
+                    }
+                    for &(start, end) in &mesh.selected_edges {
+                        if let Some(vertex) = mesh.verts.get_mut(start as usize) {
+                            vertex.selected = true;
                         }
-                        if let Some(vertex) = mesh.verts.get_mut(index) {
-                            vertex.selected = !extend || !vertex.selected;
+                        if let Some(vertex) = mesh.verts.get_mut(end as usize) {
+                            vertex.selected = true;
                         }
                     }
-                    self.state.set_status(format!("Point {index} selected"));
                 }
-                None => self.state.set_status("No point under the cursor"),
-            },
-            SelectionDomain::Face => match pick_face_hit(&self.state, origin, direction) {
-                Some((face, _)) => {
-                    if let Some(mesh) = self.state.project.active_mesh_mut() {
-                        if !extend {
-                            for current in &mut mesh.faces {
-                                current.selected = false;
-                            }
-                        }
-                        if let Some(current) = mesh.faces.get_mut(face) {
-                            current.selected = true;
-                        }
+                self.state.set_status(format!("Edge {a}-{b} selected"));
+            }
+            Target::Face(face) => {
+                if let Some(mesh) = self.state.project.active_mesh_mut() {
+                    if !extend {
+                        mesh.deselect_all();
                     }
-                    self.state.set_status(format!("Face {face} selected"));
-                }
-                None => self.state.set_status("No face under the cursor"),
-            },
-            SelectionDomain::Edge => match self.state.pick_edge(origin, direction) {
-                Some((edge, _)) => {
-                    if let Some(mesh) = self.state.project.active_mesh_mut() {
-                        if !extend {
-                            mesh.selected_edges.clear();
-                            mesh.deselect_all();
-                        }
-                        mesh.selected_edges.insert(edge);
-                        for vertex in [edge.0, edge.1] {
-                            if let Some(vertex) = mesh.verts.get_mut(vertex as usize) {
-                                vertex.selected = true;
-                            }
-                        }
+                    if let Some(current) = mesh.faces.get_mut(face) {
+                        current.selected = !extend || !current.selected;
                     }
-                    self.state
-                        .set_status(format!("Edge {}-{} selected", edge.0, edge.1));
+                    mesh.sync_vert_selection_from_faces();
                 }
-                None => self.state.set_status("No edge under the cursor"),
-            },
+                self.state.set_status(format!("Face {face} selected"));
+            }
+            Target::None => {
+                if !extend
+                    && self.state.selection_domain().is_component()
+                    && let Some(mesh) = self.state.project.active_mesh_mut()
+                {
+                    mesh.deselect_all();
+                }
+                self.state.set_status("Nothing under the cursor");
+            }
         }
         self.state.sync_selection();
         self.state.mark_dirty();
@@ -3679,8 +3780,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.is_wireframe = self.state.session.show_wireframe_overlay;
         vm.asset_library_visible = self.asset_library_visible;
         vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
-        vm.selection_overlay =
-            compute_selection_overlay(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.selection_overlay = compute_selection_overlay(
+            &self.state,
+            self.viewport_size[0],
+            self.viewport_size[1],
+            self.viewport.draws_component_guides(),
+        );
         vm.add_menu_open = self.add_menu_open;
         if let Some(draft) = &self.rename_draft {
             vm.rename_active = true;
@@ -4005,9 +4110,9 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
     // Ele mostra a orientação da câmera, não a cena: por isso as hastes partem
     // de uma âncora fixa no canto, não de um ponto projetado.
     {
-        let origin = [VIEW_MARGIN, height - VIEW_MARGIN];
-        model.view_origin_x = origin[0];
-        model.view_origin_y = origin[1];
+        model.view_origin_x = VIEW_MARGIN;
+        model.view_origin_y = height - VIEW_MARGIN;
+        let origin = [VIEW_MARGIN, VIEW_MARGIN];
         for (axis, slot) in [
             (glam::Vec3::X, &mut model.view_x_commands),
             (glam::Vec3::Y, &mut model.view_y_commands),
@@ -4110,7 +4215,12 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
     model
 }
 
-fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> SelectionOverlayModel {
+fn compute_selection_overlay(
+    state: &AppState,
+    width: f32,
+    height: f32,
+    backend_draws_guides: bool,
+) -> SelectionOverlayModel {
     /// Teto de segmentos por frame: malhas grandes não podem gerar uma string
     /// gigante a cada sync de propriedades.
     const MAX_SEGMENTS: usize = 4_000;
@@ -4161,24 +4271,31 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
 
     match domain {
         SelectionDomain::Object => {
-            // Contorno de objeto: silhueta projetada, desenhada sem depth porque
-            // é um realce de tela — Blender e C4D fazem o mesmo. Só as arestas
-            // cuja face frontal existe entram, evitando o efeito de "raio-X".
-            let mut front_facing = std::collections::HashSet::new();
+            // Silhueta: aresta entre face frontal e traseira (ou borda aberta
+            // frontal). Não desenhar todas as arestas de faces frontais, o que
+            // faria um objeto selecionado parecer uma caixa de arame gigante.
+            let mut adjacent = std::collections::HashMap::<(u32, u32), (usize, usize)>::new();
             let view_dir = state.session.camera.forward();
             for (fi, face) in mesh.faces.iter().enumerate() {
                 if face.verts.len() < 3 {
                     continue;
                 }
-                if mesh.face_normal(fi).dot(view_dir) >= 0.0 {
-                    for index in 0..face.verts.len() {
-                        let a = face.verts[index];
-                        let b = face.verts[(index + 1) % face.verts.len()];
-                        front_facing.insert(if a < b { (a, b) } else { (b, a) });
+                let front = mesh.face_normal(fi).dot(view_dir) < 0.0;
+                for index in 0..face.verts.len() {
+                    let a = face.verts[index];
+                    let b = face.verts[(index + 1) % face.verts.len()];
+                    let entry = adjacent.entry((a.min(b), a.max(b))).or_default();
+                    if front {
+                        entry.0 += 1;
+                    } else {
+                        entry.1 += 1;
                     }
                 }
             }
-            for (a, b) in front_facing {
+            for ((a, b), (front, back)) in adjacent {
+                if front == 0 || (back == 0 && front > 1) {
+                    continue;
+                }
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
                     break;
@@ -4194,6 +4311,9 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
             }
         }
         SelectionDomain::Vertex => {
+            if backend_draws_guides {
+                return SelectionOverlayModel::default();
+            }
             for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
@@ -4218,6 +4338,9 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
             }
         }
         SelectionDomain::Edge => {
+            if backend_draws_guides {
+                return SelectionOverlayModel::default();
+            }
             for (a, b) in mesh.edges_unique() {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
@@ -4239,27 +4362,7 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32) -> Selec
                 }
             }
         }
-        SelectionDomain::Face => {
-            // O GPU preenche e contorna a face selecionada com depth test; o
-            // overlay 2D não duplica.
-            for face in mesh.faces.iter().filter(|_| false) {
-                if segments >= MAX_SEGMENTS {
-                    truncated = true;
-                    break;
-                }
-                for index in 0..face.verts.len() {
-                    let a = face.verts[index] as usize;
-                    let b = face.verts[(index + 1) % face.verts.len()] as usize;
-                    let (Some(va), Some(vb)) = (mesh.verts.get(a), mesh.verts.get(b)) else {
-                        continue;
-                    };
-                    if let (Some(pa), Some(pb)) = (project(va.vec()), project(vb.vec())) {
-                        push_segment(&mut outline, pa, pb);
-                        segments += 1;
-                    }
-                }
-            }
-        }
+        SelectionDomain::Face => {}
     }
 
     let _ = truncated;
@@ -4285,13 +4388,8 @@ fn pick_face_hit(
     let mesh = state.project.active_mesh()?;
     let mut best = None;
     for (face_index, face) in mesh.faces.iter().enumerate() {
-        if face.verts.len() < 3 {
-            continue;
-        }
-        let p0 = mesh.verts[face.verts[0] as usize].vec();
-        for triangle in 1..face.verts.len() - 1 {
-            let p1 = mesh.verts[face.verts[triangle] as usize].vec();
-            let p2 = mesh.verts[face.verts[triangle + 1] as usize].vec();
+        for corners in mesh.face_triangle_corners(face_index) {
+            let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
             if let Some(distance) = ray_triangle(origin, direction, p0, p1, p2)
                 && best.is_none_or(|(_, current)| distance < current)
             {
@@ -4348,7 +4446,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
     println!("Petunia3D - Slint production frontend");
     let window = PetuniaSlintShell::new()?;
     let state = AppState::default();
-    let has_gpu_viewport = gpu_context.is_some();
 
     let mut viewport: Box<dyn PetuniaViewport> = if let Some((_, _, device, queue)) = gpu_context {
         println!("Viewport backend: shared WGPU fast path");
@@ -4378,7 +4475,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     {
         window.set_viewport_image(frame);
     }
-    window.set_has_gpu_viewport(has_gpu_viewport);
+    window.set_has_gpu_viewport(true);
 
     let bridge = Arc::new(Mutex::new(SlintUiBridge::new(state, viewport)));
 
@@ -4415,6 +4512,25 @@ pub fn run() -> Result<(), slint::PlatformError> {
         .expect("Slint bridge mutex poisoned during startup")
         .view_model();
     sync_window_properties(&window, &vm);
+
+    // O primeiro layout pode ocorrer antes da instalação dos callbacks de
+    // resize. Use suas dimensões reais antes do primeiro frame interativo.
+    let initial_bridge = Arc::clone(&bridge);
+    let initial_window = window.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        if let Some(window) = initial_window.upgrade()
+            && let Ok(mut bridge) = initial_bridge.lock()
+        {
+            bridge.resize_viewport(
+                window.get_viewport_region_width().round().max(1.0) as u32,
+                window.get_viewport_region_height().round().max(1.0) as u32,
+            );
+            sync_window_properties(&window, &bridge.view_model());
+            if let Some(frame) = bridge.render_viewport() {
+                window.set_viewport_image(frame);
+            }
+        }
+    });
 
     // Um passo de autosave a cada 30s; o intervalo real (120s) e o dirty state
     // são decididos pelo domínio, então o timer só oferece a oportunidade.
@@ -4486,6 +4602,46 @@ fn effect_params(effect: &petunia_project::paint_layers::PaintEffect) -> Vec<Pai
             param("saturation", "Saturation", *saturation, -1.0, 1.0),
         ],
     }
+}
+
+fn sync_overlay_models(window: &PetuniaSlintShell, selection: &SelectionOverlayModel, gizmo: &GizmoModel) {
+    window.set_selection_overlay_visible(selection.visible);
+    window.set_selection_outline_commands(selection.outline_commands.as_str().into());
+    window.set_selection_point_commands(selection.point_commands.as_str().into());
+    window.set_selection_unselected_outline_commands(
+        selection
+            .unselected_outline_commands
+            .as_str()
+            .into(),
+    );
+    window.set_selection_unselected_point_commands(
+        selection
+            .unselected_point_commands
+            .as_str()
+            .into(),
+    );
+    window.set_selection_overlay_accent(selection.accent);
+    window.set_gizmo_visible(gizmo.visible);
+    window.set_gizmo_origin_x(gizmo.origin_x);
+    window.set_gizmo_origin_y(gizmo.origin_y);
+    window.set_gizmo_x_commands(gizmo.x_commands.as_str().into());
+    window.set_gizmo_y_commands(gizmo.y_commands.as_str().into());
+    window.set_gizmo_z_commands(gizmo.z_commands.as_str().into());
+    window.set_gizmo_x_arrow_commands(gizmo.x_arrow_commands.as_str().into());
+    window.set_gizmo_y_arrow_commands(gizmo.y_arrow_commands.as_str().into());
+    window.set_gizmo_z_arrow_commands(gizmo.z_arrow_commands.as_str().into());
+    window.set_view_gizmo_x_commands(gizmo.view_x_commands.as_str().into());
+    window.set_view_gizmo_y_commands(gizmo.view_y_commands.as_str().into());
+    window.set_view_gizmo_z_commands(gizmo.view_z_commands.as_str().into());
+    window.set_view_gizmo_origin_x(gizmo.view_origin_x);
+    window.set_view_gizmo_origin_y(gizmo.view_origin_y);
+}
+
+fn sync_viewport_overlays<V: PetuniaViewport>(window: &PetuniaSlintShell, bridge: &SlintUiBridge<V>) {
+    let [width, height] = bridge.viewport_size;
+    let selection = compute_selection_overlay(&bridge.state, width, height, bridge.viewport.draws_component_guides());
+    let gizmo = compute_gizmo(&bridge.state, width, height);
+    sync_overlay_models(window, &selection, &gizmo);
 }
 
 fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
@@ -4565,36 +4721,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     let model = std::rc::Rc::new(slint::VecModel::from(scene_items));
     window.set_scene_items(model.into());
 
-    window.set_selection_overlay_visible(vm.selection_overlay.visible);
-    window.set_selection_outline_commands(vm.selection_overlay.outline_commands.as_str().into());
-    window.set_selection_point_commands(vm.selection_overlay.point_commands.as_str().into());
-    window.set_selection_unselected_outline_commands(
-        vm.selection_overlay
-            .unselected_outline_commands
-            .as_str()
-            .into(),
-    );
-    window.set_selection_unselected_point_commands(
-        vm.selection_overlay
-            .unselected_point_commands
-            .as_str()
-            .into(),
-    );
-    window.set_selection_overlay_accent(vm.selection_overlay.accent);
-    window.set_gizmo_visible(vm.gizmo.visible);
-    window.set_gizmo_origin_x(vm.gizmo.origin_x);
-    window.set_gizmo_origin_y(vm.gizmo.origin_y);
-    window.set_gizmo_x_commands(vm.gizmo.x_commands.as_str().into());
-    window.set_gizmo_y_commands(vm.gizmo.y_commands.as_str().into());
-    window.set_gizmo_z_commands(vm.gizmo.z_commands.as_str().into());
-    window.set_gizmo_x_arrow_commands(vm.gizmo.x_arrow_commands.as_str().into());
-    window.set_gizmo_y_arrow_commands(vm.gizmo.y_arrow_commands.as_str().into());
-    window.set_gizmo_z_arrow_commands(vm.gizmo.z_arrow_commands.as_str().into());
-    window.set_view_gizmo_x_commands(vm.gizmo.view_x_commands.as_str().into());
-    window.set_view_gizmo_y_commands(vm.gizmo.view_y_commands.as_str().into());
-    window.set_view_gizmo_z_commands(vm.gizmo.view_z_commands.as_str().into());
-    window.set_view_gizmo_origin_x(vm.gizmo.view_origin_x);
-    window.set_view_gizmo_origin_y(vm.gizmo.view_origin_y);
+    sync_overlay_models(window, &vm.selection_overlay, &vm.gizmo);
     window.set_add_menu_open(vm.add_menu_open);
     window.set_rename_active(vm.rename_active);
     window.set_rename_value(vm.rename_value.as_str().into());
@@ -5087,6 +5214,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             bridge.orbit_viewport(dx, dy);
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -5099,6 +5227,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             bridge.apply(UiIntent::ViewportGesture(ViewportGesture::Pan { dx, dy }));
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -5111,6 +5240,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             bridge.apply(UiIntent::ViewportGesture(ViewportGesture::Zoom { delta }));
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -5125,6 +5255,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             bridge.resize_viewport(width, height);
             let new_frame = bridge.render_viewport();
             if let (Some(window), Some(frame)) = (window_weak.upgrade(), new_frame) {
+                sync_viewport_overlays(&window, &bridge);
                 window.set_viewport_image(frame);
             }
         }
@@ -5968,6 +6099,29 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let loop_slide_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_loop_cut_slide_committed(move |text| {
+        if let Ok(mut bridge) = loop_slide_bridge.lock() {
+            match numeric::parse_numeric(text.as_str()) {
+                Ok(value) => {
+                    bridge.set_loop_cut_slide(value);
+                }
+                Err(_) => bridge
+                    .state
+                    .set_status("Loop Cut: slide must be between -1 and 1"),
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let loop_count_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_loop_cut_count_committed(move |text| {
@@ -6182,8 +6336,12 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         if let Ok(mut bridge) = domain_bridge.lock() {
             bridge.apply(UiIntent::SetSelectionDomain(domain));
             let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -7938,6 +8096,13 @@ mod tests {
         );
         assert!(bridge.loop_cut.as_ref().unwrap().slide > 0.0);
 
+        // O campo Slide altera a posição do corte, sem modificar Cuts.
+        assert!(bridge.set_loop_cut_slide(-0.25));
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().slide, -0.25);
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().cuts, 1);
+        assert!(!bridge.set_loop_cut_slide(2.0));
+        assert_eq!(bridge.loop_cut.as_ref().unwrap().slide, -0.25);
+
         assert!(bridge.set_loop_cut_count(3));
         assert_eq!(bridge.loop_cut.as_ref().unwrap().cuts, 3);
         assert!(
@@ -9360,6 +9525,94 @@ mod tests {
             petunia_core::HoverTarget::None
         );
         assert!(bridge.clear_hover() == false, "já estava limpo");
+    }
+
+    #[test]
+    fn object_picking_uses_the_surface_and_ignores_the_empty_bounding_sphere() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge
+            .state
+            .session
+            .camera
+            .set_preset(petunia_core::ViewPreset::Front);
+
+        // (1.1, 1.1) fica dentro da esfera aproximada do cubo, mas fora da
+        // superfície [-1, 1]². Nenhum objeto pode ser anunciado ou selecionado.
+        let ndc = bridge
+            .state
+            .session
+            .camera
+            .project_ndc(glam::Vec3::new(1.1, 1.1, 0.0));
+        let (x, y) = ((ndc.x + 1.0) * 0.5, (1.0 - ndc.y) * 0.5);
+        assert_eq!(
+            bridge.pick_viewport_target(x, y),
+            petunia_core::HoverTarget::None
+        );
+        bridge.select_viewport(x, y, false);
+        assert_eq!(bridge.state.ui.status, "Nothing under the cursor");
+        assert_eq!(bridge.state.project.active, 0);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+    }
+
+    #[test]
+    fn vertex_preselection_and_click_agree_on_visibility_and_screen_target() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge
+            .state
+            .session
+            .camera
+            .set_preset(petunia_core::ViewPreset::Front);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+
+        let front = glam::Vec3::new(-1.0, -1.0, 1.0);
+        let ndc = bridge.state.session.camera.project_ndc(front);
+        let (x, y) = ((ndc.x + 1.0) * 0.5, (1.0 - ndc.y) * 0.5);
+        assert_eq!(
+            bridge.pick_viewport_target(x, y),
+            petunia_core::HoverTarget::Vertex(4)
+        );
+        assert!(bridge.hover_component(x, y));
+        bridge.select_viewport(x, y, false);
+        assert_eq!(bridge.state.session.selection.verts, vec![4]);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
+
+        bridge.select_viewport(x, y, true);
+        assert!(bridge.state.session.selection.verts.is_empty());
+        assert!(bridge.hover_component(f32::NAN, y));
+        assert_eq!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::None
+        );
+        assert_eq!(
+            bridge.pick_viewport_target(-0.1, y),
+            petunia_core::HoverTarget::None
+        );
+    }
+
+    #[test]
+    fn changing_domains_converts_selection_without_ghost_faces_or_edges() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+        bridge.state.project.active_mesh_mut().unwrap().faces[1].selected = true;
+        bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .sync_vert_selection_from_faces();
+        bridge.state.sync_selection();
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(!mesh.faces.iter().any(|face| face.selected));
+        assert_eq!(mesh.selected_edges.len(), 4);
+
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(mesh.selected_edges.is_empty());
+        assert_eq!(mesh.selected_vert_count(), 4);
+        assert_eq!(bridge.state.project.undo.depth(), (0, 0));
     }
 
     #[test]

@@ -5,10 +5,10 @@
 - Current phase: **Wave 11 — Extensibility, Plugins & Automation (Ativa)**
 - Canonical Specification & SSOT: [`docs/bible/`](docs/bible/index.md) (155 P3D specs, 17 capítulos constitucionais, 15 seções, 3 adendos e 36 capítulos de fundação unificados)
 - Canonical UI Golden Reference: [`docs/image-references/Blender.svg`](file:///home/raillen/Documentos/Projetos/simple3d-modeling/docs/image-references/Blender.svg) (component catalog in [`docs/image-references/extracted/`](file:///home/raillen/Documentos/Projetos/simple3d-modeling/docs/image-references/extracted/))
-- Current implementation status: **Waves 0 a 10 100% Concluídas e Verificadas** (480+ testes automatizados, zero warnings no Clippy, arch-check e docs-check verdes, Sistema de Rigging e Animação funcional).
+- Current implementation status: **Conformidade em revisão**. A alegação histórica de Waves 0–10 totalmente concluídas não certifica o frontend Slint. Ver [plano de paridade](docs/development/viewport-parity-plan.md) e [matriz de gaps](docs/development/viewport-gap-matrix.md). Checkpoints de 22/09/2026 permanecem sem testes por orientação do usuário até o fim da implementação.
 - **Frontend de produção**: `petunia_ui_slint` (Slint 1.18) — shell declarativo, 55 testes unitários, bridge de intents, viewport WGPU/software fallback. UI egui (`crates/ui/`) arquivada como legado de transição (`--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`).
 - Context methodology: **Lean Progressive Context (LPC)**
-- Last updated: `2026-09-14`
+- Last updated: `2026-09-22`
 
 ## Current status
 

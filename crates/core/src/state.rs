@@ -1739,6 +1739,92 @@ impl AppState {
     ///
     /// `EditMode` é derivado deste estado — não existe escrita separada de modo.
     pub fn set_selection_domain(&mut self, domain: SelectionDomain) {
+        let previous = self.session.selection_domain;
+        let source = if previous == SelectionDomain::Object {
+            self.session.last_component_domain
+        } else {
+            previous
+        };
+        if domain.is_component()
+            && source != domain
+            && let Some(mesh) = self.project.active_mesh_mut()
+        {
+            match source {
+                SelectionDomain::Vertex => match domain {
+                    SelectionDomain::Edge => {
+                        mesh.selected_edges = mesh
+                            .edges_unique()
+                            .into_iter()
+                            .filter(|&(a, b)| {
+                                mesh.verts[a as usize].selected && mesh.verts[b as usize].selected
+                            })
+                            .collect();
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        for vertex in &mut mesh.verts {
+                            vertex.selected = false;
+                        }
+                        let selected_edges: Vec<_> = mesh.selected_edges.iter().copied().collect();
+                        for (a, b) in selected_edges {
+                            mesh.verts[a as usize].selected = true;
+                            mesh.verts[b as usize].selected = true;
+                        }
+                    }
+                    SelectionDomain::Face => {
+                        mesh.sync_face_selection_from_verts();
+                        mesh.selected_edges.clear();
+                        mesh.sync_vert_selection_from_faces();
+                    }
+                    _ => {}
+                },
+                SelectionDomain::Edge => match domain {
+                    SelectionDomain::Vertex => {
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        mesh.selected_edges.clear();
+                    }
+                    SelectionDomain::Face => {
+                        for face in &mut mesh.faces {
+                            face.selected = !face.verts.is_empty()
+                                && (0..face.verts.len()).all(|i| {
+                                    let a = face.verts[i];
+                                    let b = face.verts[(i + 1) % face.verts.len()];
+                                    mesh.selected_edges.contains(&(a.min(b), a.max(b)))
+                                });
+                        }
+                        mesh.selected_edges.clear();
+                        mesh.sync_vert_selection_from_faces();
+                    }
+                    _ => {}
+                },
+                SelectionDomain::Face => match domain {
+                    SelectionDomain::Vertex => {
+                        mesh.sync_vert_selection_from_faces();
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        mesh.selected_edges.clear();
+                    }
+                    SelectionDomain::Edge => {
+                        mesh.selected_edges.clear();
+                        for face in mesh.faces.iter().filter(|face| face.selected) {
+                            for i in 0..face.verts.len() {
+                                let a = face.verts[i];
+                                let b = face.verts[(i + 1) % face.verts.len()];
+                                mesh.selected_edges.insert((a.min(b), a.max(b)));
+                            }
+                        }
+                        mesh.faces.iter_mut().for_each(|face| face.selected = false);
+                        for vertex in &mut mesh.verts {
+                            vertex.selected = false;
+                        }
+                        for &(a, b) in &mesh.selected_edges {
+                            mesh.verts[a as usize].selected = true;
+                            mesh.verts[b as usize].selected = true;
+                        }
+                    }
+                    _ => {}
+                },
+                SelectionDomain::Object => {}
+            }
+        }
+        self.session.tools.hover = HoverTarget::None;
         self.session.selection_domain = domain;
         if domain.is_component() {
             self.session.last_component_domain = domain;
