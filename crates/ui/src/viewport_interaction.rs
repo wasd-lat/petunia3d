@@ -145,89 +145,140 @@ pub fn draw(
     if state.workspace != Workspace::Model || state.active_tool == "draw_profile" {
         return false;
     }
-    let mode = if state.edit_mode() == EditMode::Object {
-        SelectMode::Face
-    } else {
-        state.select_mode
-    };
-    // No domínio Point, demarca visualmente todos os pontos disponíveis para seleção.
-    if state.edit_mode() == EditMode::Edit
-        && state.select_mode == SelectMode::Vertex
-        && let Some(mesh) = state.project.active_mesh()
-    {
-        for v in &mesh.verts {
-            let sp = screen(state, rect, v.vec());
-            if rect.contains(sp) {
-                if v.selected {
-                    painter.circle_filled(sp, 3.5, Color32::from_rgb(255, 140, 20));
-                    painter.circle_stroke(sp, 3.5, egui::Stroke::new(1.0_f32, Color32::WHITE));
-                } else {
-                    painter.circle_filled(sp, 2.5, Color32::from_rgb(25, 25, 30));
-                    painter.circle_stroke(
-                        sp,
-                        2.5,
-                        egui::Stroke::new(1.0_f32, Color32::from_rgb(200, 200, 210)),
-                    );
+    let is_object_domain = state.selection_domain() == petunia_core::SelectionDomain::Object;
+
+    if is_object_domain {
+        let scene = petunia_core::viewport_query::ViewportSceneQuery::new(&state.project.project);
+        let hovered_idx = pointer.and_then(|pos| {
+            let n = ndc(rect, pos);
+            scene.nearest_object(&state.camera, [n.x, n.y])
+        });
+        state.session.tools.hover = hovered_idx.map_or(
+            petunia_core::HoverTarget::None,
+            petunia_core::HoverTarget::Object,
+        );
+
+        // Desenha contornos dos objetos selecionados e do objeto sob hover no domínio Object
+        let project = |p| screen(state, rect, p);
+        for (idx, asset) in state.project.assets.iter().enumerate() {
+            if !asset.visible {
+                continue;
+            }
+            let is_active = idx == state.project.active;
+            let is_selected = state.session.selection.assets.contains(&asset.id) || is_active;
+            let is_hovered = hovered_idx == Some(idx);
+            if !is_selected && !is_hovered {
+                continue;
+            }
+            let stroke_color = if is_active {
+                Color32::from_rgb(255, 140, 20)
+            } else if is_selected {
+                Color32::from_rgb(255, 180, 50)
+            } else {
+                Color32::from_rgb(125, 220, 255)
+            };
+            let stroke_width = if is_active || is_hovered {
+                2.0_f32
+            } else {
+                1.5_f32
+            };
+            let stroke = egui::Stroke::new(stroke_width, stroke_color);
+
+            let mesh = asset.evaluated_mesh();
+            for (a, b) in mesh.edges_unique() {
+                if let (Some(va), Some(vb)) =
+                    (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                {
+                    let spa = project(va.vec());
+                    let spb = project(vb.vec());
+                    if rect.contains(spa) || rect.contains(spb) {
+                        painter.line_segment([spa, spb], stroke);
+                    }
                 }
             }
         }
-    }
+    } else {
+        let mode = state.select_mode;
+        // No domínio Point, demarca visualmente todos os pontos disponíveis para seleção.
+        if state.edit_mode() == EditMode::Edit
+            && state.select_mode == SelectMode::Vertex
+            && let Some(mesh) = state.project.active_mesh()
+        {
+            for v in &mesh.verts {
+                let sp = screen(state, rect, v.vec());
+                if rect.contains(sp) {
+                    if v.selected {
+                        painter.circle_filled(sp, 3.5, Color32::from_rgb(255, 140, 20));
+                        painter.circle_stroke(sp, 3.5, egui::Stroke::new(1.0_f32, Color32::WHITE));
+                    } else {
+                        painter.circle_filled(sp, 2.5, Color32::from_rgb(25, 25, 30));
+                        painter.circle_stroke(
+                            sp,
+                            2.5,
+                            egui::Stroke::new(1.0_f32, Color32::from_rgb(200, 200, 210)),
+                        );
+                    }
+                }
+            }
+        }
 
-    let hit = pointer.and_then(|pos| {
-        state.project.active_mesh().and_then(|mesh| {
-            pick_mesh(
-                mesh,
-                &state.camera,
-                Vec2::new(rect.width(), rect.height()) * ctx.pixels_per_point(),
-                ndc(rect, pos),
-                mode,
-                state.shading == petunia_render::Shading::Wireframe || state.show_xray,
-            )
-        })
-    });
-    if let (Some(hit), Some(mesh)) = (hit, state.project.active_mesh()) {
-        let color = egui::Color32::from_rgb(125, 220, 255);
-        let project = |p| screen(state, rect, p);
-        match hit.component {
-            PickComponent::Vertex(i) => {
-                if let Some(v) = mesh.verts.get(i) {
-                    let sp = project(v.vec());
-                    // Anel externo de foco e halo
-                    painter.circle_stroke(
-                        sp,
-                        8.5,
-                        egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(100, 220, 255)),
-                    );
-                    // Ponto interno dourado
-                    painter.circle_filled(sp, 5.0, egui::Color32::from_rgb(255, 215, 0));
-                    painter.circle_stroke(
-                        sp,
-                        5.0,
-                        egui::Stroke::new(1.0_f32, egui::Color32::WHITE),
-                    );
+        let hit = pointer.and_then(|pos| {
+            state.project.active_mesh().and_then(|mesh| {
+                pick_mesh(
+                    mesh,
+                    &state.camera,
+                    Vec2::new(rect.width(), rect.height()) * ctx.pixels_per_point(),
+                    ndc(rect, pos),
+                    mode,
+                    state.shading == petunia_render::Shading::Wireframe || state.show_xray,
+                )
+            })
+        });
+        if let (Some(hit), Some(mesh)) = (hit, state.project.active_mesh()) {
+            let color = egui::Color32::from_rgb(125, 220, 255);
+            let project = |p| screen(state, rect, p);
+            match hit.component {
+                PickComponent::Vertex(i) => {
+                    if let Some(v) = mesh.verts.get(i) {
+                        let sp = project(v.vec());
+                        // Anel externo de foco e halo
+                        painter.circle_stroke(
+                            sp,
+                            8.5,
+                            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(100, 220, 255)),
+                        );
+                        // Ponto interno dourado
+                        painter.circle_filled(sp, 5.0, egui::Color32::from_rgb(255, 215, 0));
+                        painter.circle_stroke(
+                            sp,
+                            5.0,
+                            egui::Stroke::new(1.0_f32, egui::Color32::WHITE),
+                        );
+                    }
                 }
-            }
-            PickComponent::Edge(a, b) => {
-                if let (Some(a), Some(b)) = (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
-                {
-                    painter.line_segment(
-                        [project(a.vec()), project(b.vec())],
-                        egui::Stroke::new(3.0_f32, color),
-                    );
+                PickComponent::Edge(a, b) => {
+                    if let (Some(a), Some(b)) =
+                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                    {
+                        painter.line_segment(
+                            [project(a.vec()), project(b.vec())],
+                            egui::Stroke::new(3.0_f32, color),
+                        );
+                    }
                 }
-            }
-            PickComponent::Face(i) => {
-                if let Some(face) = mesh.faces.get(i) {
-                    for k in 0..face.verts.len() {
-                        if let (Some(a), Some(b)) = (
-                            mesh.verts.get(face.verts[k] as usize),
-                            mesh.verts
-                                .get(face.verts[(k + 1) % face.verts.len()] as usize),
-                        ) {
-                            painter.line_segment(
-                                [project(a.vec()), project(b.vec())],
-                                egui::Stroke::new(2.5_f32, color),
-                            );
+                PickComponent::Face(i) => {
+                    if let Some(face) = mesh.faces.get(i) {
+                        for k in 0..face.verts.len() {
+                            if let (Some(a), Some(b)) = (
+                                mesh.verts.get(face.verts[k] as usize),
+                                mesh.verts
+                                    .get(face.verts[(k + 1) % face.verts.len()] as usize),
+                            ) {
+                                painter.line_segment(
+                                    [project(a.vec()), project(b.vec())],
+                                    egui::Stroke::new(2.5_f32, color),
+                                );
+                            }
                         }
                     }
                 }

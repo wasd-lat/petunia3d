@@ -737,8 +737,29 @@ fn viewport_3d(ui: &mut egui::Ui, state: &mut AppState, rect: egui::Rect) {
             } else if let Some(pos) = resp.interact_pointer_pos() {
                 let nx = ((pos.x - rect.min.x) / rect.width().max(1.0)) * 2.0 - 1.0;
                 let ny = 1.0 - ((pos.y - rect.min.y) / rect.height().max(1.0)) * 2.0;
-                state.ui.pending_pick = Some((nx, ny));
-                state.mark_dirty();
+                if state.selection_domain() == petunia_core::SelectionDomain::Object {
+                    let scene = petunia_core::viewport_query::ViewportSceneQuery::new(
+                        &state.project.project,
+                    );
+                    let hit_obj = scene.nearest_object(&state.camera, [nx, ny]);
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    state.select_object(hit_obj, shift);
+                    if let Some(idx) = hit_obj {
+                        let name = state
+                            .project
+                            .assets
+                            .get(idx)
+                            .map(|a| a.name.clone())
+                            .unwrap_or_default();
+                        state.set_status(format!("Selected '{name}'"));
+                    } else if !shift {
+                        state.set_status(state.t("viewport.status_nothing_selected"));
+                    }
+                    state.mark_dirty();
+                } else {
+                    state.ui.pending_pick = Some((nx, ny));
+                    state.mark_dirty();
+                }
             }
         }
     }

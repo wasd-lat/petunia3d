@@ -1530,31 +1530,51 @@ impl Renderer {
                 }
             }
         }
+
+        if edit_domain == petunia_core::SelectionDomain::Object {
+            let edge_color = [1.0f32, 0.62, 0.20, 1.0];
+            for (idx, asset) in scene.assets.iter().enumerate() {
+                if !asset.visible {
+                    continue;
+                }
+                let is_active = idx == scene.active;
+                let is_selected = scene.history_selection.contains(&asset.id) || is_active;
+                if is_selected {
+                    let mesh = asset.evaluated_mesh();
+                    for (a, b) in mesh.edges_unique() {
+                        let (Some(va), Some(vb)) =
+                            (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                        else {
+                            continue;
+                        };
+                        sel_line.push(SelectionVertex {
+                            pos: va.pos,
+                            color: edge_color,
+                        });
+                        sel_line.push(SelectionVertex {
+                            pos: vb.pos,
+                            color: edge_color,
+                        });
+                    }
+                }
+            }
+        }
         // Preselection: mesma linguagem da seleção, porém mais fraca — o
         // usuário vê o que vai clicar sem confundir com o que já selecionou.
         // Ciano #7DDCFF único em GPU, software e shell (era cinza-azulado
         // só aqui, destoando do hover do restante da UI).
         let hover_line = [0.49f32, 0.86, 1.0, 0.85];
         let hover_tri = [0.49f32, 0.86, 1.0, 0.18];
-        if let Some(asset) = scene.assets.get(scene.active) {
-            let mesh = asset.evaluated_mesh();
-            match hover {
-                petunia_core::HoverTarget::Vertex(index) => {
-                    if let Some(vertex) = mesh.verts.get(index as usize) {
-                        append_point_marker(
-                            &mut sel_line,
-                            vertex.vec(),
-                            camera,
-                            self.depth_size.1,
-                            5.0,
-                            hover_line,
-                        );
-                    }
-                }
-                petunia_core::HoverTarget::Edge(a, b) => {
-                    if let (Some(va), Some(vb)) =
-                        (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
-                    {
+        match hover {
+            petunia_core::HoverTarget::Object(index) => {
+                if let Some(asset) = scene.assets.get(index) {
+                    let mesh = asset.evaluated_mesh();
+                    for (a, b) in mesh.edges_unique() {
+                        let (Some(va), Some(vb)) =
+                            (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                        else {
+                            continue;
+                        };
                         sel_line.push(SelectionVertex {
                             pos: va.pos,
                             color: hover_line,
@@ -1565,23 +1585,56 @@ impl Renderer {
                         });
                     }
                 }
-                petunia_core::HoverTarget::Face(index) => {
-                    if let Some(face) = mesh.faces.get(index)
-                        && face.verts.len() >= 3
-                    {
-                        for corners in mesh.face_triangle_corners(index) {
-                            let [p0, p1, p2] =
-                                corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
-                            for point in [p0, p1, p2] {
-                                sel_tri.push(SelectionVertex {
-                                    pos: point.to_array(),
-                                    color: hover_tri,
+            }
+            _ => {
+                if let Some(asset) = scene.assets.get(scene.active) {
+                    let mesh = asset.evaluated_mesh();
+                    match hover {
+                        petunia_core::HoverTarget::Vertex(index) => {
+                            if let Some(vertex) = mesh.verts.get(index as usize) {
+                                append_point_marker(
+                                    &mut sel_line,
+                                    vertex.vec(),
+                                    camera,
+                                    self.depth_size.1,
+                                    5.0,
+                                    hover_line,
+                                );
+                            }
+                        }
+                        petunia_core::HoverTarget::Edge(a, b) => {
+                            if let (Some(va), Some(vb)) =
+                                (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
+                            {
+                                sel_line.push(SelectionVertex {
+                                    pos: va.pos,
+                                    color: hover_line,
+                                });
+                                sel_line.push(SelectionVertex {
+                                    pos: vb.pos,
+                                    color: hover_line,
                                 });
                             }
                         }
+                        petunia_core::HoverTarget::Face(index) => {
+                            if let Some(face) = mesh.faces.get(index)
+                                && face.verts.len() >= 3
+                            {
+                                for corners in mesh.face_triangle_corners(index) {
+                                    let [p0, p1, p2] =
+                                        corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                                    for point in [p0, p1, p2] {
+                                        sel_tri.push(SelectionVertex {
+                                            pos: point.to_array(),
+                                            color: hover_tri,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        petunia_core::HoverTarget::Object(_) | petunia_core::HoverTarget::None => {}
                     }
                 }
-                petunia_core::HoverTarget::Object(_) | petunia_core::HoverTarget::None => {}
             }
         }
         self.selection_tri_count = sel_tri.len() as u32;

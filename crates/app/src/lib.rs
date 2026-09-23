@@ -743,59 +743,25 @@ pub fn handle_pick(core: &mut Core, nx: f32, ny: f32) {
         .unwrap_or(glam::Vec2::new(800.0, 600.0))
         * core.state.ui.viewport_pixels_per_point;
 
-    if core.state.session.edit_mode() == EditMode::Object {
-        let is_wire =
-            core.state.shading == petunia_render::Shading::Wireframe || core.state.show_xray;
-        let mut closest_hit: Option<(usize, f32)> = None;
-        for (idx, asset) in core.state.project.assets.iter().enumerate() {
-            if !asset.visible || asset.locked {
-                continue;
-            }
-            if let Some(hit) = pick_mesh(
-                &asset.mesh,
-                &core.state.camera,
-                viewport,
-                glam::Vec2::new(nx, ny),
-                SelectMode::Face,
-                is_wire,
-            ) {
-                let dist = (hit.position - core.state.camera.eye()).length();
-                if closest_hit.is_none_or(|(_, min_dist)| dist < min_dist) {
-                    closest_hit = Some((idx, dist));
-                }
-            }
-        }
-
-        if let Some((best_idx, _)) = closest_hit {
-            if !core.shift_down {
-                for (idx, asset) in core.state.project.assets.iter_mut().enumerate() {
-                    if idx != best_idx {
-                        asset.mesh.deselect_all();
-                    }
-                }
-                core.state.project.active = best_idx;
-                if let Some(mesh) = core.state.project.active_mesh_mut() {
-                    mesh.select_all();
-                }
-            } else {
-                core.state.project.active = best_idx;
-                if let Some(mesh) = core.state.project.active_mesh_mut() {
-                    let any_selected = mesh.verts.iter().any(|v| v.selected);
-                    if any_selected {
-                        mesh.deselect_all();
-                    } else {
-                        mesh.select_all();
-                    }
-                }
-            }
-            core.state.mark_dirty();
+    if core.state.selection_domain() == petunia_core::SelectionDomain::Object {
+        let scene =
+            petunia_core::viewport_query::ViewportSceneQuery::new(&core.state.project.project);
+        let nearest = scene.nearest_object(&core.state.camera, [nx, ny]);
+        core.state.select_object(nearest, core.shift_down);
+        if let Some(best_idx) = nearest {
+            let name = core
+                .state
+                .project
+                .assets
+                .get(best_idx)
+                .map(|a| a.name.clone())
+                .unwrap_or_default();
+            core.state.set_status(format!("Selected '{name}'"));
         } else if !core.shift_down {
-            for asset in &mut core.state.project.assets {
-                asset.mesh.deselect_all();
-            }
-            core.state.mark_dirty();
+            core.state
+                .set_status(core.state.t("viewport.status_nothing_selected"));
         }
-        core.state.sync_selection();
+        core.state.mark_dirty();
         return;
     }
 

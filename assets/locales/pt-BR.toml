@@ -123,6 +123,7 @@ overflow = "Mais ferramentas da viewport"
 orientation = "Orientação"
 pivot = "Ponto de Pivô"
 drop_to_instantiate = "Soltar para Instanciar"
+status_nothing_selected = "Nada selecionado"
 
 [toolbar]
 configure = "Configurar Barra"
@@ -187,13 +188,29 @@ unlocked = "Só desbloqueados"
 [transform]
 title = "Transform"
 position = "Posição"
+position_hint = "Posição absoluta no espaço 3D (centróide da seleção)."
 rotation = "Rotação"
+rotation_hint = "Rotação em graus nos eixos X, Y e Z em torno do centro da seleção."
 scale = "Escala"
+scale_hint = "Fator de escala por eixo. Trave para escalonar uniformemente em todos os eixos."
 dimensions = "Dimensões"
+dimensions_hint = "Dimensões da caixa delimitadora (largura X, profundidade Y, altura Z)."
 link = "Ligar eixos"
 unlink = "Desligar eixos"
 reset_origin = "Centralizar na Origem"
 relative_hint = "Rotação é relativa à malha atual."
+
+[status]
+ready = "Pronto"
+saved = "Salvo"
+unsaved = "Não salvo"
+saved_hint = "Projeto salvo e sincronizado"
+unsaved_hint = "Alterações não salvas · Ctrl+S para salvar"
+hint_interact = "Enter: Confirmar · Esc: Cancelar · Shift: Precisão"
+hint_object = "Seleção: Objeto · BEM: Selecionar · BME: Orbitar · Shift+BME: Pan"
+hint_point = "Seleção: Ponto · BEM: Selecionar · BME: Orbitar · Shift+BME: Pan"
+hint_edge = "Seleção: Aresta · BEM: Selecionar · BME: Orbitar · Shift+BME: Pan"
+hint_face = "Seleção: Face · BEM: Selecionar · BME: Orbitar · Shift+BME: Pan"
 
 [selection]
 clear = "Limpar"

@@ -407,7 +407,9 @@ fn draw_transform_section(ui: &mut Ui, state: &mut AppState, idx: Option<usize>,
                 RichText::new(state.t("transform.position"))
                     .strong()
                     .size(11.0),
-            );
+            )
+            .on_hover_text(state.t("transform.position_hint"));
+            ui.small(state.t("transform.position_hint"));
             let center = state
                 .project
                 .assets
@@ -445,8 +447,9 @@ fn draw_transform_section(ui: &mut Ui, state: &mut AppState, idx: Option<usize>,
                 RichText::new(state.t("transform.rotation"))
                     .strong()
                     .size(11.0),
-            );
-            ui.small(state.t("transform.relative_hint"));
+            )
+            .on_hover_text(state.t("transform.rotation_hint"));
+            ui.small(state.t("transform.rotation_hint"));
             let mut scratch = state.transform_rotation;
             let prev_rot = scratch;
             let rot_opts = inspector_widgets::NumericOpts {
@@ -500,7 +503,8 @@ fn draw_transform_section(ui: &mut Ui, state: &mut AppState, idx: Option<usize>,
                     RichText::new(state.t("transform.scale"))
                         .strong()
                         .size(11.0),
-                );
+                )
+                .on_hover_text(state.t("transform.scale_hint"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let linked = state.scale_linked;
                     if widgets::PetuniaIconButton::new(
@@ -525,6 +529,7 @@ fn draw_transform_section(ui: &mut Ui, state: &mut AppState, idx: Option<usize>,
                     }
                 });
             });
+            ui.small(state.t("transform.scale_hint"));
             let mut factors = state.scale_factors;
             let prev_factors = factors;
             let scale_opts = inspector_widgets::NumericOpts {
@@ -587,7 +592,9 @@ fn draw_transform_section(ui: &mut Ui, state: &mut AppState, idx: Option<usize>,
                 RichText::new(state.t("transform.dimensions"))
                     .strong()
                     .size(11.0),
-            );
+            )
+            .on_hover_text(state.t("transform.dimensions_hint"));
+            ui.small(state.t("transform.dimensions_hint"));
             let (dims, center) = match state.project.assets.get(idx) {
                 Some(asset) => {
                     let (min, max) = mesh_bounds(&asset.mesh.verts);

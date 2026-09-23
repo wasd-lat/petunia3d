@@ -121,6 +121,7 @@ overflow = "More viewport tools"
 orientation = "Orientation"
 pivot = "Pivot Point"
 drop_to_instantiate = "Drop to Instantiate"
+status_nothing_selected = "Nothing selected"
 
 [toolbar]
 configure = "Configure Toolbar"
@@ -185,13 +186,29 @@ unlocked = "Unlocked only"
 [transform]
 title = "Transform"
 position = "Position"
+position_hint = "Absolute position in 3D world space (selection centroid)."
 rotation = "Rotation"
+rotation_hint = "Rotation in degrees along X, Y, Z axes around selection center."
 scale = "Scale"
+scale_hint = "Scale factor per axis. Lock to scale uniformly across all axes."
 dimensions = "Dimensions"
+dimensions_hint = "Bounding box dimensions (width X, depth Y, height Z)."
 link = "Link axes"
 unlink = "Unlink axes"
 reset_origin = "Reset to Origin"
 relative_hint = "Rotation is relative to the current mesh."
+
+[status]
+ready = "Ready"
+saved = "Saved"
+unsaved = "Unsaved"
+saved_hint = "Project saved and synced"
+unsaved_hint = "Unsaved changes · Ctrl+S to save"
+hint_interact = "Enter: Confirm · Esc: Cancel · Shift: Precision"
+hint_object = "Selection: Object · LMB: Select · MMB: Orbit · Shift+MMB: Pan"
+hint_point = "Selection: Point · LMB: Select · MMB: Orbit · Shift+MMB: Pan"
+hint_edge = "Selection: Edge · LMB: Select · MMB: Orbit · Shift+MMB: Pan"
+hint_face = "Selection: Face · LMB: Select · MMB: Orbit · Shift+MMB: Pan"
 
 [selection]
 clear = "Clear"

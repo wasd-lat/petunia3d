@@ -362,6 +362,25 @@ pub mod text_id {
     pub const PRIMS_TIP_CAPS: TextId = TextId::new("prims.tip_caps");
     pub const PRIMS_TIP_BODY_LENGTH: TextId = TextId::new("prims.tip_body_length");
 
+    pub const STATUS_READY: TextId = TextId::new("status.ready");
+    pub const STATUS_SAVED: TextId = TextId::new("status.saved");
+    pub const STATUS_UNSAVED: TextId = TextId::new("status.unsaved");
+    pub const STATUS_SAVED_HINT: TextId = TextId::new("status.saved_hint");
+    pub const STATUS_UNSAVED_HINT: TextId = TextId::new("status.unsaved_hint");
+    pub const STATUS_HINT_INTERACT: TextId = TextId::new("status.hint_interact");
+    pub const STATUS_HINT_OBJECT: TextId = TextId::new("status.hint_object");
+    pub const STATUS_HINT_POINT: TextId = TextId::new("status.hint_point");
+    pub const STATUS_HINT_EDGE: TextId = TextId::new("status.hint_edge");
+    pub const STATUS_HINT_FACE: TextId = TextId::new("status.hint_face");
+
+    pub const TRANSFORM_POSITION_HINT: TextId = TextId::new("transform.position_hint");
+    pub const TRANSFORM_ROTATION_HINT: TextId = TextId::new("transform.rotation_hint");
+    pub const TRANSFORM_SCALE_HINT: TextId = TextId::new("transform.scale_hint");
+    pub const TRANSFORM_DIMENSIONS_HINT: TextId = TextId::new("transform.dimensions_hint");
+
+    pub const VIEWPORT_STATUS_NOTHING_SELECTED: TextId =
+        TextId::new("viewport.status_nothing_selected");
+
     /// Todos os ids do catálogo (cobertura de tradução).
     pub const ALL: &[TextId] = &[
         UI_OUTLINER,
@@ -550,6 +569,21 @@ pub mod text_id {
         PRIMS_TIP_FILL,
         PRIMS_TIP_CAPS,
         PRIMS_TIP_BODY_LENGTH,
+        STATUS_READY,
+        STATUS_SAVED,
+        STATUS_UNSAVED,
+        STATUS_SAVED_HINT,
+        STATUS_UNSAVED_HINT,
+        STATUS_HINT_INTERACT,
+        STATUS_HINT_OBJECT,
+        STATUS_HINT_POINT,
+        STATUS_HINT_EDGE,
+        STATUS_HINT_FACE,
+        TRANSFORM_POSITION_HINT,
+        TRANSFORM_ROTATION_HINT,
+        TRANSFORM_SCALE_HINT,
+        TRANSFORM_DIMENSIONS_HINT,
+        VIEWPORT_STATUS_NOTHING_SELECTED,
     ];
 }
 
