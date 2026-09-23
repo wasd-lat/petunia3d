@@ -252,6 +252,9 @@ pub struct SceneItemModel {
     pub visible: bool,
     pub locked: bool,
     pub selected: bool,
+    /// Objeto ativo (referência das operações). No máximo um por vez e
+    /// visualmente distinto do apenas-selecionado, como no Blender.
+    pub active: bool,
     pub verts: usize,
     pub tris: usize,
 }
@@ -388,6 +391,7 @@ impl ShellViewModel {
                 visible: asset.visible,
                 locked: asset.locked,
                 selected: state.session.selection.assets.contains(&asset.id) || active_id == Some(asset.id),
+                active: active_id == Some(asset.id),
                 verts: asset.mesh.verts.len(),
                 tris: asset.mesh.tri_count(),
             })
@@ -787,13 +791,18 @@ pub struct UvEditorModel {
 
 /// Feedback visual da seleção na viewport, projetado para `Path` do Slint.
 ///
-/// O renderer WGPU não desenha seleção, então o shell desenha o contorno por
-/// cima da imagem: sem isso o usuário clica e nada muda na tela.
+/// O shell desenha a silhueta do objeto por cima da imagem do backend como
+/// complemento da camada de seleção 3D: sem isso o usuário clica e nada
+/// muda na tela. Como no Blender, ativo e selecionado são canais distintos:
+/// no máximo um ativo (amarelo) contra N selecionados (laranja).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SelectionOverlayModel {
     pub visible: bool,
     /// Arestas do contorno (caixa do objeto, arestas ou faces selecionadas).
     pub outline_commands: String,
+    /// Silhueta do objeto ATIVO. Canal separado do selecionado para o
+    /// usuário saber qual objeto é referência das operações.
+    pub active_outline_commands: String,
     /// Marcadores preenchidos dos vértices selecionados.
     pub point_commands: String,
     /// Elementos não selecionados do domínio atual, para o usuário ver o que
@@ -927,7 +936,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.cancel_active_operation();
         }
         match intent {
-            UiIntent::SetWorkspace(workspace) => self.state.switch_workspace(workspace),
+            UiIntent::SetWorkspace(workspace) => {
+                self.state.switch_workspace(workspace);
+                // Preselection morta de outro workspace não pode vazar para
+                // cá: o hover pertence ao domínio e ao modo onde nasceu.
+                self.state.session.tools.hover = petunia_core::HoverTarget::None;
+            }
             UiIntent::SaveProject => {
                 if let Some(path) = self.state.project.project_path.clone() {
                     self.apply(UiIntent::SaveProjectTo(PathBuf::from(path)));
@@ -1613,7 +1627,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.pointer_position = [normalized_x * self.viewport_size[0], normalized_y * self.viewport_size[1]];
         }
         if self.state.workspace == Workspace::Paint {
-            return false;
+            // No Paint o pincel consome o ponteiro: limpar em vez de
+            // congelar o último hover do modo Model.
+            return self.clear_hover();
         }
         let next = self.pick_viewport_target(normalized_x, normalized_y);
 
@@ -1679,6 +1695,23 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         self.state.session.tools.hover = petunia_core::HoverTarget::None;
         true
+    }
+
+    /// Oclusão do segmento olho→ponto: a preselection respeita faces, salvo
+    /// em X-Ray. `origin`/`direction` documentam o raio que gerou `position`;
+    /// o teste usa a mesma cena canônica (`point_visible`) do picking.
+    pub fn is_occluded(
+        &self,
+        _origin: glam::Vec3,
+        _direction: glam::Vec3,
+        position: glam::Vec3,
+    ) -> bool {
+        if self.state.session.show_xray {
+            return false;
+        }
+        let scene =
+            petunia_core::viewport_query::ViewportSceneQuery::new(&self.state.project.project);
+        !scene.point_visible(&self.state.session.camera, position)
     }
 
     /// Handle do gizmo sob o cursor (preselection, sem clique).
@@ -3341,7 +3374,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
 
         use petunia_core::HoverTarget as Target;
-        match self.pick_viewport_target(normalized_x, normalized_y) {
+        // O clique confirma a preselection: o alvo sob o cursor vira o hover
+        // corrente para o destaque e o rótulo aparecerem de imediato, sem
+        // esperar o próximo mousemove. Erro limpa em vez de congelar.
+        let hit = self.pick_viewport_target(normalized_x, normalized_y);
+        match hit {
             Target::Object(index) => {
                 self.state.select_object(Some(index), extend);
                 let name = self.state.project.assets[index].name.clone();
@@ -3410,6 +3447,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 self.state.set_status("Nothing under the cursor");
             }
         }
+        self.state.session.tools.hover = hit;
         self.state.sync_selection();
         self.state.mark_dirty();
         self.reset_transform_fields();
@@ -4291,14 +4329,22 @@ fn compute_selection_overlay(state: &AppState, width: f32, height: f32, backend_
     let mut overlay = SelectionOverlayModel::default();
     for (index, asset) in state.project.assets.iter().enumerate() {
         if !asset.visible { continue; }
-        let selected = state.session.selection.assets.contains(&asset.id) || index == state.project.active;
+        let is_active = index == state.project.active;
+        let selected = state.session.selection.assets.contains(&asset.id) || is_active;
         let hovered = state.session.tools.hover == petunia_core::HoverTarget::Object(index);
         if !selected && !hovered { continue; }
         let part = compute_asset_overlay(state, width, height, backend_draws_guides, index);
-        if selected { overlay.outline_commands.push_str(&part.outline_commands); }
-        else { overlay.unselected_outline_commands.push_str(&part.outline_commands); }
+        if is_active {
+            overlay.active_outline_commands.push_str(&part.outline_commands);
+        } else if selected {
+            overlay.outline_commands.push_str(&part.outline_commands);
+        } else {
+            overlay.unselected_outline_commands.push_str(&part.outline_commands);
+        }
     }
-    overlay.visible = !overlay.outline_commands.is_empty() || !overlay.unselected_outline_commands.is_empty();
+    overlay.visible = !overlay.outline_commands.is_empty()
+        || !overlay.active_outline_commands.is_empty()
+        || !overlay.unselected_outline_commands.is_empty();
     overlay
 }
 
@@ -4456,6 +4502,9 @@ fn compute_asset_overlay(state: &AppState, width: f32, height: f32, backend_draw
     SelectionOverlayModel {
         visible,
         outline_commands: outline,
+        // O roteamento ativo × selecionado acontece no chamador
+        // (compute_selection_overlay); aqui nasce sempre vazio.
+        active_outline_commands: String::new(),
         point_commands: points,
         unselected_outline_commands: unselected_outline,
         unselected_point_commands: unselected_points,
@@ -4690,6 +4739,9 @@ fn effect_params(effect: &petunia_project::paint_layers::PaintEffect) -> Vec<Pai
 fn sync_overlay_models(window: &PetuniaSlintShell, selection: &SelectionOverlayModel, gizmo: &GizmoModel) {
     window.set_selection_overlay_visible(selection.visible);
     window.set_selection_outline_commands(selection.outline_commands.as_str().into());
+    window.set_selection_active_outline_commands(
+        selection.active_outline_commands.as_str().into(),
+    );
     window.set_selection_point_commands(selection.point_commands.as_str().into());
     window.set_selection_unselected_outline_commands(
         selection
@@ -4805,6 +4857,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
             visible: item.visible,
             locked: item.locked,
             selected: item.selected,
+            active: item.active,
             verts: item.verts as i32,
             tris: item.tris as i32,
         })
@@ -5248,6 +5301,43 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_viewport_box_select(move |x0, y0, x1, y1, add, subtract| {
         if let Ok(mut bridge) = box_bridge.lock() {
             bridge.state.select_viewport_box([x0 * 2.0 - 1.0, 1.0 - y0 * 2.0], [x1 * 2.0 - 1.0, 1.0 - y1 * 2.0], add, subtract);
+            // Box mudo é box confuso: dizer o que entrou na seleção fecha o
+            // ciclo de feedback do gesto (Blender mostra a contagem na barra).
+            let summary = match bridge.state.selection_domain() {
+                SelectionDomain::Object => {
+                    let total = bridge.state.session.selection.assets.len();
+                    if total == 0 {
+                        "Box select: nothing in the region".to_string()
+                    } else {
+                        format!("Box select: {total} object(s)")
+                    }
+                }
+                SelectionDomain::Vertex | SelectionDomain::Edge | SelectionDomain::Face => {
+                    match bridge.state.project.active_mesh() {
+                        Some(mesh) => {
+                            let points = mesh.verts.iter().filter(|v| v.selected).count();
+                            let faces = mesh.faces.iter().filter(|f| f.selected).count();
+                            let edges = mesh.selected_edges.len();
+                            match bridge.state.selection_domain() {
+                                SelectionDomain::Vertex => {
+                                    if points == 0 { "Box select: nothing in the region".to_string() }
+                                    else { format!("Box select: {points} point(s)") }
+                                }
+                                SelectionDomain::Edge => {
+                                    if edges == 0 { "Box select: nothing in the region".to_string() }
+                                    else { format!("Box select: {edges} edge(s)") }
+                                }
+                                _ => {
+                                    if faces == 0 { "Box select: nothing in the region".to_string() }
+                                    else { format!("Box select: {faces} face(s)") }
+                                }
+                            }
+                        }
+                        None => "Box select: no active object".to_string(),
+                    }
+                }
+            };
+            bridge.state.set_status(summary);
             if let Some(window) = box_window.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
                 if let Some(frame) = bridge.render_viewport() { window.set_viewport_image(frame); }
@@ -9088,9 +9178,12 @@ mod tests {
         let overlay = bridge.view_model().selection_overlay;
         assert!(overlay.visible, "o cubo ativo precisa de contorno visível");
         assert!(!overlay.accent, "domínio Object usa a cor de seleção");
+        // Ativo tem canal próprio (amarelo), distinto do selecionado
+        // (laranja): o cubo ativo padrão não polui o canal de seleção.
+        assert!(overlay.outline_commands.is_empty());
         // Contorno de objeto = silhueta frontal, não a caixa nem as 12 arestas:
         // de um canto vê-se 3 faces, portanto 9 arestas de contorno.
-        let edges = overlay.outline_commands.matches('M').count();
+        let edges = overlay.active_outline_commands.matches('M').count();
         assert!(
             (6..=12).contains(&edges),
             "silhueta frontal precisa ter entre 6 e 12 arestas, veio {edges}"
@@ -9174,6 +9267,40 @@ mod tests {
     }
 
     #[test]
+    fn click_confirms_hover_and_miss_clears_it() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        // Clicar no cubo fixa a preselection: destaque e rótulo aparecem de
+        // imediato, sem esperar o próximo mousemove.
+        bridge.select_viewport(0.5, 0.5, false);
+        assert!(
+            bridge.state.session.tools.hover.is_some(),
+            "o alvo clicado vira o hover corrente"
+        );
+        assert!(!bridge.view_model().hover_label.is_empty());
+        // Erro limpa em vez de congelar o hover antigo.
+        bridge.select_viewport(0.02, 0.02, false);
+        assert_eq!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::None
+        );
+    }
+
+    #[test]
+    fn workspace_switch_clears_stale_hover() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.select_viewport(0.5, 0.5, false);
+        assert!(bridge.state.session.tools.hover.is_some());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        assert_eq!(
+            bridge.state.session.tools.hover,
+            petunia_core::HoverTarget::None,
+            "hover do Model não pode vazar para o Paint"
+        );
+    }
+
+    #[test]
     fn the_gizmo_only_appears_with_a_transform_tool() {
         let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
         bridge.resize_viewport(1024, 768);
@@ -9226,10 +9353,12 @@ mod tests {
             "as outras 11 arestas precisam aparecer como alvos"
         );
 
-        // Object: silhueta frontal, sem camada de não selecionados.
+        // Object: silhueta frontal no canal do ativo (o cubo padrão é o
+        // ativo), sem camada de não selecionados.
         bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Object));
         let overlay = bridge.view_model().selection_overlay;
-        assert!(!overlay.outline_commands.is_empty());
+        assert!(!overlay.active_outline_commands.is_empty());
+        assert!(overlay.outline_commands.is_empty());
         assert!(overlay.unselected_outline_commands.is_empty());
         assert!(overlay.unselected_point_commands.is_empty());
     }

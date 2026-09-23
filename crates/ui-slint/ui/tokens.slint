@@ -3,7 +3,9 @@ export global DesignTokens {
     // de trabalho parecer um espaço independente (item 39 da spec).
     in-out property <color> canvas: #101114;
     /// Realce de hover sobre a geometria, mais sutil que a seleção.
-    in-out property <color> hover: #7f8ea3;
+    /// Mesma família do hover 3D ([0.62,0.72,0.88]) e do hover legado
+    /// egui (#7DDCFF): ciano claro, nunca confundido com seleção.
+    in-out property <color> hover: #7ddcff;
     in-out property <color> surface: #1d1f23;
     in-out property <color> surface-raised: #25282e;
     in-out property <color> surface-hover: #30343b;
@@ -21,7 +23,13 @@ export global DesignTokens {
     in-out property <color> axis-x: #ff6e6e;
     in-out property <color> axis-y: #69db7c;
     in-out property <color> axis-z: #4dabf7;
-    in-out property <color> selection: #b58cff;
+    /// Laranja Blender `selected_object` (#E96A00): a mesma cor do destaque
+    /// 3D (faces/arestas/pontos selecionados). Uma cor por estado, em todas
+    /// as superfícies — nunca roxo aqui e laranja lá.
+    in-out property <color> selection: #e96a00;
+    /// Amarelo Blender `active_object` (#FFAF29): no máximo um ativo por
+    /// vez, sempre distinguível do selecionado.
+    in-out property <color> selection-active: #ffaf29;
     in-out property <length> control-height: 28px;
     in-out property <length> radius-control: 4px;
     in-out property <length> radius-panel: 8px;

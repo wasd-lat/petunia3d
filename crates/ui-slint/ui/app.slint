@@ -48,6 +48,9 @@ export struct SceneItem {
     visible: bool,
     locked: bool,
     selected: bool,
+    // Objeto ativo (referência das operações): no máximo um, com destaque
+    // próprio amarelo, distinto do apenas-selecionado laranja.
+    active: bool,
     verts: int,
     tris: int,
 }
@@ -647,6 +650,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> gizmo-visible: false;
     in-out property <bool> selection-overlay-visible: false;
     in-out property <string> selection-outline-commands: "";
+    // Silhueta do objeto ativo (amarelo Blender #FFAF29): canal separado do
+    // selecionado (laranja) para o usuário saber a referência das operações.
+    in-out property <string> selection-active-outline-commands: "";
     in-out property <string> selection-unselected-outline-commands: "";
     in-out property <string> selection-unselected-point-commands: "";
     in-out property <string> selection-point-commands: "";
@@ -1255,6 +1261,13 @@ export component PetuniaSlintShell inherits Window {
                     }
                     if selection-overlay-visible: Path {
                         fit: ImageFit.preserve;
+                        fill: transparent;
+                        stroke: DesignTokens.selection-active;
+                        stroke-width: 2px;
+                        commands: root.selection-active-outline-commands;
+                    }
+                    if selection-overlay-visible: Path {
+                        fit: ImageFit.preserve;
                         fill: DesignTokens.text-muted;
                         stroke: transparent;
                         commands: root.selection-unselected-point-commands;
@@ -1506,9 +1519,45 @@ export component PetuniaSlintShell inherits Window {
                         y: min(viewport-touch.last-y, viewport-touch.mouse-y);
                         width: abs(viewport-touch.mouse-x - viewport-touch.last-x);
                         height: abs(viewport-touch.mouse-y - viewport-touch.last-y);
-                        background: DesignTokens.accent.transparentize(0.9);
-                        border-color: DesignTokens.accent;
+                        background: DesignTokens.selection.transparentize(0.9);
+                        border-color: DesignTokens.selection;
                         border-width: 1px;
+                    }
+
+                    // Pill de preselection (Object Info do Blender, topo-esquerda):
+                    // rótulo do alvo sob o cursor + dica contextual do domínio.
+                    // Texto não consome ponteiro: o TouchArea abaixo segue livre.
+                    if root.hover-label != "" || root.context-hint != "": Rectangle {
+                        x: 14px;
+                        y: 14px;
+                        width: min(280px, parent.width * 0.4);
+                        border-radius: 8px;
+                        background: DesignTokens.scrim;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+
+                        VerticalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            padding-top: 6px;
+                            padding-bottom: 6px;
+                            spacing: 2px;
+                            alignment: start;
+
+                            if root.hover-label != "": Text {
+                                text: root.hover-label;
+                                color: DesignTokens.hover;
+                                font-size: 11px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+                            if root.context-hint != "": Text {
+                                text: root.context-hint;
+                                color: DesignTokens.text-secondary;
+                                font-size: 10px;
+                                overflow: elide;
+                            }
+                        }
                     }
 
                     // Barra da viewport (P3D-076): visão à esquerda, domínio de
@@ -3174,7 +3223,9 @@ export component PetuniaSlintShell inherits Window {
                             border-radius: 4px;
                             background: item.selected ? DesignTokens.surface-hover : transparent;
                             border-width: item.selected ? 1px : 0px;
-                            border-color: DesignTokens.accent;
+                            // Ativo (amarelo) ≠ selecionado (laranja): a
+                            // referência das operações sempre identificável.
+                            border-color: item.active ? DesignTokens.selection-active : DesignTokens.selection;
 
                             HorizontalLayout {
                                 padding-left: 8px;
