@@ -192,18 +192,18 @@ impl Default for ThemeColors {
             bg_panel_header: "#292a30".into(),
             bg_surface: "#30323a".into(),
             bg_surface_hover: "#3b3d47".into(),
-            bg_surface_active: "#474a56".into(),
+            bg_surface_active: "#392e49".into(),
             text_primary: "#f0f2f5".into(),
             text_secondary: "#a3a7b5".into(),
             text_muted: "#6e7280".into(),
             text_active: "#ffffff".into(),
-            accent_blue: "#3b82f6".into(),
+            accent_blue: "#b58cff".into(),
             accent_orange: "#f97316".into(),
-            accent_hover: "#60a5fa".into(),
-            accent_border: "#2563eb".into(),
+            accent_hover: "#c9aeff".into(),
+            accent_border: "#b58cff".into(),
             border_subtle: "#32343c".into(),
             border_strong: "#434652".into(),
-            border_focus: "#3b82f6".into(),
+            border_focus: "#b58cff".into(),
             status_info: "#38bdf8".into(),
             status_warning: "#fbbf24".into(),
             status_error: "#f87171".into(),
@@ -565,5 +565,18 @@ mod tests {
             }
             assert!(theme.colors.resolved.get().is_some());
         }
+    }
+
+    #[test]
+    fn petunia_dark_uses_floral_accent_and_contrast_safe_active_surface() {
+        let theme = Theme::default();
+        assert_eq!(
+            theme.colors.get_token_color(ThemeToken::AccentBlue),
+            ColorRgba::rgb(0xb5, 0x8c, 0xff)
+        );
+        assert_eq!(
+            theme.colors.get_token_color(ThemeToken::BgSurfaceActive),
+            ColorRgba::rgb(0x39, 0x2e, 0x49)
+        );
     }
 }

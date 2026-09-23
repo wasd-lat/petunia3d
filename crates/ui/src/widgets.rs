@@ -103,7 +103,7 @@ pub fn chevron_toggle_dir(ui: &mut Ui, tooltip: &str, dir: ChevronDir) -> Respon
             painter.rect_stroke(
                 rect,
                 tokens::RADIUS_SMALL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 StrokeKind::Inside,
             );
         }
@@ -180,7 +180,7 @@ impl<'a> PetuniaMenuButton<'a> {
                 painter.rect_stroke(
                     rect,
                     tokens::RADIUS_CONTROL,
-                    tokens::stroke_focus(),
+                    tokens::stroke_focus(ui.ctx()),
                     StrokeKind::Inside,
                 );
             }
@@ -285,7 +285,7 @@ impl<'a> PetuniaToolbarButton<'a> {
 
         if ui.is_rect_visible(rect) {
             let (bg_fill, fg_color) = if self.selected {
-                (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+                (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
             } else if response.hovered() {
                 (tokens::BG_SURFACE_HOVER, tokens::TEXT_ACTIVE)
             } else {
@@ -307,7 +307,7 @@ impl<'a> PetuniaToolbarButton<'a> {
                 painter.rect_stroke(
                     rect,
                     tokens::RADIUS_CONTAINER,
-                    tokens::stroke_focus(),
+                    tokens::stroke_focus(ui.ctx()),
                     StrokeKind::Inside,
                 );
             }
@@ -413,7 +413,7 @@ impl PetuniaPropertyTabButton {
                 painter.rect_stroke(
                     rect,
                     tokens::RADIUS_CONTAINER,
-                    tokens::stroke_focus(),
+                    tokens::stroke_focus(ui.ctx()),
                     StrokeKind::Inside,
                 );
             }
@@ -446,7 +446,7 @@ impl<'a> PetuniaWorkspacePill<'a> {
 
     pub fn show(self, ui: &mut Ui) -> Response {
         let (bg, fg) = if self.selected {
-            (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+            (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
         } else {
             (Color32::TRANSPARENT, tokens::TEXT_SECONDARY)
         };
@@ -619,7 +619,11 @@ impl<'a> PetuniaIconButton<'a> {
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             if self.selected {
-                painter.rect_filled(rect, tokens::RADIUS_CONTROL, tokens::ACCENT_BLUE);
+                painter.rect_filled(
+                    rect,
+                    tokens::RADIUS_CONTROL,
+                    tokens::bg_surface_active_for(ui.ctx()),
+                );
             } else if self.enabled && response.hovered() {
                 painter.rect_filled(rect, tokens::RADIUS_CONTROL, tokens::BG_SURFACE_HOVER);
             }
@@ -627,7 +631,7 @@ impl<'a> PetuniaIconButton<'a> {
                 painter.rect_stroke(
                     rect,
                     tokens::RADIUS_CONTROL,
-                    tokens::stroke_focus(),
+                    tokens::stroke_focus(ui.ctx()),
                     StrokeKind::Inside,
                 );
             }
@@ -1063,7 +1067,7 @@ pub fn petunia_action_button(
                 )
             } else {
                 (
-                    tokens::BG_SURFACE_ACTIVE,
+                    tokens::bg_surface_active_for(ui.ctx()),
                     tokens::ACCENT_BORDER,
                     Color32::WHITE,
                 )

@@ -294,7 +294,7 @@ pub fn section(
             painter.rect_stroke(
                 rect,
                 tokens::RADIUS_SMALL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 StrokeKind::Inside,
             );
         }
@@ -378,7 +378,7 @@ pub fn context_tabs(
             if ui.is_rect_visible(rect) {
                 let painter = ui.painter();
                 let (fill, fg) = if selected {
-                    (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+                    (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
                 } else if resp.hovered() {
                     (tokens::BG_SURFACE_HOVER, tokens::TEXT_PRIMARY)
                 } else {
@@ -389,7 +389,7 @@ pub fn context_tabs(
                     painter.rect_stroke(
                         rect,
                         tokens::RADIUS_CONTROL,
-                        tokens::stroke_focus(),
+                        tokens::stroke_focus(ui.ctx()),
                         StrokeKind::Inside,
                     );
                 }

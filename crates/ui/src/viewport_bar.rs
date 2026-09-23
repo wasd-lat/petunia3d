@@ -294,7 +294,7 @@ fn draw_selection_domain_cluster(ui: &mut Ui, state: &mut AppState) {
         for (domain, icon, shortcut, name) in domains {
             let is_active = active_domain == domain;
             let (bg, fg) = if is_active {
-                (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+                (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
             } else {
                 (tokens::BG_SURFACE, tokens::TEXT_SECONDARY)
             };
@@ -323,7 +323,7 @@ fn draw_selection_domain_cluster(ui: &mut Ui, state: &mut AppState) {
                     painter.rect_stroke(
                         rect,
                         tokens::RADIUS_CONTROL,
-                        tokens::stroke_focus(),
+                        tokens::stroke_focus(ui.ctx()),
                         StrokeKind::Inside,
                     );
                 }
@@ -341,11 +341,12 @@ fn draw_selection_domain_cluster(ui: &mut Ui, state: &mut AppState) {
 
 /// Cluster 3: Menus rápidos padronizados com ícones (View, Select, Add, Objeto/Malha).
 fn draw_viewport_actions_cluster(ui: &mut Ui, state: &mut AppState) {
+    let active_surface = tokens::bg_surface_active_for(ui.ctx());
     let visuals = ui.visuals_mut();
     visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
     visuals.widgets.hovered.weak_bg_fill = tokens::BG_SURFACE_HOVER;
-    visuals.widgets.active.weak_bg_fill = tokens::ACCENT_BLUE;
+    visuals.widgets.active.weak_bg_fill = active_surface;
 
     // Menu View
     let view_label = state.t("menu.view");
@@ -958,7 +959,7 @@ fn draw_snap_and_prop_cluster(ui: &mut Ui, state: &mut AppState) {
         if ui.is_rect_visible(rect) {
             let is_active = state.snap_enabled;
             let bg = if is_active {
-                tokens::ACCENT_BLUE
+                tokens::bg_surface_active_for(ui.ctx())
             } else if resp.hovered() {
                 tokens::BG_SURFACE_HOVER
             } else {
@@ -996,7 +997,7 @@ fn draw_snap_and_prop_cluster(ui: &mut Ui, state: &mut AppState) {
                         ne: 0,
                         se: 0,
                     },
-                    tokens::stroke_focus(),
+                    tokens::stroke_focus(ui.ctx()),
                     StrokeKind::Inside,
                 );
             }
@@ -1074,7 +1075,7 @@ fn draw_snap_and_prop_cluster(ui: &mut Ui, state: &mut AppState) {
         if ui.is_rect_visible(rect) {
             let is_active = state.proportional_editing;
             let bg = if is_active {
-                tokens::ACCENT_BLUE
+                tokens::bg_surface_active_for(ui.ctx())
             } else if resp.hovered() {
                 tokens::BG_SURFACE_HOVER
             } else {
@@ -1112,7 +1113,7 @@ fn draw_snap_and_prop_cluster(ui: &mut Ui, state: &mut AppState) {
                         ne: 0,
                         se: 0,
                     },
-                    tokens::stroke_focus(),
+                    tokens::stroke_focus(ui.ctx()),
                     StrokeKind::Inside,
                 );
             }
@@ -1185,7 +1186,7 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
         if ui.is_rect_visible(rect) {
             let is_active = state.show_overlays;
             let bg = if is_active {
-                tokens::ACCENT_BLUE
+                tokens::bg_surface_active_for(ui.ctx())
             } else if resp.hovered() {
                 tokens::BG_SURFACE_HOVER
             } else {
@@ -1223,7 +1224,7 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
                         ne: 0,
                         se: 0,
                     },
-                    tokens::stroke_focus(),
+                    tokens::stroke_focus(ui.ctx()),
                     StrokeKind::Inside,
                 );
             }
@@ -1400,7 +1401,7 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
     if ui.is_rect_visible(rect) {
         let is_active = state.show_xray;
         let bg = if is_active {
-            tokens::ACCENT_BLUE
+            tokens::bg_surface_active_for(ui.ctx())
         } else if resp.hovered() {
             tokens::BG_SURFACE_HOVER
         } else {
@@ -1418,7 +1419,7 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
             ui.painter().rect_stroke(
                 rect,
                 tokens::RADIUS_CONTROL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 StrokeKind::Inside,
             );
         }
@@ -1442,7 +1443,7 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
     if ui.is_rect_visible(rect) {
         let is_active = state.show_triangulation;
         let bg = if is_active {
-            tokens::ACCENT_BLUE
+            tokens::bg_surface_active_for(ui.ctx())
         } else if resp.hovered() {
             tokens::BG_SURFACE_HOVER
         } else {
@@ -1469,7 +1470,7 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
             ui.painter().rect_stroke(
                 rect,
                 tokens::RADIUS_CONTROL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 StrokeKind::Inside,
             );
         }
@@ -1507,7 +1508,7 @@ fn draw_shading_spheres_cluster(ui: &mut Ui, state: &mut AppState) {
             });
             if ui.is_rect_visible(rect) {
                 let bg = if is_active {
-                    tokens::ACCENT_BLUE
+                    tokens::bg_surface_active_for(ui.ctx())
                 } else if resp.hovered() {
                     tokens::BG_SURFACE_HOVER
                 } else {
@@ -1525,7 +1526,7 @@ fn draw_shading_spheres_cluster(ui: &mut Ui, state: &mut AppState) {
                     ui.painter().rect_stroke(
                         rect,
                         CornerRadius::same(11),
-                        tokens::stroke_focus(),
+                        tokens::stroke_focus(ui.ctx()),
                         StrokeKind::Inside,
                     );
                 }

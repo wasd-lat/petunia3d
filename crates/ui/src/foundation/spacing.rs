@@ -24,8 +24,14 @@ pub const GUTTER: f32 = 8.0;
 /// Espaço entre grupos distintos dentro de um painel.
 pub const GROUP: f32 = 10.0;
 
+/// Espaço amplo entre grupos relacionados.
+pub const LARGE: f32 = 12.0;
+
 /// Espaço entre seções de um painel.
 pub const SECTION: f32 = 16.0;
+
+/// Espaço excepcional entre regiões de conteúdo.
+pub const EXTRA_LARGE: f32 = 20.0;
 
 /// Coleção nomeada, usada por consumidores que querem iterar/documentar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,10 +43,21 @@ impl PetuniaSpacing {
     pub const CONTROL: f32 = CONTROL;
     pub const GUTTER: f32 = GUTTER;
     pub const GROUP: f32 = GROUP;
+    pub const LARGE: f32 = LARGE;
     pub const SECTION: f32 = SECTION;
+    pub const EXTRA_LARGE: f32 = EXTRA_LARGE;
 
-    /// Todos os gaps, do mais apertado ao mais amplo.
-    pub const ALL: [f32; 6] = [TIGHT, RELATED, CONTROL, GUTTER, GROUP, SECTION];
+    /// Escala completa do capítulo 24, do mais apertado ao mais amplo.
+    pub const ALL: [f32; 8] = [
+        TIGHT,
+        RELATED,
+        CONTROL,
+        GUTTER,
+        GROUP,
+        LARGE,
+        SECTION,
+        EXTRA_LARGE,
+    ];
 }
 
 /// Aplica um espaço vertical nomeado.
@@ -73,6 +90,14 @@ mod tests {
         for pair in all.windows(2) {
             assert!(pair[0] < pair[1], "escala de spacing precisa ser crescente");
         }
+    }
+
+    #[test]
+    fn scale_matches_the_frozen_design_system() {
+        assert_eq!(
+            PetuniaSpacing::ALL,
+            [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0]
+        );
     }
 
     #[test]

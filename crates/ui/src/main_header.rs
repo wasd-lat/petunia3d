@@ -138,11 +138,12 @@ fn draw_overflow_menu(ui: &mut Ui, state: &mut AppState, hidden: &[PetuniaToolba
 }
 
 fn draw_menus(ui: &mut Ui, state: &mut AppState, action: &mut UiAction) {
+    let active_surface = tokens::bg_surface_active_for(ui.ctx());
     let visuals = ui.visuals_mut();
     visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
     visuals.widgets.hovered.weak_bg_fill = tokens::BG_SURFACE_HOVER;
-    visuals.widgets.active.weak_bg_fill = tokens::ACCENT_BLUE;
+    visuals.widgets.active.weak_bg_fill = active_surface;
 
     ui.style_mut().text_styles.insert(
         egui::TextStyle::Button,
@@ -434,7 +435,7 @@ fn draw_workspace_pills(ui: &mut Ui, state: &mut AppState) {
     for (ws, label) in canonical_workspaces {
         let is_active = state.workspace == ws;
         let (bg, fg) = if is_active {
-            (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+            (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
         } else {
             (Color32::TRANSPARENT, tokens::TEXT_SECONDARY)
         };

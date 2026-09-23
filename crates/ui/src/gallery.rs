@@ -1098,7 +1098,7 @@ fn gallery_top_slot(ui: &mut Ui, slot: PetuniaTopBarSlot<'_>) {
         "top.workspaces" => {
             for (label, active) in [("MODEL", true), ("PAINT", false), ("UV", false)] {
                 let (bg, fg) = if active {
-                    (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+                    (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
                 } else {
                     (egui::Color32::TRANSPARENT, tokens::TEXT_SECONDARY)
                 };

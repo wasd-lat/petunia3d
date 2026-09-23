@@ -41,7 +41,7 @@ pub fn draw(ctx: &egui::Context, state: &mut AppState) {
         .frame(
             egui::Frame::new()
                 .fill(tokens::BG_PANEL)
-                .stroke(tokens::stroke_focus())
+                .stroke(tokens::stroke_focus(ctx))
                 .corner_radius(tokens::RADIUS_CONTAINER)
                 .inner_margin(egui::Margin::symmetric(10, 10))
                 .shadow(egui::Shadow {
@@ -253,7 +253,7 @@ fn render_palette_item(ui: &mut Ui, item: &CommandPaletteItem, is_selected: bool
 
         // Fundo
         let bg = if is_selected {
-            tokens::BG_SURFACE_ACTIVE
+            tokens::bg_surface_active_for(ui.ctx())
         } else if is_hovered {
             tokens::BG_SURFACE_HOVER
         } else {

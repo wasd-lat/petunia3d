@@ -118,7 +118,7 @@ fn outliner_icon_button_selected(
     let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let fill = if selected {
-            tokens::ACCENT_BLUE
+            tokens::bg_surface_active_for(ui.ctx())
         } else if resp.hovered() {
             tokens::BG_SURFACE_HOVER
         } else {
@@ -131,7 +131,7 @@ fn outliner_icon_button_selected(
             ui.painter().rect_stroke(
                 rect,
                 tokens::RADIUS_CONTROL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -155,7 +155,7 @@ fn outliner_eye_button(ui: &mut Ui, visible: bool, tooltip: &str) -> Response {
             ui.painter().rect_stroke(
                 rect,
                 tokens::RADIUS_CONTROL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -178,7 +178,7 @@ fn outliner_lock_button(ui: &mut Ui, locked: bool, tooltip: &str) -> Response {
             ui.painter().rect_stroke(
                 rect,
                 tokens::RADIUS_CONTROL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 egui::StrokeKind::Inside,
             );
         }

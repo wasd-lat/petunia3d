@@ -121,7 +121,7 @@ fn draw_categories(ui: &mut Ui, _state: &mut AppState) {
         for (id, label) in categories {
             let is_sel = active_cat == id;
             let (bg, fg) = if is_sel {
-                (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+                (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
             } else {
                 (tokens::BG_SURFACE, tokens::TEXT_SECONDARY)
             };
@@ -245,7 +245,7 @@ fn draw_asset_cards(ui: &mut Ui, state: &mut AppState) {
                 let asset_id = a.id;
 
                 let card_bg = if is_active {
-                    tokens::BG_SURFACE_ACTIVE
+                    tokens::bg_surface_active_for(ui.ctx())
                 } else {
                     tokens::BG_SURFACE
                 };
@@ -377,7 +377,7 @@ fn draw_asset_cards(ui: &mut Ui, state: &mut AppState) {
                                     .size(10.0)
                                     .color(tokens::TEXT_ACTIVE),
                             )
-                            .fill(tokens::ACCENT_BLUE)
+                            .fill(tokens::bg_surface_active_for(ui.ctx()))
                             .corner_radius(tokens::RADIUS_SMALL);
 
                             if ui
@@ -472,7 +472,7 @@ fn draw_footer_actions(ui: &mut Ui, state: &mut AppState) {
                 .size(11.0)
                 .color(tokens::TEXT_ACTIVE),
         )
-        .fill(tokens::ACCENT_BLUE)
+        .fill(tokens::bg_surface_active_for(ui.ctx()))
         .corner_radius(tokens::RADIUS_CONTROL);
 
         if ui

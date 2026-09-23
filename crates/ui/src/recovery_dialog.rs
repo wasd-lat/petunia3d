@@ -132,7 +132,7 @@ pub fn draw(ctx: &Context, state: &mut AppState, info: &RecoveryInfo) -> Option<
                         .strong()
                         .color(tokens::TEXT_ACTIVE),
                 )
-                .fill(tokens::ACCENT_BLUE)
+                .fill(tokens::bg_surface_active_for(ui.ctx()))
                 .corner_radius(tokens::RADIUS_CONTROL);
 
                 if ui.add(recover_btn).clicked() {

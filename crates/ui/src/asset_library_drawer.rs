@@ -84,7 +84,7 @@ fn draw_contents(ui: &mut Ui, state: &mut AppState) {
                     .size(11.0)
                     .color(tokens::TEXT_ACTIVE),
             )
-            .fill(tokens::ACCENT_BLUE)
+            .fill(tokens::bg_surface_active_for(ui.ctx()))
             .corner_radius(tokens::RADIUS_CONTROL);
 
             if ui
@@ -153,7 +153,7 @@ fn draw_contents(ui: &mut Ui, state: &mut AppState) {
 
                     let is_active = state.project.active == i;
                     let (card_bg, border_color) = if is_active {
-                        (tokens::BG_SURFACE_ACTIVE, tokens::ACCENT_BLUE)
+                        (tokens::bg_surface_active_for(ui.ctx()), tokens::ACCENT_BLUE)
                     } else {
                         (tokens::BG_SURFACE, tokens::BORDER_SUBTLE)
                     };

@@ -10,17 +10,23 @@ pub const BG_PANEL: Color32 = Color32::from_rgb(0x20, 0x20, 0x20);
 pub const BG_PANEL_HEADER: Color32 = Color32::from_rgb(0x28, 0x28, 0x28);
 pub const BG_SURFACE: Color32 = Color32::from_rgb(0x2d, 0x2d, 0x2d);
 pub const BG_SURFACE_HOVER: Color32 = Color32::from_rgb(0x38, 0x38, 0x38);
-pub const BG_SURFACE_ACTIVE: Color32 = Color32::from_rgb(0x31, 0x69, 0xe3);
+pub const BG_SURFACE_ACTIVE: Color32 = Color32::from_rgb(0x39, 0x2e, 0x49);
 pub const BG_INPUT: Color32 = Color32::from_rgb(0x16, 0x16, 0x16);
 pub const BG_DROPDOWN: Color32 = Color32::from_rgb(0x22, 0x22, 0x22);
 pub const BG_SHELF: Color32 = Color32::from_rgba_premultiplied(0x1e, 0x1e, 0x1e, 0xf0);
 
 // ------------------------------------------------------------- Cores de Destaque
-pub const ACCENT_BLUE: Color32 = Color32::from_rgb(0x31, 0x69, 0xe3);
-pub const ACCENT_BLUE_HOVER: Color32 = Color32::from_rgb(0x47, 0x7c, 0xf5);
-pub const ACCENT_BORDER: Color32 = Color32::from_rgb(0x5b, 0x8e, 0xff);
+/// Accent Petunia canônico. `ACCENT_BLUE` permanece como alias legado porque
+/// o tema externo ainda serializa o token como `accent_blue`.
+pub const ACCENT_PRIMARY: Color32 = Color32::from_rgb(0xb5, 0x8c, 0xff);
+pub const ACCENT_PRIMARY_HOVER: Color32 = Color32::from_rgb(0xc9, 0xae, 0xff);
+pub const ACCENT_FOCUS: Color32 = Color32::from_rgb(0xb5, 0x8c, 0xff);
+pub const ACCENT_BLUE: Color32 = ACCENT_PRIMARY;
+pub const ACCENT_BLUE_HOVER: Color32 = ACCENT_PRIMARY_HOVER;
+pub const ACCENT_BORDER: Color32 = ACCENT_PRIMARY;
 pub const ACCENT_GREEN: Color32 = Color32::from_rgb(0x2e, 0xcc, 0x71);
 pub const ACCENT_AMBER: Color32 = Color32::from_rgb(0xf3, 0x9c, 0x12);
+pub const STATUS_INFO: Color32 = Color32::from_rgb(0x38, 0xbd, 0xf8);
 /// Semântica de **erro/validação** (Wave 7 — §51): campo inválido, não
 /// destrutivo. Antes era literal em cada tela de erro.
 pub const ACCENT_ERROR: Color32 = Color32::from_rgb(0xef, 0x53, 0x50);
@@ -97,9 +103,14 @@ pub const PAINT_CANVAS_MIN_WIDTH: f32 = 220.0;
 pub const PAINT_CANVAS_MAX_WIDTH: f32 = 1200.0;
 
 // -------------------------------------------------------------- Raios de Cantos
-pub const RADIUS_PILL: CornerRadius = CornerRadius::same(12);
+pub const RADIUS_SEGMENT: CornerRadius = CornerRadius::same(5);
+pub const RADIUS_PANEL: CornerRadius = CornerRadius::same(8);
+pub const RADIUS_WINDOW: CornerRadius = CornerRadius::same(10);
+/// egui limita o raio efetivo ao retângulo, então `u8::MAX` produz uma pílula
+/// completa para qualquer altura sem escolher um raio por tamanho.
+pub const RADIUS_PILL: CornerRadius = CornerRadius::same(u8::MAX);
 pub const RADIUS_CONTAINER: CornerRadius = CornerRadius::same(4);
-pub const RADIUS_CONTROL: CornerRadius = CornerRadius::same(3);
+pub const RADIUS_CONTROL: CornerRadius = CornerRadius::same(4);
 pub const RADIUS_SMALL: CornerRadius = CornerRadius::same(2);
 
 // --------------------------------------------------------------- Traços (Strokes)
@@ -111,8 +122,17 @@ pub fn stroke_border() -> Stroke {
     Stroke::new(1.0_f32, BORDER_DARK)
 }
 
-pub fn stroke_focus() -> Stroke {
-    Stroke::new(1.5_f32, ACCENT_BORDER)
+pub fn stroke_focus(ctx: &egui::Context) -> Stroke {
+    let color = ctx
+        .data(|data| data.get_temp::<Color32>(egui::Id::new("petunia_focus_color")))
+        .unwrap_or(ACCENT_FOCUS);
+    Stroke::new(1.5_f32, color)
+}
+
+/// Surface de seleção do tema atualmente aplicado ao contexto egui.
+pub fn bg_surface_active_for(ctx: &egui::Context) -> Color32 {
+    ctx.data(|data| data.get_temp::<Color32>(egui::Id::new("petunia_active_surface_color")))
+        .unwrap_or(BG_SURFACE_ACTIVE)
 }
 
 pub use petunia_config::ThemeToken;
@@ -147,11 +167,11 @@ pub fn color(state: &petunia_core::AppState, token: ThemeToken) -> Color32 {
             ThemeToken::AccentBorder => ACCENT_BORDER,
             ThemeToken::BorderSubtle => BORDER_SUBTLE,
             ThemeToken::BorderStrong => BORDER_LIGHT,
-            ThemeToken::BorderFocus => ACCENT_BLUE,
-            ThemeToken::StatusInfo => ACCENT_BLUE,
-            ThemeToken::StatusWarning => MODE_EDIT,
-            ThemeToken::StatusError => AXIS_X,
-            ThemeToken::StatusSuccess => MODE_PAINT,
+            ThemeToken::BorderFocus => ACCENT_FOCUS,
+            ThemeToken::StatusInfo => STATUS_INFO,
+            ThemeToken::StatusWarning => ACCENT_AMBER,
+            ThemeToken::StatusError => ACCENT_ERROR,
+            ThemeToken::StatusSuccess => ACCENT_GREEN,
         }
     }
 }
@@ -232,6 +252,7 @@ pub fn apply_theme_to_egui(theme: &petunia_config::Theme, ctx: &egui::Context) {
     let text = get_c(ThemeToken::TextPrimary);
     let text_muted = get_c(ThemeToken::TextMuted);
     let accent = get_c(ThemeToken::AccentBlue);
+    let focus = get_c(ThemeToken::BorderFocus);
     let border = get_c(ThemeToken::BorderSubtle);
     let control = get_c(ThemeToken::BgSurface);
     let hover = get_c(ThemeToken::BgSurfaceHover);
@@ -247,6 +268,10 @@ pub fn apply_theme_to_egui(theme: &petunia_config::Theme, ctx: &egui::Context) {
     v.selection.stroke = Stroke::new(1.0_f32, text);
     v.hyperlink_color = accent;
     v.window_stroke = Stroke::new(1.0_f32, border);
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new("petunia_focus_color"), focus);
+        data.insert_temp(egui::Id::new("petunia_active_surface_color"), selection);
+    });
 
     for widget in [
         &mut v.widgets.noninteractive,
@@ -257,7 +282,7 @@ pub fn apply_theme_to_egui(theme: &petunia_config::Theme, ctx: &egui::Context) {
     ] {
         widget.fg_stroke = Stroke::new(1.5_f32, text);
         widget.bg_stroke = Stroke::new(1.0_f32, border);
-        widget.corner_radius = egui::CornerRadius::same(5);
+        widget.corner_radius = RADIUS_SEGMENT;
         widget.expansion = 0.0;
     }
 
@@ -307,4 +332,63 @@ pub fn apply_theme_to_egui(theme: &petunia_config::Theme, ctx: &egui::Context) {
     };
     ctx.style_mut_of(egui::Theme::Dark, apply_style);
     ctx.style_mut_of(egui::Theme::Light, apply_style);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn petunia_dark_accent_matches_the_floral_baseline() {
+        assert_eq!(ACCENT_PRIMARY, Color32::from_rgb(0xb5, 0x8c, 0xff));
+        assert_eq!(ACCENT_BLUE, ACCENT_PRIMARY);
+        assert_eq!(BG_SURFACE_ACTIVE, Color32::from_rgb(0x39, 0x2e, 0x49));
+        assert!(contrast_ratio(TEXT_ACTIVE, BG_SURFACE_ACTIVE) >= 4.5);
+        assert!(contrast_ratio(ACCENT_PRIMARY, BG_PANEL) >= 4.5);
+    }
+
+    #[test]
+    fn focus_stroke_reads_the_active_theme_focus_token() {
+        let ctx = egui::Context::default();
+        let mut theme = petunia_config::Theme::default();
+        theme.colors.border_focus = "#FFD400".into();
+        theme.colors.bg_surface_active = "#0057B8".into();
+
+        apply_theme_to_egui(&theme, &ctx);
+
+        assert_eq!(
+            stroke_focus(&ctx).color,
+            Color32::from_rgb(0xff, 0xd4, 0x00)
+        );
+        assert_eq!(
+            bg_surface_active_for(&ctx),
+            Color32::from_rgb(0x00, 0x57, 0xb8)
+        );
+    }
+
+    fn contrast_ratio(foreground: Color32, background: Color32) -> f32 {
+        fn luminance(color: Color32) -> f32 {
+            let [r, g, b, _] = color.to_array();
+            let linear = [r, g, b].map(|channel| {
+                let value = channel as f32 / 255.0;
+                if value <= 0.04045 {
+                    value / 12.92
+                } else {
+                    ((value + 0.055) / 1.055).powf(2.4)
+                }
+            });
+            0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        }
+
+        let (lighter, darker) = {
+            let foreground = luminance(foreground);
+            let background = luminance(background);
+            if foreground >= background {
+                (foreground, background)
+            } else {
+                (background, foreground)
+            }
+        };
+        (lighter + 0.05) / (darker + 0.05)
+    }
 }

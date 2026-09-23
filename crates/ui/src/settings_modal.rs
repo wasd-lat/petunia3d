@@ -114,7 +114,7 @@ fn draw_settings_content(ctx: &egui::Context, ui: &mut Ui, state: &mut AppState)
                 let (tab_id, label, hint) = tabs[index];
                 let is_selected = state.ui.settings_tab == tab_id;
                 let (bg, fg) = if is_selected {
-                    (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+                    (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
                 } else {
                     (tokens::BG_SURFACE, tokens::TEXT_SECONDARY)
                 };
@@ -272,7 +272,7 @@ fn draw_appearance_tab(ctx: &egui::Context, ui: &mut Ui, state: &mut AppState) {
             for manifest in themes {
                 let is_active = state.ui.active_theme_id == manifest.id;
                 let (card_bg, border_color) = if is_active {
-                    (tokens::BG_SURFACE_ACTIVE, tokens::ACCENT_BLUE)
+                    (tokens::bg_surface_active_for(ui.ctx()), tokens::ACCENT_BLUE)
                 } else {
                     (tokens::BG_SURFACE, tokens::BORDER_SUBTLE)
                 };
@@ -394,7 +394,7 @@ fn draw_icons_tab(ui: &mut Ui, state: &mut AppState) {
                         .is_some_and(|p| p.is_enabled());
                 let is_active = state.ui.active_icon_pack_id == pack.id;
                 let (card_bg, border_color) = if is_active {
-                    (tokens::BG_SURFACE_ACTIVE, tokens::ACCENT_BLUE)
+                    (tokens::bg_surface_active_for(ui.ctx()), tokens::ACCENT_BLUE)
                 } else {
                     (tokens::BG_SURFACE, tokens::BORDER_SUBTLE)
                 };
@@ -541,7 +541,7 @@ fn draw_language_tab(ui: &mut Ui, state: &mut AppState) {
         let is_active =
             state.ui.i18n.lang == code || (code == "en" && state.ui.i18n.lang == "en-US");
         let (card_bg, border_color) = if is_active {
-            (tokens::BG_SURFACE_ACTIVE, tokens::ACCENT_BLUE)
+            (tokens::bg_surface_active_for(ui.ctx()), tokens::ACCENT_BLUE)
         } else {
             (tokens::BG_SURFACE, tokens::BORDER_SUBTLE)
         };
@@ -628,7 +628,7 @@ fn draw_keymap_tab(ui: &mut Ui, state: &mut AppState) {
             let profile = &profiles[index - 1];
             let is_active = state.ui.active_keymap_id == profile.id;
             let (bg, fg) = if is_active {
-                (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+                (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
             } else {
                 (tokens::BG_SURFACE, tokens::TEXT_SECONDARY)
             };

@@ -610,7 +610,7 @@ fn draw_shelf_pill(
         || matches!(cmd.action, ShelfAction::SetGizmo(g) if state.gizmo_mode == g && state.active_tool == "transform")
         || matches!(cmd.action, ShelfAction::TimelinePlayPause if state.ui.timeline_playing);
     let (bg, fg) = if is_active {
-        (tokens::ACCENT_BLUE, tokens::TEXT_ACTIVE)
+        (tokens::bg_surface_active_for(ui.ctx()), tokens::TEXT_ACTIVE)
     } else {
         (tokens::BG_SURFACE, tokens::TEXT_PRIMARY)
     };
@@ -671,7 +671,7 @@ fn draw_shelf_pill(
             ui.painter().rect_stroke(
                 rect,
                 tokens::RADIUS_PILL,
-                tokens::stroke_focus(),
+                tokens::stroke_focus(ui.ctx()),
                 StrokeKind::Inside,
             );
         }

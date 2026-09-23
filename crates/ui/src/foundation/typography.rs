@@ -1,15 +1,10 @@
 //! Papéis tipográficos.
 //!
-//! A escala reúne os tamanhos que o produto **já usa** (`10.0`, `10.5`, `11.0`,
-//! `11.5`, `12.0`, `13.0`, `14.0`), transformando literais espalhados em papéis
-//! nomeados. Não é uma fonte nova nem uma segunda escala: `ThemeFont.size`
-//! (default `14.0`) continua sendo o tamanho base do tema.
-//!
-//! Motivação medida: 74 ocorrências de `.size(11.0)` e 35 de `.size(10.5)` em
-//! `crates/ui/src` — o valor existe, só não tinha nome.
+//! Papéis tipográficos seguem a escala congelada do capítulo 36. O tamanho
+//! global configurável do tema continua independente desta escala de papéis.
 
-/// Tamanho base do texto do tema (espelha `ThemeFont::default().size`).
-pub const BASE: f32 = 14.0;
+/// Tamanho do papel UI Default.
+pub const BASE: f32 = 12.0;
 
 /// Papel tipográfico. O valor é o tamanho em logical px.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -34,24 +29,24 @@ impl TextRole {
     /// Tamanho em logical px.
     pub const fn size(self) -> f32 {
         match self {
-            TextRole::Pill => 11.5,
-            TextRole::Label => 11.0,
+            TextRole::Pill => 11.0,
+            TextRole::Label => 12.0,
             TextRole::Field => 12.0,
-            TextRole::SectionTitle => 11.0,
-            TextRole::Heading => 13.0,
-            TextRole::Caption => 10.5,
+            TextRole::SectionTitle => 13.0,
+            TextRole::Heading => 14.0,
+            TextRole::Caption => 10.0,
             TextRole::Micro => 10.0,
         }
     }
 
     /// Todos os papéis, do menor ao maior.
     pub const ALL: [TextRole; 7] = [
-        TextRole::Micro,
         TextRole::Caption,
-        TextRole::Label,
-        TextRole::SectionTitle,
+        TextRole::Micro,
         TextRole::Pill,
+        TextRole::Label,
         TextRole::Field,
+        TextRole::SectionTitle,
         TextRole::Heading,
     ];
 }
@@ -71,28 +66,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn base_matches_theme_default() {
-        assert_eq!(BASE, petunia_config::theme::ThemeFont::default().size);
-    }
-
-    #[test]
-    fn sizes_match_values_already_used_by_the_product() {
-        // Se um papel mudar de tamanho, o teste obriga a atualizar a evidência.
-        assert_eq!(TextRole::Label.size(), 11.0);
-        assert_eq!(TextRole::Pill.size(), 11.5);
+    fn canonical_roles_match_the_frozen_typography_scale() {
+        assert_eq!(BASE, 12.0);
+        assert_eq!(TextRole::Caption.size(), 10.0);
+        assert_eq!(TextRole::Pill.size(), 11.0);
+        assert_eq!(TextRole::Label.size(), 12.0);
         assert_eq!(TextRole::Field.size(), 12.0);
-        assert_eq!(TextRole::Heading.size(), 13.0);
-        assert_eq!(TextRole::Caption.size(), 10.5);
+        assert_eq!(TextRole::SectionTitle.size(), 13.0);
+        assert_eq!(TextRole::Heading.size(), 14.0);
     }
 
     #[test]
-    fn smallest_role_is_micro_and_all_fit_under_base() {
-        assert_eq!(TextRole::ALL[0], TextRole::Micro);
+    fn roles_fit_within_the_exceptional_size() {
+        assert_eq!(TextRole::ALL[0], TextRole::Caption);
         for role in TextRole::ALL {
-            assert!(
-                role.size() <= BASE,
-                "{role:?} maior que o texto base do tema"
-            );
+            assert!(role.size() <= 14.0, "{role:?} excede o papel excepcional");
         }
     }
 
