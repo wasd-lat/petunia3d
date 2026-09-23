@@ -141,6 +141,34 @@ impl Software3dViewport {
         }
     }
 
+    fn world_line_width(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        vp: &Mat4,
+        color: [f32; 3],
+        through: bool,
+        width_px: f32,
+    ) {
+        let (Some(a), Some(b)) = (self.project_point(a, vp), self.project_point(b, vp)) else {
+            return;
+        };
+        let delta = [b.x - a.x, b.y - a.y];
+        let length = delta[0].hypot(delta[1]).max(1.0);
+        let normal = [-delta[1] / length, delta[0] / length];
+        let width = width_px.round().clamp(1.0, 6.0) as i32;
+        for index in 0..width {
+            let offset = index as f32 - (width - 1) as f32 * 0.5;
+            let mut a = a;
+            let mut b = b;
+            a.x += normal[0] * offset;
+            a.y += normal[1] * offset;
+            b.x += normal[0] * offset;
+            b.y += normal[1] * offset;
+            self.line(a, b, color, 1.0, through);
+        }
+    }
+
     fn triangle(&mut self, p: [ScreenVertex; 3], surface: &Surface<'_>) {
         let [a, b, c] = p;
         let area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
@@ -338,7 +366,7 @@ impl PetuniaViewport for Software3dViewport {
                     && state.selection_domain == SelectionDomain::Face
                 {
                     if face.selected {
-                        Some((scene::SELECT_COLOR, 0.32))
+                        Some((state.selection_rgb.map(|value| value as f32 / 255.0), 0.32))
                     } else if state.hover == HoverTarget::Face(fi) {
                         Some(([0.49, 0.86, 1.0], 0.2))
                     } else {
@@ -407,19 +435,34 @@ impl PetuniaViewport for Software3dViewport {
                         && mesh.selected_edges.contains(&(a, b));
                     let hover = active && state.hover == HoverTarget::Edge(a, b);
                     let color = if selected {
-                        scene::SELECT_EDGE_COLOR
+                        state.selection_rgb.map(|value| value as f32 / 255.0)
                     } else if hover {
                         [0.49, 0.86, 1.0]
                     } else {
                         [0.32, 0.35, 0.40]
                     };
-                    self.world_line(
-                        mesh.verts[a as usize].vec(),
-                        mesh.verts[b as usize].vec(),
-                        &vp,
-                        color,
-                        through,
-                    );
+                    if selected || hover {
+                        self.world_line_width(
+                            mesh.verts[a as usize].vec(),
+                            mesh.verts[b as usize].vec(),
+                            &vp,
+                            color,
+                            through,
+                            if hover {
+                                state.selection_thickness * 1.35
+                            } else {
+                                state.selection_thickness
+                            },
+                        );
+                    } else {
+                        self.world_line(
+                            mesh.verts[a as usize].vec(),
+                            mesh.verts[b as usize].vec(),
+                            &vp,
+                            color,
+                            through,
+                        );
+                    }
                 }
                 if state.show_triangulation {
                     for (a, b) in mesh.triangulation_wireframe() {
@@ -439,11 +482,20 @@ impl PetuniaViewport for Software3dViewport {
                         continue;
                     };
                     let (radius, color) = if state.hover == HoverTarget::Vertex(index as u32) {
-                        (5, [0.49, 0.86, 1.0])
+                        (
+                            (state.selection_thickness * 2.5).min(7.0).round() as i32,
+                            [0.49, 0.86, 1.0],
+                        )
                     } else if vertex.selected {
-                        (4, [1.0, 0.78, 0.35])
+                        (
+                            (state.selection_thickness * 2.0).min(6.0).round() as i32,
+                            state.selection_rgb.map(|value| value as f32 / 255.0),
+                        )
                     } else {
-                        (2, [0.62, 0.66, 0.74])
+                        (
+                            (state.selection_thickness * 1.25).min(5.0).round() as i32,
+                            [0.62, 0.66, 0.74],
+                        )
                     };
                     self.marker(p, radius, color, through);
                 }
@@ -509,5 +561,54 @@ mod tests {
         viewport.set_selection_domain(SelectionDomain::Face);
         let frame_f = viewport.render_frame(&project, &camera, ViewportRenderState::default());
         assert!(frame_f.is_some());
+    }
+
+    #[test]
+    fn software_selection_style_changes_pixels() {
+        let mut viewport = Software3dViewport::new(320, 240);
+        let mut project = Project::default();
+        project.add("Cube", petunia_core::Mesh::cube(2.0));
+        for vertex in &mut project.active_mesh_mut().unwrap().verts {
+            vertex.selected = true;
+        }
+        let camera = Camera::default();
+        let mut style = ViewportRenderState {
+            selection_domain: SelectionDomain::Vertex,
+            selection_rgb: [255, 64, 32],
+            selection_thickness: 2.0,
+            ..ViewportRenderState::default()
+        };
+        viewport.render_frame(&project, &camera, style);
+        let red = viewport.color_buffer.clone();
+        style.selection_rgb = [32, 160, 255];
+        viewport.render_frame(&project, &camera, style);
+        assert_ne!(viewport.color_buffer, red);
+        let blue = viewport.color_buffer.clone();
+        style.selection_thickness = 5.0;
+        viewport.render_frame(&project, &camera, style);
+        assert_ne!(viewport.color_buffer, blue);
+    }
+
+    #[test]
+    fn software_xray_opacity_changes_visible_pixels() {
+        let mut viewport = Software3dViewport::new(320, 240);
+        let mut project = Project::default();
+        project.add("Cube", petunia_core::Mesh::cube(2.0));
+        let camera = Camera::default();
+        let mut state = ViewportRenderState {
+            show_grid: false,
+            xray: true,
+            xray_opacity: 0.15,
+            ..ViewportRenderState::default()
+        };
+        viewport.render_frame(&project, &camera, state);
+        let transparent = viewport.color_buffer.clone();
+        state.xray_opacity = 0.85;
+        viewport.render_frame(&project, &camera, state);
+        assert_ne!(viewport.color_buffer, transparent);
+        let mostly_opaque = viewport.color_buffer.clone();
+        state.xray = false;
+        viewport.render_frame(&project, &camera, state);
+        assert_ne!(viewport.color_buffer, mostly_opaque);
     }
 }

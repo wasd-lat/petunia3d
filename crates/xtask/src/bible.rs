@@ -182,6 +182,14 @@ fn walk_md(dir: &Path) -> Vec<PathBuf> {
             continue;
         };
         for entry in entries.filter_map(|e| e.ok()) {
+            // O check global não deve percorrer os artefatos de build/deps:
+            // filtrar após walk_md(root) ainda atravessa árvores enormes.
+            if matches!(
+                entry.file_name().to_str(),
+                Some("target" | "node_modules" | ".git")
+            ) {
+                continue;
+            }
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);

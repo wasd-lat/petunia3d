@@ -137,6 +137,11 @@ impl WgpuViewport {
             .as_ref()
             .ok_or("TextureView indisponível")?;
 
+        // O uniforme da câmera é escrito em `update`; a opacidade precisa
+        // estar no renderer antes dessa escrita, inclusive no primeiro frame.
+        self.renderer.set_xray_opacity(state.xray_opacity);
+        self.renderer
+            .set_selection_style(state.selection_rgb, state.selection_thickness);
         self.renderer.update(
             &self.device,
             &self.queue,
@@ -151,7 +156,6 @@ impl WgpuViewport {
             state.selection_domain,
             state.hover,
         );
-        self.renderer.set_xray_opacity(state.xray_opacity);
         self.renderer.set_overlays(true, state.show_grid);
 
         let mut encoder = self
@@ -265,6 +269,8 @@ mod tests {
                         show_wireframe_overlay: false,
                         selection_domain: petunia_core::SelectionDomain::Object,
                         xray_opacity: 0.42,
+                        selection_rgb: [233, 106, 0],
+                        selection_thickness: 2.0,
                         show_grid: true,
                         hover: petunia_core::HoverTarget::None,
                     },

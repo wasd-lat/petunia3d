@@ -36,10 +36,10 @@ struct SelectionVertex {
     color: [f32; 4],
 }
 
-/// Cruz orientada para a tela. O raio é em pixels lógicos do target WGPU,
-/// independente do zoom e da profundidade do vértice.
-fn append_point_marker(
-    lines: &mut Vec<SelectionVertex>,
+/// Disco orientado para a tela. O raio é em pixels lógicos do target WGPU,
+/// independente do zoom e da profundidade do ponto.
+fn append_point_disc(
+    triangles: &mut Vec<SelectionVertex>,
     point: Vec3,
     camera: &Camera,
     viewport_height: u32,
@@ -53,15 +53,98 @@ fn append_point_marker(
     };
     let radius =
         camera.visible_height() * perspective_scale * radius_px / viewport_height.max(1) as f32;
-    for axis in [camera.right(), camera.up()] {
-        lines.push(SelectionVertex {
-            pos: (point - axis * radius).to_array(),
+    let right = camera.right() * radius;
+    let up = camera.up() * radius;
+    const SIDES: usize = 12;
+    for side in 0..SIDES {
+        let a = side as f32 * std::f32::consts::TAU / SIDES as f32;
+        let b = (side + 1) as f32 * std::f32::consts::TAU / SIDES as f32;
+        let pa = point + right * a.cos() + up * a.sin();
+        let pb = point + right * b.cos() + up * b.sin();
+        for position in [point, pa, pb] {
+            triangles.push(SelectionVertex {
+                pos: position.to_array(),
+                color,
+            });
+        }
+    }
+}
+
+/// Faixa de aresta voltada à câmera, com largura em pixels lógicos.
+fn append_edge_band(
+    triangles: &mut Vec<SelectionVertex>,
+    start: Vec3,
+    end: Vec3,
+    camera: &Camera,
+    viewport_height: u32,
+    width_px: f32,
+    color: [f32; 4],
+) {
+    let direction = end - start;
+    let side = direction.cross(camera.forward()).normalize_or_zero();
+    if side.length_squared() < 1.0e-8 {
+        return;
+    }
+    let midpoint = (start + end) * 0.5;
+    let perspective_scale = if camera.proj == petunia_core::Projection::Perspective {
+        ((midpoint - camera.eye()).dot(camera.forward()) / camera.distance.max(0.01)).max(0.01)
+    } else {
+        1.0
+    };
+    let half_width = camera.visible_height() * perspective_scale * width_px
+        / viewport_height.max(1) as f32
+        * 0.5;
+    let offset = side * half_width;
+    let corners = [start - offset, start + offset, end + offset, end - offset];
+    for index in [0usize, 1, 2, 0, 2, 3] {
+        triangles.push(SelectionVertex {
+            pos: corners[index].to_array(),
             color,
         });
-        lines.push(SelectionVertex {
-            pos: (point + axis * radius).to_array(),
-            color,
-        });
+    }
+}
+
+#[cfg(test)]
+mod point_disc_tests {
+    use super::*;
+
+    #[test]
+    fn point_marker_is_a_filled_disc_that_grows_for_hover() {
+        let camera = Camera::default();
+        let mut regular = Vec::new();
+        let mut hovered = Vec::new();
+        let color = [0.49, 0.86, 1.0, 1.0];
+        append_point_disc(&mut regular, Vec3::ZERO, &camera, 768, 3.0, color);
+        append_point_disc(&mut hovered, Vec3::ZERO, &camera, 768, 5.0, color);
+        assert_eq!(regular.len(), 36);
+        assert_eq!(hovered.len(), regular.len());
+        assert!(
+            regular
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .all(|triangle| triangle[0].pos == [0.0; 3])
+        );
+        let regular_radius = Vec3::from_array(regular[1].pos).length();
+        let hover_radius = Vec3::from_array(hovered[1].pos).length();
+        assert!(hover_radius > regular_radius * 1.6);
+    }
+
+    #[test]
+    fn selected_edge_band_uses_triangles_and_configured_width() {
+        let camera = Camera::default();
+        let mut narrow = Vec::new();
+        let mut thick = Vec::new();
+        let color = [0.2, 0.7, 0.9, 1.0];
+        append_edge_band(&mut narrow, Vec3::ZERO, Vec3::X, &camera, 768, 1.0, color);
+        append_edge_band(&mut thick, Vec3::ZERO, Vec3::X, &camera, 768, 5.0, color);
+        assert_eq!(narrow.len(), 6);
+        assert_eq!(thick.len(), 6);
+        assert!(thick.iter().all(|vertex| vertex.color == color));
+        let narrow_span =
+            (Vec3::from_array(narrow[0].pos) - Vec3::from_array(narrow[1].pos)).length();
+        let thick_span = (Vec3::from_array(thick[0].pos) - Vec3::from_array(thick[1].pos)).length();
+        assert!(thick_span > narrow_span * 4.9);
     }
 }
 
@@ -136,6 +219,8 @@ pub struct Renderer {
     line_xray_pipeline: wgpu::RenderPipeline,
     xray: bool,
     xray_opacity: f32,
+    selection_rgb: [u8; 3],
+    selection_thickness: f32,
     ref_pipeline: wgpu::RenderPipeline,
     ref_xray_pipeline: wgpu::RenderPipeline,
     cam_buffer: wgpu::Buffer,
@@ -1023,6 +1108,8 @@ impl Renderer {
             line_xray_pipeline,
             xray: false,
             xray_opacity: 0.42,
+            selection_rgb: [233, 106, 0],
+            selection_thickness: 2.0,
             ref_pipeline,
             ref_xray_pipeline,
             cam_buffer,
@@ -1079,6 +1166,16 @@ impl Renderer {
     /// Opacidade da geometria em X-Ray, aplicada no uniform do shader.
     pub fn set_xray_opacity(&mut self, opacity: f32) {
         self.xray_opacity = opacity.clamp(0.1, 0.9);
+    }
+
+    pub fn set_selection_style(&mut self, rgb: [u8; 3], thickness: f32) {
+        let thickness = thickness.clamp(1.0, 6.0);
+        if self.selection_rgb != rgb || (self.selection_thickness - thickness).abs() > f32::EPSILON
+        {
+            self.selection_rgb = rgb;
+            self.selection_thickness = thickness;
+            self.last_selection_view_proj = None;
+        }
     }
 
     pub fn set_overlays(&mut self, show_overlays: bool, show_grid: bool) {
@@ -1436,9 +1533,10 @@ impl Renderer {
             let domain = edit_domain;
             // Seleção: laranja quente com alpha, como Blender/C4D. Legível
             // sobre qualquer shading porque o shader não aplica luz.
-            let face_color = [1.0f32, 0.55, 0.15, 0.32];
-            let edge_color = [1.0f32, 0.62, 0.20, 1.0];
-            let point_color = [1.0f32, 0.78, 0.35, 1.0];
+            let selected = self.selection_rgb.map(|channel| channel as f32 / 255.0);
+            let face_color = [selected[0], selected[1], selected[2], 0.32];
+            let edge_color = [selected[0], selected[1], selected[2], 1.0];
+            let point_color = edge_color;
 
             if domain == petunia_core::SelectionDomain::Edge {
                 let guide_color = [0.62, 0.66, 0.74, 0.58];
@@ -1465,12 +1563,12 @@ impl Renderer {
             if domain == petunia_core::SelectionDomain::Vertex {
                 let guide_color = [0.62, 0.66, 0.74, 0.72];
                 for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
-                    append_point_marker(
-                        &mut sel_line,
+                    append_point_disc(
+                        &mut sel_tri,
                         vertex.vec(),
                         camera,
                         self.depth_size.1,
-                        2.5,
+                        (self.selection_thickness * 1.25).min(5.0),
                         guide_color,
                     );
                 }
@@ -1506,25 +1604,26 @@ impl Renderer {
                     else {
                         continue;
                     };
-                    sel_line.push(SelectionVertex {
-                        pos: va.pos,
-                        color: edge_color,
-                    });
-                    sel_line.push(SelectionVertex {
-                        pos: vb.pos,
-                        color: edge_color,
-                    });
+                    append_edge_band(
+                        &mut sel_tri,
+                        va.vec(),
+                        vb.vec(),
+                        camera,
+                        self.depth_size.1,
+                        self.selection_thickness,
+                        edge_color,
+                    );
                 }
             }
 
             if domain == petunia_core::SelectionDomain::Vertex {
                 for vertex in mesh.verts.iter().filter(|vertex| vertex.selected) {
-                    append_point_marker(
-                        &mut sel_line,
+                    append_point_disc(
+                        &mut sel_tri,
                         vertex.vec(),
                         camera,
                         self.depth_size.1,
-                        4.0,
+                        (self.selection_thickness * 2.0).min(6.0),
                         point_color,
                     );
                 }
@@ -1541,12 +1640,12 @@ impl Renderer {
             match hover {
                 petunia_core::HoverTarget::Vertex(index) => {
                     if let Some(vertex) = mesh.verts.get(index as usize) {
-                        append_point_marker(
-                            &mut sel_line,
+                        append_point_disc(
+                            &mut sel_tri,
                             vertex.vec(),
                             camera,
                             self.depth_size.1,
-                            5.0,
+                            (self.selection_thickness * 2.5).min(7.0),
                             hover_line,
                         );
                     }
@@ -1555,14 +1654,15 @@ impl Renderer {
                     if let (Some(va), Some(vb)) =
                         (mesh.verts.get(a as usize), mesh.verts.get(b as usize))
                     {
-                        sel_line.push(SelectionVertex {
-                            pos: va.pos,
-                            color: hover_line,
-                        });
-                        sel_line.push(SelectionVertex {
-                            pos: vb.pos,
-                            color: hover_line,
-                        });
+                        append_edge_band(
+                            &mut sel_tri,
+                            va.vec(),
+                            vb.vec(),
+                            camera,
+                            self.depth_size.1,
+                            self.selection_thickness * 1.35,
+                            hover_line,
+                        );
                     }
                 }
                 petunia_core::HoverTarget::Face(index) => {

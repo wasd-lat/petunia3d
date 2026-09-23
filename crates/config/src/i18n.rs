@@ -186,6 +186,29 @@ pub mod text_id {
     pub const UI_ALBEDO_BASE_COLOR: TextId = TextId::new("ui.albedo_base_color");
     pub const UI_THEME: TextId = TextId::new("ui.theme");
     pub const UI_PLACE_IN_SCENE: TextId = TextId::new("ui.place_in_scene");
+    pub const UI_VERTICAL_TOOL_DRAG: TextId = TextId::new("ui.vertical_tool_drag");
+    pub const UI_INVERT_VERTICAL_DRAG: TextId = TextId::new("ui.invert_vertical_drag");
+    pub const UI_VERTICAL_DRAG_INVERTED: TextId = TextId::new("ui.vertical_drag_inverted");
+    pub const UI_VERTICAL_DRAG_NORMAL: TextId = TextId::new("ui.vertical_drag_normal");
+    pub const UI_SEARCH_ASSETS: TextId = TextId::new("ui.search_assets");
+    pub const UI_SEARCH_PARTS: TextId = TextId::new("ui.search_parts");
+    pub const UI_SELECTED_PARTS_ONLY: TextId = TextId::new("ui.selected_parts_only");
+    pub const UI_SORT_PARTS: TextId = TextId::new("ui.sort_parts");
+    pub const UI_PARTS_ROW_SIZE: TextId = TextId::new("ui.parts_row_size");
+    pub const UI_SORT_ASSETS: TextId = TextId::new("ui.sort_assets");
+    pub const UI_THUMBNAIL_SIZE: TextId = TextId::new("ui.thumbnail_size");
+    pub const UI_SELECTION_COLOR: TextId = TextId::new("ui.selection_color");
+    pub const UI_HIGHLIGHT_THICKNESS: TextId = TextId::new("ui.highlight_thickness");
+    pub const UI_VIEW_WIREFRAME: TextId = TextId::new("ui.view_wireframe");
+    pub const UI_VIEW_SOLID: TextId = TextId::new("ui.view_solid");
+    pub const UI_VIEW_MATERIAL: TextId = TextId::new("ui.view_material");
+    pub const UI_VIEW_LIT: TextId = TextId::new("ui.view_lit");
+    pub const UI_MORE_MODEL_TOOLS: TextId = TextId::new("ui.more_model_tools");
+    pub const UI_XRAY_OPACITY: TextId = TextId::new("ui.xray_opacity");
+    pub const UI_SELECTION_COLOR_INVALID: TextId = TextId::new("ui.selection_color_invalid");
+    pub const UI_SELECTION_COLOR_LOW_CONTRAST: TextId =
+        TextId::new("ui.selection_color_low_contrast");
+    pub const UI_PREFERENCES_SAVE_FAILED: TextId = TextId::new("ui.preferences_save_failed");
 
     // Diálogo de recuperação de autosave (P3D-002).
     pub const UI_RECOVERY_TITLE: TextId = TextId::new("ui.recovery_title");

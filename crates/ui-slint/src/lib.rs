@@ -58,6 +58,8 @@ pub struct ViewportRenderState {
     pub selection_domain: petunia_core::SelectionDomain,
     /// Opacidade da geometria em X-Ray.
     pub xray_opacity: f32,
+    pub selection_rgb: [u8; 3],
+    pub selection_thickness: f32,
     /// Overlays: grade e wireframe opcional sobre as faces.
     pub show_grid: bool,
     /// Componente sob o cursor (preselection).
@@ -74,6 +76,8 @@ impl Default for ViewportRenderState {
             show_wireframe_overlay: false,
             selection_domain: petunia_core::SelectionDomain::Object,
             xray_opacity: 0.42,
+            selection_rgb: [233, 106, 0],
+            selection_thickness: 2.0,
             show_grid: true,
             hover: petunia_core::HoverTarget::None,
         }
@@ -281,6 +285,15 @@ pub struct ShellViewModel {
     pub rotation: [f32; 3],
     pub scale: [f32; 3],
     pub scene_items: Vec<SceneItemModel>,
+    pub parts_items: Vec<SceneItemModel>,
+    pub parts_query: String,
+    pub parts_selected_only: bool,
+    pub parts_sort_by_name: bool,
+    pub parts_row_height: f32,
+    pub asset_items: Vec<SceneItemModel>,
+    pub asset_query: String,
+    pub asset_sort_by_name: bool,
+    pub asset_thumbnail_size: f32,
     pub active_object_title: String,
     pub active_object_details: String,
     pub active_material_name: String,
@@ -291,6 +304,9 @@ pub struct ShellViewModel {
     pub is_wireframe: bool,
     pub shading_mode: String,
     pub xray_opacity: f32,
+    pub selection_rgb: [u8; 3],
+    pub selection_thickness: f32,
+    pub selection_color_hex: String,
     pub show_xray: bool,
     pub shading_popover_open: bool,
     /// HUD da operação: título, linhas de valor e dica de controles.
@@ -303,10 +319,12 @@ pub struct ShellViewModel {
     /// Barra de status contextual.
     pub context_hint: String,
     pub operation_preview_commands: String,
+    pub drag_link_commands: String,
     pub hover_label: String,
     pub transform_instant_active: bool,
     pub gizmo_hover_axis: i32,
     pub gizmo_active_axis: i32,
+    pub gizmo_constraint_axes: [i32; 2],
     pub asset_library_visible: bool,
     pub gizmo: GizmoModel,
     pub selection_overlay: SelectionOverlayModel,
@@ -345,6 +363,23 @@ pub struct ShellViewModel {
     pub label_albedo_base_color: String,
     pub label_theme: String,
     pub label_place_in_scene: String,
+    pub label_vertical_tool_drag: String,
+    pub label_invert_vertical_drag: String,
+    pub label_search_assets: String,
+    pub label_search_parts: String,
+    pub label_selected_parts_only: String,
+    pub label_sort_parts: String,
+    pub label_parts_row_size: String,
+    pub label_sort_assets: String,
+    pub label_thumbnail_size: String,
+    pub label_selection_color: String,
+    pub label_highlight_thickness: String,
+    pub label_view_wireframe: String,
+    pub label_view_solid: String,
+    pub label_view_material: String,
+    pub label_view_lit: String,
+    pub label_more_model_tools: String,
+    pub label_xray_opacity: String,
     pub recovery_open: bool,
     pub recovery_title: String,
     pub recovery_body: String,
@@ -374,6 +409,8 @@ pub struct ShellViewModel {
     pub loop_cut_slide: f32,
     pub loop_cut_cuts: i32,
     pub tool_activation: String,
+    pub keyboard_tool_modal_active: bool,
+    pub invert_vertical_drag: bool,
     pub tool_modal_active: bool,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
@@ -478,6 +515,15 @@ impl ShellViewModel {
             rotation: [0.0, 0.0, 0.0],
             scale: [1.0, 1.0, 1.0],
             scene_items,
+            parts_items: Vec::new(),
+            parts_query: String::new(),
+            parts_selected_only: false,
+            parts_sort_by_name: false,
+            parts_row_height: 28.0,
+            asset_items: Vec::new(),
+            asset_query: String::new(),
+            asset_sort_by_name: false,
+            asset_thumbnail_size: state.ui.asset_thumbnail_size,
             active_object_title,
             active_object_details,
             active_material_name,
@@ -488,6 +534,12 @@ impl ShellViewModel {
             is_wireframe: state.session.show_wireframe_overlay,
             shading_mode: state.shading.id().to_string(),
             xray_opacity: state.session.xray_opacity,
+            selection_rgb: state.ui.selection_rgb,
+            selection_thickness: state.ui.selection_thickness,
+            selection_color_hex: format!(
+                "#{:02X}{:02X}{:02X}",
+                state.ui.selection_rgb[0], state.ui.selection_rgb[1], state.ui.selection_rgb[2]
+            ),
             show_xray: state.session.show_xray,
             shading_popover_open: false,
             operation_hud_active: false,
@@ -497,10 +549,12 @@ impl ShellViewModel {
             operation_hud_subject: String::new(),
             context_hint: String::new(),
             operation_preview_commands: String::new(),
+            drag_link_commands: String::new(),
             hover_label: String::new(),
             transform_instant_active: false,
             gizmo_hover_axis: -1,
             gizmo_active_axis: -1,
+            gizmo_constraint_axes: [-1, -1],
             asset_library_visible: false,
             gizmo: GizmoModel::default(),
             selection_overlay: SelectionOverlayModel::default(),
@@ -538,6 +592,23 @@ impl ShellViewModel {
             label_albedo_base_color: String::new(),
             label_theme: String::new(),
             label_place_in_scene: String::new(),
+            label_vertical_tool_drag: String::new(),
+            label_invert_vertical_drag: String::new(),
+            label_search_assets: String::new(),
+            label_search_parts: String::new(),
+            label_selected_parts_only: String::new(),
+            label_sort_parts: String::new(),
+            label_parts_row_size: String::new(),
+            label_sort_assets: String::new(),
+            label_thumbnail_size: String::new(),
+            label_selection_color: String::new(),
+            label_highlight_thickness: String::new(),
+            label_view_wireframe: String::new(),
+            label_view_solid: String::new(),
+            label_view_material: String::new(),
+            label_view_lit: String::new(),
+            label_more_model_tools: String::new(),
+            label_xray_opacity: String::new(),
             recovery_open: false,
             recovery_title: String::new(),
             recovery_body: String::new(),
@@ -567,6 +638,8 @@ impl ShellViewModel {
             loop_cut_slide: 0.0,
             loop_cut_cuts: 1,
             tool_activation: "drag".to_string(),
+            keyboard_tool_modal_active: false,
+            invert_vertical_drag: state.ui.invert_vertical_drag,
             tool_modal_active: false,
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
@@ -676,6 +749,12 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub overlays: OverlayStack,
     pub scene_drawer_visible: bool,
     pub asset_library_visible: bool,
+    pub asset_query: String,
+    pub asset_sort_by_name: bool,
+    pub parts_query: String,
+    pub parts_selected_only: bool,
+    pub parts_sort_by_name: bool,
+    pub parts_row_height: f32,
     pub command_search_visible: bool,
     pub settings_visible: bool,
     pub position: [NumericFieldState; 3],
@@ -689,6 +768,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub add_menu_open: bool,
     /// Ferramenta paramétrica modal ativa (Extrude, Inset, Bevel, Push/Pull).
     pub tool_modal: Option<ToolModalKind>,
+    /// Sessão paramétrica aberta por atalho: o movimento do mouse já manipula.
+    pub keyboard_tool_modal_active: bool,
     pub tool_modal_value: f32,
     /// Renomeação inline do ativo selecionado (Outliner): `Some(nome em edição)`.
     pub rename_draft: Option<String>,
@@ -908,6 +989,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             overlays: OverlayStack::default(),
             scene_drawer_visible: false,
             asset_library_visible: false,
+            asset_query: String::new(),
+            asset_sort_by_name: false,
+            parts_query: String::new(),
+            parts_selected_only: false,
+            parts_sort_by_name: false,
+            parts_row_height: 28.0,
             command_search_visible: false,
             settings_visible: false,
             drag: None,
@@ -915,6 +1002,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             paint_last: None,
             add_menu_open: false,
             tool_modal: None,
+            keyboard_tool_modal_active: false,
             tool_modal_value: 0.0,
             rename_draft: None,
             context_menu: None,
@@ -1295,6 +1383,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             show_wireframe_overlay: self.state.session.show_wireframe_overlay,
             selection_domain: self.state.selection_domain(),
             xray_opacity: self.state.session.xray_opacity,
+            selection_rgb: self.state.ui.selection_rgb,
+            selection_thickness: self.state.ui.selection_thickness,
             show_grid: self.state.session.show_grid,
             hover: self.state.session.tools.hover,
         };
@@ -1937,7 +2027,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         };
         let precision = if fine { 0.1 } else { 1.0 };
         for (axis, pointer) in [x, y].into_iter().enumerate() {
-            drag.virtual_pointer[axis] += (pointer - drag.last_pointer[axis]) * precision;
+            let direction = if axis == 1 && self.state.ui.invert_vertical_drag {
+                -1.0
+            } else {
+                1.0
+            };
+            drag.virtual_pointer[axis] +=
+                (pointer - drag.last_pointer[axis]) * precision * direction;
             drag.last_pointer[axis] = pointer;
         }
         let Some(modal) = self.state.session.tools.modal.as_ref() else {
@@ -2319,9 +2415,134 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Preferência de input da aplicação, sem criar undo nem sujar o modelo.
+    pub fn set_invert_vertical_drag(&mut self, invert: bool) -> bool {
+        if self.state.ui.invert_vertical_drag == invert {
+            return false;
+        }
+        self.state.ui.invert_vertical_drag = invert;
+        let status_id = if invert {
+            petunia_config::text_id::UI_VERTICAL_DRAG_INVERTED
+        } else {
+            petunia_config::text_id::UI_VERTICAL_DRAG_NORMAL
+        };
+        self.state.set_status(self.state.t_id(status_id));
+        true
+    }
+
+    pub fn set_asset_query(&mut self, query: &str) -> bool {
+        if self.asset_query == query {
+            return false;
+        }
+        self.asset_query = query.to_string();
+        true
+    }
+
+    pub fn set_parts_query(&mut self, query: &str) -> bool {
+        if self.parts_query == query {
+            return false;
+        }
+        self.parts_query = query.to_string();
+        true
+    }
+
+    pub fn set_parts_selected_only(&mut self, enabled: bool) -> bool {
+        if self.parts_selected_only == enabled {
+            return false;
+        }
+        self.parts_selected_only = enabled;
+        true
+    }
+
+    pub fn set_parts_sort_by_name(&mut self, enabled: bool) -> bool {
+        if self.parts_sort_by_name == enabled {
+            return false;
+        }
+        self.parts_sort_by_name = enabled;
+        true
+    }
+
+    pub fn set_parts_row_height(&mut self, size: f32) -> bool {
+        if !size.is_finite() {
+            return false;
+        }
+        let size = size.clamp(28.0, 44.0);
+        if (self.parts_row_height - size).abs() < f32::EPSILON {
+            return false;
+        }
+        self.parts_row_height = size;
+        true
+    }
+
+    pub fn set_asset_sort_by_name(&mut self, sort_by_name: bool) -> bool {
+        if self.asset_sort_by_name == sort_by_name {
+            return false;
+        }
+        self.asset_sort_by_name = sort_by_name;
+        true
+    }
+
+    pub fn set_asset_thumbnail_size(&mut self, size: f32) -> bool {
+        if !size.is_finite() {
+            return false;
+        }
+        let size = size.clamp(48.0, 128.0);
+        if (self.state.ui.asset_thumbnail_size - size).abs() < f32::EPSILON {
+            return false;
+        }
+        self.state.ui.asset_thumbnail_size = size;
+        true
+    }
+
+    pub fn set_selection_color_hex(&mut self, value: &str) -> bool {
+        let hex = value.trim().strip_prefix('#').unwrap_or(value.trim());
+        if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            let message = self
+                .state
+                .t_id(petunia_config::text_id::UI_SELECTION_COLOR_INVALID);
+            self.state.set_status(message);
+            return false;
+        }
+        let mut rgb = [0u8; 3];
+        for (index, channel) in rgb.iter_mut().enumerate() {
+            let Some(piece) = hex.get(index * 2..index * 2 + 2) else {
+                return false;
+            };
+            let Ok(parsed) = u8::from_str_radix(piece, 16) else {
+                return false;
+            };
+            *channel = parsed;
+        }
+        if !selection_color_has_contrast(rgb) {
+            let message = self
+                .state
+                .t_id(petunia_config::text_id::UI_SELECTION_COLOR_LOW_CONTRAST);
+            self.state.set_status(message);
+            return false;
+        }
+        if self.state.ui.selection_rgb == rgb {
+            return false;
+        }
+        self.state.ui.selection_rgb = rgb;
+        true
+    }
+
+    pub fn set_selection_thickness(&mut self, thickness: f32) -> bool {
+        if !thickness.is_finite() {
+            return false;
+        }
+        let thickness = thickness.clamp(1.0, 6.0);
+        if (self.state.ui.selection_thickness - thickness).abs() < f32::EPSILON {
+            return false;
+        }
+        self.state.ui.selection_thickness = thickness;
+        true
+    }
+
     /// O modo Instant está ativo?
     pub fn is_instant_tool_mode(&self) -> bool {
-        self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
+        self.keyboard_tool_modal_active
+            || self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
     }
 
     /// Alinha a câmera a um eixo a partir do tripé de navegação.
@@ -3465,6 +3686,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         match self.state.begin_modal(kind.modal_kind()) {
             Ok(()) => {
                 self.tool_modal = Some(kind);
+                self.keyboard_tool_modal_active = false;
                 let initial = match kind {
                     ToolModalKind::Inset => 0.2,
                     ToolModalKind::Bevel => 0.05,
@@ -3491,7 +3713,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return false;
         };
         let step = kind.step();
-        let delta_y = delta_y * if fine { 0.1 } else { 1.0 };
+        let delta_y = delta_y
+            * if fine { 0.1 } else { 1.0 }
+            * if self.state.ui.invert_vertical_drag {
+                -1.0
+            } else {
+                1.0
+            };
         let world_per_pixel =
             self.state.session.camera.visible_height() / self.viewport_size[1].max(1.0);
         let delta = match kind {
@@ -3527,6 +3755,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if self.tool_modal.take().is_none() {
             return false;
         }
+        self.keyboard_tool_modal_active = false;
         self.state.commit_modal();
         self.state.mark_dirty();
         true
@@ -3536,6 +3765,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if self.tool_modal.take().is_none() {
             return false;
         }
+        self.keyboard_tool_modal_active = false;
         self.state.cancel_modal();
         self.state.mark_dirty();
         true
@@ -3604,9 +3834,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         // No modo Instant um clique confirma a sessão paramétrica em vez de
         // trocar a seleção — é o equivalente ao Enter com o mouse.
-        if self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
-            && self.tool_modal.is_some()
-        {
+        if self.is_instant_tool_mode() && self.tool_modal.is_some() {
             self.commit_tool_modal();
             return;
         }
@@ -3890,6 +4118,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
     }
 
+    fn execute_shortcut_tool(&mut self, id: &str) {
+        let was_active = self.tool_modal.is_some();
+        if self.execute_core_command(id).is_ok() && !was_active && self.tool_modal.is_some() {
+            self.keyboard_tool_modal_active = true;
+        }
+    }
+
     pub fn route_shortcut(&mut self, text: &str, ctrl: bool, shift: bool, alt: bool) -> bool {
         if text == "Enter" && !ctrl && !alt {
             return self.confirm_active_operation();
@@ -3992,23 +4227,23 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 let _ = self.execute_core_command("view.frame_selection");
             }
             "model.extrude" => {
-                let _ = self.execute_core_command("model.extrude");
+                self.execute_shortcut_tool("model.extrude");
             }
             "model.inset" => {
-                let _ = self.execute_core_command("model.inset");
+                self.execute_shortcut_tool("model.inset");
             }
             "model.bevel" => {
-                let _ = self.execute_core_command("model.bevel");
+                self.execute_shortcut_tool("model.bevel");
             }
             "model.delete" => self.apply(UiIntent::DeleteActiveAsset),
             "model.push_pull" => {
-                let _ = self.execute_core_command("model.push_pull");
+                self.execute_shortcut_tool("model.push_pull");
             }
             "model.knife" => {
                 let _ = self.execute_core_command("model.knife");
             }
             "model.extrude_individual" => {
-                let _ = self.execute_core_command("model.extrude_individual");
+                self.execute_shortcut_tool("model.extrude_individual");
             }
             "model.subdivide" => {
                 let _ = self.execute_core_command("model.subdivide");
@@ -4266,6 +4501,46 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.is_orthographic = self.state.session.camera.proj == petunia_core::Projection::Ortho;
         vm.is_wireframe = self.state.session.show_wireframe_overlay;
         vm.asset_library_visible = self.asset_library_visible;
+        vm.parts_query = self.parts_query.clone();
+        vm.parts_selected_only = self.parts_selected_only;
+        vm.parts_sort_by_name = self.parts_sort_by_name;
+        vm.parts_row_height = self.parts_row_height;
+        let parts_query = self.parts_query.trim().to_lowercase();
+        vm.parts_items = vm
+            .scene_items
+            .iter()
+            .filter(|item| {
+                (parts_query.is_empty() || item.name.to_lowercase().contains(&parts_query))
+                    && (!self.parts_selected_only || item.selected || item.active)
+            })
+            .cloned()
+            .collect();
+        if self.parts_sort_by_name {
+            vm.parts_items.sort_by(|a, b| {
+                a.name
+                    .to_lowercase()
+                    .cmp(&b.name.to_lowercase())
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+        }
+        vm.asset_query = self.asset_query.clone();
+        vm.asset_sort_by_name = self.asset_sort_by_name;
+        vm.asset_thumbnail_size = self.state.ui.asset_thumbnail_size;
+        let query = self.asset_query.trim().to_lowercase();
+        vm.asset_items = vm
+            .scene_items
+            .iter()
+            .filter(|item| query.is_empty() || item.name.to_lowercase().contains(&query))
+            .cloned()
+            .collect();
+        if self.asset_sort_by_name {
+            vm.asset_items.sort_by(|a, b| {
+                a.name
+                    .to_lowercase()
+                    .cmp(&b.name.to_lowercase())
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+        }
         vm.gizmo = compute_gizmo(&self.state, self.viewport_size[0], self.viewport_size[1]);
         vm.selection_overlay = compute_selection_overlay(
             &self.state,
@@ -4283,6 +4558,30 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.instant_transform && self.state.session.tools.modal.is_some();
         vm.gizmo_hover_axis = self.gizmo_hover.map_or(-1, |h| h.axis() as i32);
         vm.gizmo_active_axis = self.gizmo_drag.map_or(-1, |h| h.axis() as i32);
+        vm.gizmo_constraint_axes = match self
+            .state
+            .session
+            .tools
+            .modal
+            .as_ref()
+            .map(|op| op.constraint)
+        {
+            Some(petunia_core::ModalConstraint::Axis(axis)) => [axis as i32, -1],
+            Some(petunia_core::ModalConstraint::Plane(excluded)) => {
+                [((excluded + 1) % 3) as i32, ((excluded + 2) % 3) as i32]
+            }
+            _ => [-1, -1],
+        };
+        let link_active = self.drag.is_some()
+            || self.tool_modal.is_some()
+            || self.state.session.tools.modal.is_some();
+        vm.drag_link_commands = compute_drag_link(
+            &self.state,
+            self.viewport_size[0],
+            self.viewport_size[1],
+            self.pointer_position,
+            link_active,
+        );
         vm.hover_label = self.state.session.tools.hover.label();
         self.fill_operation_hud(&mut vm);
         if let Some(menu) = self.context_menu {
@@ -4336,6 +4635,24 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_albedo_base_color = translated(petunia_config::text_id::UI_ALBEDO_BASE_COLOR);
         vm.label_theme = translated(petunia_config::text_id::UI_THEME);
         vm.label_place_in_scene = translated(petunia_config::text_id::UI_PLACE_IN_SCENE);
+        vm.label_vertical_tool_drag = translated(petunia_config::text_id::UI_VERTICAL_TOOL_DRAG);
+        vm.label_invert_vertical_drag =
+            translated(petunia_config::text_id::UI_INVERT_VERTICAL_DRAG);
+        vm.label_search_assets = translated(petunia_config::text_id::UI_SEARCH_ASSETS);
+        vm.label_search_parts = translated(petunia_config::text_id::UI_SEARCH_PARTS);
+        vm.label_selected_parts_only = translated(petunia_config::text_id::UI_SELECTED_PARTS_ONLY);
+        vm.label_sort_parts = translated(petunia_config::text_id::UI_SORT_PARTS);
+        vm.label_parts_row_size = translated(petunia_config::text_id::UI_PARTS_ROW_SIZE);
+        vm.label_sort_assets = translated(petunia_config::text_id::UI_SORT_ASSETS);
+        vm.label_thumbnail_size = translated(petunia_config::text_id::UI_THUMBNAIL_SIZE);
+        vm.label_selection_color = translated(petunia_config::text_id::UI_SELECTION_COLOR);
+        vm.label_highlight_thickness = translated(petunia_config::text_id::UI_HIGHLIGHT_THICKNESS);
+        vm.label_view_wireframe = translated(petunia_config::text_id::UI_VIEW_WIREFRAME);
+        vm.label_view_solid = translated(petunia_config::text_id::UI_VIEW_SOLID);
+        vm.label_view_material = translated(petunia_config::text_id::UI_VIEW_MATERIAL);
+        vm.label_view_lit = translated(petunia_config::text_id::UI_VIEW_LIT);
+        vm.label_more_model_tools = translated(petunia_config::text_id::UI_MORE_MODEL_TOOLS);
+        vm.label_xray_opacity = translated(petunia_config::text_id::UI_XRAY_OPACITY);
         if let Some(info) = &self.pending_recovery {
             vm.recovery_open = true;
             vm.recovery_title = translated(petunia_config::text_id::UI_RECOVERY_TITLE);
@@ -4492,6 +4809,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.loop_cut_cuts = session.cuts as i32;
         }
         vm.tool_activation = self.state.session.tools.tool_activation.id().to_string();
+        vm.keyboard_tool_modal_active =
+            self.keyboard_tool_modal_active && self.tool_modal.is_some();
+        vm.invert_vertical_drag = self.state.ui.invert_vertical_drag;
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
@@ -4567,8 +4887,9 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
     /// Tamanho da seta: recuo da ponta e meia-largura da base.
     const ARROW_BACK: f32 = 13.0;
     const ARROW_HALF: f32 = 5.5;
-    /// Tripé de navegação: margem do canto e comprimento das hastes.
+    /// Tripé de navegação: no alto à direita, abaixo dos controles da viewport.
     const VIEW_MARGIN: f32 = 54.0;
+    const VIEW_TOP: f32 = 108.0;
     const VIEW_LENGTH: f32 = 38.0;
 
     if width <= 1.0 || height <= 1.0 {
@@ -4602,8 +4923,8 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
     // Ele mostra a orientação da câmera, não a cena: por isso as hastes partem
     // de uma âncora fixa no canto, não de um ponto projetado.
     {
-        model.view_origin_x = VIEW_MARGIN;
-        model.view_origin_y = height - VIEW_MARGIN;
+        model.view_origin_x = width - VIEW_MARGIN;
+        model.view_origin_y = VIEW_TOP.min(height - VIEW_MARGIN);
         let origin = [VIEW_MARGIN, VIEW_MARGIN];
         for (axis, slot, endpoint) in [
             (
@@ -4747,11 +5068,11 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
 /// mouse durante uma ferramenta de manipulação ativa (Move/Rotate/Scale por
 /// arrasto ou modal de teclado, Extrude/Inset/Bevel paramétricos...).
 /// O Path do Slint não tem dash nativo, então o padrão nasce aqui em Rust:
-/// traços de 7px com 5px de intervalo ao longo do segmento base→mouse.
+/// pontos de 2px com 4px de intervalo ao longo do segmento base→mouse.
 /// A linha cresce/encolhe sozinha conforme o mouse se afasta/aproxima.
 fn dotted_link_commands(from: [f32; 2], to: [f32; 2]) -> String {
-    const DASH: f32 = 7.0;
-    const GAP: f32 = 5.0;
+    const DASH: f32 = 2.0;
+    const GAP: f32 = 4.0;
     let dx = to[0] - from[0];
     let dy = to[1] - from[1];
     let length = dx.hypot(dy);
@@ -4898,7 +5219,7 @@ fn compute_asset_overlay(
     /// Teto de segmentos por frame: malhas grandes não podem gerar uma string
     /// gigante a cada sync de propriedades.
     const MAX_SEGMENTS: usize = 4_000;
-    /// Meia-aresta do marcador de vértice, em px lógicos.
+    /// Raio de pontos de face no overlay de fallback.
     const MARKER: f32 = 3.5;
 
     if width <= 1.0 || height <= 1.0 {
@@ -4939,6 +5260,20 @@ fn compute_asset_overlay(
             "M {:.2} {:.2} L {:.2} {:.2} ",
             a[0], a[1], b[0], b[1]
         ));
+    };
+    let push_disc = |commands: &mut String, center: [f32; 2], radius: f32| {
+        use std::fmt::Write as _;
+        for step in 0..12 {
+            let angle = step as f32 * std::f32::consts::TAU / 12.0;
+            let action = if step == 0 { 'M' } else { 'L' };
+            let _ = write!(
+                commands,
+                "{action} {:.2} {:.2} ",
+                center[0] + radius * angle.cos(),
+                center[1] + radius * angle.sin()
+            );
+        }
+        commands.push_str("Z ");
     };
 
     let domain = state.selection_domain();
@@ -4989,7 +5324,7 @@ fn compute_asset_overlay(
             if backend_draws_guides {
                 return SelectionOverlayModel::default();
             }
-            for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
+            for (index, vertex) in mesh.verts.iter().enumerate() {
                 if segments >= MAX_SEGMENTS {
                     truncated = true;
                     break;
@@ -4997,18 +5332,21 @@ fn compute_asset_overlay(
                 let Some(sp) = project(vertex.vec()) else {
                     continue;
                 };
-                let target = &mut unselected_points;
-                target.push_str(&format!(
-                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
-                    sp[0],
-                    sp[1] - MARKER,
-                    sp[0] + MARKER,
-                    sp[1],
-                    sp[0],
-                    sp[1] + MARKER,
-                    sp[0] - MARKER,
-                    sp[1],
-                ));
+                let hovered =
+                    state.session.tools.hover == petunia_core::HoverTarget::Vertex(index as u32);
+                let radius = if hovered {
+                    (state.ui.selection_thickness * 2.5).min(7.0)
+                } else if vertex.selected {
+                    (state.ui.selection_thickness * 2.0).min(6.0)
+                } else {
+                    (state.ui.selection_thickness * 1.25).min(5.0)
+                };
+                let target = if hovered || vertex.selected {
+                    &mut points
+                } else {
+                    &mut unselected_points
+                };
+                push_disc(target, sp, radius);
                 segments += 1;
             }
         }
@@ -5068,17 +5406,7 @@ fn compute_asset_overlay(
                 } else {
                     &mut unselected_points
                 };
-                target.push_str(&format!(
-                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
-                    sp[0],
-                    sp[1] - MARKER,
-                    sp[0] + MARKER,
-                    sp[1],
-                    sp[0],
-                    sp[1] + MARKER,
-                    sp[0] - MARKER,
-                    sp[1],
-                ));
+                push_disc(target, sp, MARKER);
                 segments += 1;
             }
         }
@@ -5167,7 +5495,15 @@ pub fn run() -> Result<(), slint::PlatformError> {
 
     println!("Petunia3D - Slint production frontend");
     let window = PetuniaSlintShell::new()?;
-    let state = AppState::default();
+    let mut state = AppState::default();
+    let preferences = petunia_config::UserPreferences::load();
+    state.ui.invert_vertical_drag = preferences.invert_vertical_drag;
+    state.ui.selection_rgb = if selection_color_has_contrast(preferences.selection_rgb) {
+        preferences.selection_rgb
+    } else {
+        petunia_config::UserPreferences::default().selection_rgb
+    };
+    state.ui.selection_thickness = preferences.selection_thickness.clamp(1.0, 6.0);
 
     let mut viewport: Box<dyn PetuniaViewport> = if let Some((_, _, device, queue)) = gpu_context {
         println!("Viewport backend: shared WGPU fast path");
@@ -5190,6 +5526,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
         show_wireframe_overlay: state.session.show_wireframe_overlay,
         selection_domain: state.selection_domain(),
         xray_opacity: state.session.xray_opacity,
+        selection_rgb: state.ui.selection_rgb,
+        selection_thickness: state.ui.selection_thickness,
         show_grid: state.session.show_grid,
         hover: state.session.tools.hover,
     };
@@ -5414,7 +5752,10 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_transform_instant_active(vm.transform_instant_active);
     window.set_gizmo_hover_axis(vm.gizmo_hover_axis);
     window.set_gizmo_active_axis(vm.gizmo_active_axis);
+    window.set_gizmo_constraint_axis_a(vm.gizmo_constraint_axes[0]);
+    window.set_gizmo_constraint_axis_b(vm.gizmo_constraint_axes[1]);
     window.set_operation_preview_commands(vm.operation_preview_commands.as_str().into());
+    window.set_drag_link_commands(vm.drag_link_commands.as_str().into());
     window.set_operation_hud_active(vm.operation_hud_active);
     window.set_operation_hud_title(vm.operation_hud_title.as_str().into());
     window.set_operation_hud_subject(vm.operation_hud_subject.as_str().into());
@@ -5456,22 +5797,30 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_uv_stats(vm.uv_stats.as_str().into());
     window.set_current_theme(vm.current_theme.as_str().into());
 
-    let scene_items: Vec<SceneItem> = vm
-        .scene_items
-        .iter()
-        .map(|item| SceneItem {
-            id: item.id.as_str().into(),
-            name: item.name.as_str().into(),
-            visible: item.visible,
-            locked: item.locked,
-            selected: item.selected,
-            active: item.active,
-            verts: item.verts as i32,
-            tris: item.tris as i32,
-        })
-        .collect();
+    let to_scene_item = |item: &SceneItemModel| SceneItem {
+        id: item.id.as_str().into(),
+        name: item.name.as_str().into(),
+        visible: item.visible,
+        locked: item.locked,
+        selected: item.selected,
+        active: item.active,
+        verts: item.verts as i32,
+        tris: item.tris as i32,
+    };
+    let scene_items: Vec<SceneItem> = vm.scene_items.iter().map(to_scene_item).collect();
     let model = std::rc::Rc::new(slint::VecModel::from(scene_items));
     window.set_scene_items(model.into());
+    let parts_items: Vec<SceneItem> = vm.parts_items.iter().map(to_scene_item).collect();
+    window.set_parts_items(std::rc::Rc::new(slint::VecModel::from(parts_items)).into());
+    window.set_parts_query(vm.parts_query.as_str().into());
+    window.set_parts_selected_only(vm.parts_selected_only);
+    window.set_parts_sort_by_name(vm.parts_sort_by_name);
+    window.set_parts_row_height(vm.parts_row_height);
+    let asset_items: Vec<SceneItem> = vm.asset_items.iter().map(to_scene_item).collect();
+    window.set_asset_items(std::rc::Rc::new(slint::VecModel::from(asset_items)).into());
+    window.set_asset_query(vm.asset_query.as_str().into());
+    window.set_asset_sort_by_name(vm.asset_sort_by_name);
+    window.set_asset_thumbnail_size(vm.asset_thumbnail_size);
 
     sync_overlay_models(window, &vm.selection_overlay, &vm.gizmo);
     window.set_add_menu_open(vm.add_menu_open);
@@ -5516,6 +5865,30 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_label_albedo_base_color(vm.label_albedo_base_color.as_str().into());
     window.set_label_theme(vm.label_theme.as_str().into());
     window.set_label_place_in_scene(vm.label_place_in_scene.as_str().into());
+    window.set_label_vertical_tool_drag(vm.label_vertical_tool_drag.as_str().into());
+    window.set_label_invert_vertical_drag(vm.label_invert_vertical_drag.as_str().into());
+    window.set_label_search_assets(vm.label_search_assets.as_str().into());
+    window.set_label_search_parts(vm.label_search_parts.as_str().into());
+    window.set_label_selected_parts_only(vm.label_selected_parts_only.as_str().into());
+    window.set_label_sort_parts(vm.label_sort_parts.as_str().into());
+    window.set_label_parts_row_size(vm.label_parts_row_size.as_str().into());
+    window.set_label_sort_assets(vm.label_sort_assets.as_str().into());
+    window.set_label_thumbnail_size(vm.label_thumbnail_size.as_str().into());
+    window.set_label_selection_color(vm.label_selection_color.as_str().into());
+    window.set_label_highlight_thickness(vm.label_highlight_thickness.as_str().into());
+    window.set_label_view_wireframe(vm.label_view_wireframe.as_str().into());
+    window.set_label_view_solid(vm.label_view_solid.as_str().into());
+    window.set_label_view_material(vm.label_view_material.as_str().into());
+    window.set_label_view_lit(vm.label_view_lit.as_str().into());
+    window.set_label_more_model_tools(vm.label_more_model_tools.as_str().into());
+    window.set_label_xray_opacity(vm.label_xray_opacity.as_str().into());
+    window.set_selection_color(slint::Color::from_rgb_u8(
+        vm.selection_rgb[0],
+        vm.selection_rgb[1],
+        vm.selection_rgb[2],
+    ));
+    window.set_selection_color_hex(vm.selection_color_hex.as_str().into());
+    window.set_selection_thickness(vm.selection_thickness);
     window.set_recovery_open(vm.recovery_open);
     window.set_recovery_title(vm.recovery_title.as_str().into());
     window.set_recovery_body(vm.recovery_body.as_str().into());
@@ -5586,6 +5959,8 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_loop_cut_slide(vm.loop_cut_slide);
     window.set_loop_cut_cuts(vm.loop_cut_cuts);
     window.set_tool_activation(vm.tool_activation.as_str().into());
+    window.set_keyboard_tool_modal_active(vm.keyboard_tool_modal_active);
+    window.set_invert_vertical_drag(vm.invert_vertical_drag);
     window.set_tool_modal_active(vm.tool_modal_active);
     window.set_tool_modal_title(vm.tool_modal_title.as_str().into());
     window.set_tool_modal_label(vm.tool_modal_label.as_str().into());
@@ -5595,6 +5970,39 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_tool_modal_max(vm.tool_modal_max);
 
     theme::apply_theme(window, &vm.current_theme);
+}
+
+fn persist_user_preferences<V: PetuniaViewport>(bridge: &mut SlintUiBridge<V>) {
+    let preferences = petunia_config::UserPreferences {
+        invert_vertical_drag: bridge.state.ui.invert_vertical_drag,
+        selection_rgb: bridge.state.ui.selection_rgb,
+        selection_thickness: bridge.state.ui.selection_thickness,
+    };
+    if let Err(error) = preferences.save() {
+        let message = bridge
+            .state
+            .t_id(petunia_config::text_id::UI_PREFERENCES_SAVE_FAILED);
+        bridge.state.set_status(format!("{message}: {error}"));
+    }
+}
+
+/// Mantém o destaque configurável legível sobre o canvas escuro oficial.
+fn selection_color_has_contrast(rgb: [u8; 3]) -> bool {
+    let luminance = |channels: [u8; 3]| {
+        let linear = channels.map(|channel| {
+            let value = channel as f32 / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        });
+        linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+    };
+    let backdrop = luminance([16, 17, 20]);
+    let foreground = luminance(rgb);
+    // WCAG 3:1 para indicadores não textuais.
+    (foreground + 0.05) / (backdrop + 0.05) >= 3.0
 }
 
 fn connect_callbacks<V: PetuniaViewport + 'static>(
@@ -6244,11 +6652,12 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
 
     let tool_hover_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_tool_modal_hovered(move |delta| {
+    window.on_tool_modal_hovered(move |delta, x, y| {
         if let Ok(mut bridge) = tool_hover_bridge.lock()
             && bridge.is_instant_tool_mode()
             && bridge.tool_modal.is_some()
         {
+            bridge.pointer_position = [x, y];
             bridge.scrub_tool_modal(delta, false);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
@@ -6273,10 +6682,137 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let vertical_drag_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_invert_vertical_drag_set(move |invert| {
+        if let Ok(mut bridge) = vertical_drag_bridge.lock() {
+            if bridge.set_invert_vertical_drag(invert) {
+                persist_user_preferences(&mut bridge);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let selection_color_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_selection_color_set(move |hex| {
+        if let Ok(mut bridge) = selection_color_bridge.lock() {
+            if bridge.set_selection_color_hex(hex.as_str()) {
+                persist_user_preferences(&mut bridge);
+            }
+            let vm = bridge.view_model();
+            let frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let selection_thickness_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_selection_thickness_set(move |thickness| {
+        if let Ok(mut bridge) = selection_thickness_bridge.lock() {
+            if bridge.set_selection_thickness(thickness) {
+                persist_user_preferences(&mut bridge);
+            }
+            let vm = bridge.view_model();
+            let frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let parts_query_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_parts_query_changed(move |query| {
+        if let Ok(mut bridge) = parts_query_bridge.lock() {
+            bridge.set_parts_query(query.as_str());
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let parts_filter_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_parts_selected_only_changed(move |enabled| {
+        if let Ok(mut bridge) = parts_filter_bridge.lock() {
+            bridge.set_parts_selected_only(enabled);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let parts_sort_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_parts_sort_changed(move |enabled| {
+        if let Ok(mut bridge) = parts_sort_bridge.lock() {
+            bridge.set_parts_sort_by_name(enabled);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let parts_size_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_parts_row_height_changed(move |height| {
+        if let Ok(mut bridge) = parts_size_bridge.lock() {
+            bridge.set_parts_row_height(height);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let asset_query_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_asset_query_changed(move |query| {
+        if let Ok(mut bridge) = asset_query_bridge.lock() {
+            bridge.set_asset_query(query.as_str());
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let asset_sort_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_asset_sort_changed(move |sort_by_name| {
+        if let Ok(mut bridge) = asset_sort_bridge.lock() {
+            bridge.set_asset_sort_by_name(sort_by_name);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let asset_size_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_asset_thumbnail_size_changed(move |size| {
+        if let Ok(mut bridge) = asset_size_bridge.lock() {
+            bridge.set_asset_thumbnail_size(size);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
     let tool_scrub_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_tool_modal_scrubbed(move |delta, fine| {
+    window.on_tool_modal_scrubbed(move |delta, fine, x, y| {
         if let Ok(mut bridge) = tool_scrub_bridge.lock() {
+            bridge.pointer_position = [x, y];
             bridge.scrub_tool_modal(delta, fine);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
@@ -6635,6 +7171,24 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_shading_mode_set(move |id| {
         if let Ok(mut bridge) = shading_bridge.lock() {
             bridge.set_shading_mode(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let xray_toggle_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_xray_requested(move || {
+        if let Ok(mut bridge) = xray_toggle_bridge.lock() {
+            if let Err(error) = bridge.execute_core_command("view.toggle_xray") {
+                bridge.state.set_status(error.to_string());
+            }
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -7959,6 +8513,67 @@ mod tests {
     }
 
     #[test]
+    fn asset_drawer_search_sort_and_zoom_do_not_mutate_the_document() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        bridge.state.mark_document_clean();
+        let total = bridge.view_model().scene_items.len();
+        assert!(total >= 2);
+        assert!(bridge.set_asset_query("sphere"));
+        let filtered = bridge.view_model();
+        assert_eq!(filtered.asset_items.len(), 1);
+        assert!(
+            filtered.asset_items[0]
+                .name
+                .to_lowercase()
+                .contains("sphere")
+        );
+        assert_eq!(filtered.scene_items.len(), total);
+        assert!(bridge.set_asset_sort_by_name(true));
+        assert!(bridge.set_asset_thumbnail_size(120.0));
+        assert_eq!(bridge.view_model().asset_thumbnail_size, 120.0);
+        assert!(!bridge.state.is_document_dirty());
+        assert!(!bridge.set_asset_thumbnail_size(f32::NAN));
+    }
+
+    #[test]
+    fn parts_drawer_filters_sorts_and_scales_rows_without_mutation() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+        bridge.state.mark_document_clean();
+        assert_eq!(bridge.view_model().parts_items.len(), 2);
+
+        assert!(bridge.set_parts_query("cube"));
+        assert_eq!(bridge.view_model().parts_items.len(), 1);
+        assert!(
+            bridge.view_model().parts_items[0]
+                .name
+                .to_lowercase()
+                .contains("cube")
+        );
+        assert!(bridge.set_parts_query(""));
+        assert!(bridge.set_parts_selected_only(true));
+        assert_eq!(bridge.view_model().parts_items.len(), 1);
+        assert!(bridge.set_parts_selected_only(false));
+        assert!(bridge.set_parts_sort_by_name(true));
+        let names: Vec<_> = bridge
+            .view_model()
+            .parts_items
+            .iter()
+            .map(|item| item.name.clone())
+            .collect();
+        assert!(
+            names
+                .windows(2)
+                .all(|pair| pair[0].to_lowercase() <= pair[1].to_lowercase())
+        );
+        assert!(bridge.set_parts_row_height(40.0));
+        assert_eq!(bridge.view_model().parts_row_height, 40.0);
+        assert!(!bridge.set_parts_row_height(f32::NAN));
+        assert!(!bridge.state.is_document_dirty());
+    }
+
+    #[test]
     fn modal_identity_preserves_lifo_when_multiple_modals_are_open() {
         let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
         bridge.apply(UiIntent::OpenCommandSearch);
@@ -8017,6 +8632,78 @@ mod tests {
                 .all(|(restored, before)| restored.pos == before.pos)
         );
         assert!(bridge.drag.is_none());
+    }
+
+    #[test]
+    fn shortcut_transform_accepts_drag_in_the_same_mouse_gesture() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.pointer_position = [400.0, 300.0];
+        let before = bridge.state.project.active_mesh().unwrap().verts.clone();
+
+        assert!(bridge.route_shortcut("G", false, false, false));
+        assert!(bridge.view_model().transform_instant_active);
+        // O TouchArea entrega estes updates com LMB pressionado, antes do
+        // release que confirma; não existe segundo pointer-down.
+        assert!(bridge.update_viewport_transform_modified(430.0, 300.0, false, false));
+        assert!(bridge.update_viewport_transform_modified(470.0, 300.0, false, false));
+        assert!(bridge.end_viewport_transform());
+        assert!(!bridge.view_model().transform_instant_active);
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert!(
+            bridge
+                .state
+                .project
+                .active_mesh()
+                .unwrap()
+                .verts
+                .iter()
+                .zip(&before)
+                .any(|(after, before)| after.pos != before.pos)
+        );
+    }
+
+    #[test]
+    fn vertical_drag_preference_reverses_transform_without_dirtying_the_document() {
+        let mut regular = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let mut inverted = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        regular.resize_viewport(800, 600);
+        inverted.resize_viewport(800, 600);
+        let origin =
+            glam::Vec3::from_array(regular.state.project.active_mesh().unwrap().verts[0].pos);
+
+        assert!(inverted.set_invert_vertical_drag(true));
+        assert!(inverted.view_model().invert_vertical_drag);
+        assert!(!inverted.state.is_document_dirty());
+        assert!(regular.begin_viewport_transform(TransformKind::Position, 400.0, 300.0));
+        assert!(inverted.begin_viewport_transform(TransformKind::Position, 400.0, 300.0));
+        assert!(regular.update_viewport_transform(400.0, 350.0));
+        assert!(inverted.update_viewport_transform(400.0, 350.0));
+
+        let normal_delta =
+            glam::Vec3::from_array(regular.state.project.active_mesh().unwrap().verts[0].pos)
+                - origin;
+        let inverted_delta =
+            glam::Vec3::from_array(inverted.state.project.active_mesh().unwrap().verts[0].pos)
+                - origin;
+        assert!(normal_delta.length() > 1.0e-4);
+        assert!((normal_delta + inverted_delta).length() < 1.0e-4);
+    }
+
+    #[test]
+    fn selection_appearance_preferences_validate_without_document_mutation() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.mark_document_clean();
+        assert!(bridge.set_selection_color_hex("#20B4F0"));
+        assert_eq!(bridge.view_model().selection_rgb, [32, 180, 240]);
+        assert_eq!(bridge.view_model().selection_color_hex, "#20B4F0");
+        assert!(!bridge.set_selection_color_hex("#xyz"));
+        assert!(!bridge.set_selection_color_hex("#000000"));
+        assert_eq!(bridge.view_model().selection_rgb, [32, 180, 240]);
+        assert!(bridge.set_selection_thickness(4.5));
+        assert_eq!(bridge.view_model().selection_thickness, 4.5);
+        assert!(!bridge.set_selection_thickness(f32::NAN));
+        assert!(!bridge.state.is_document_dirty());
     }
 
     #[test]
@@ -8121,7 +8808,7 @@ mod tests {
     }
 
     #[test]
-    fn the_view_tripod_marks_all_three_axes_in_the_corner() {
+    fn the_view_tripod_marks_all_three_axes_at_top_right() {
         let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
         assert!(!bridge.view_model().gizmo.view_x_commands.is_empty());
 
@@ -8152,8 +8839,8 @@ mod tests {
         // O tripé existe mesmo sem ferramenta de transformação: ele mostra a
         // câmera, não a ferramenta.
         assert!(!gizmo.visible);
-        assert!((gizmo.view_origin_x - 54.0).abs() < 1.0);
-        assert!((gizmo.view_origin_y - (768.0 - 54.0)).abs() < 1.0);
+        assert!((gizmo.view_origin_x - (1024.0 - 54.0)).abs() < 1.0);
+        assert!((gizmo.view_origin_y - 108.0).abs() < 1.0);
     }
 
     #[test]
@@ -9995,12 +10682,12 @@ mod tests {
         bridge.state.sync_selection();
         let overlay = bridge.view_model().selection_overlay;
         assert!(overlay.visible && overlay.accent);
-        assert!(overlay.point_commands.is_empty());
+        assert_eq!(overlay.point_commands.matches('M').count(), 1);
         assert!(overlay.outline_commands.is_empty());
         assert_eq!(
             overlay.unselected_point_commands.matches('M').count(),
             7,
-            "o vértice selecionado sai do overlay 2D e vai para o renderer"
+            "o vértice selecionado sai dos alvos neutros e recebe cor forte"
         );
 
         // Edge: uma linha por aresta selecionada.
@@ -10118,13 +10805,13 @@ mod tests {
 
     #[test]
     fn dotted_link_grows_with_pointer_distance() {
-        // Traço de 7px + intervalo de 5px: 100px rendem 9 segmentos.
+        // Ponto de 2px + intervalo de 4px: 100px rendem 17 segmentos.
         let short = dotted_link_commands([0.0, 0.0], [20.0, 0.0]);
         let long = dotted_link_commands([0.0, 0.0], [100.0, 0.0]);
         let short_count = short.matches('M').count();
         let long_count = long.matches('M').count();
-        assert_eq!(short_count, 2, "20px rendem 2 traços, veio {short_count}");
-        assert_eq!(long_count, 9, "100px rendem 9 traços, veio {long_count}");
+        assert_eq!(short_count, 4, "20px rendem 4 pontos, veio {short_count}");
+        assert_eq!(long_count, 17, "100px rendem 17 pontos, veio {long_count}");
         assert!(long_count > short_count);
     }
 
@@ -10145,6 +10832,8 @@ mod tests {
             !link.is_empty(),
             "arrasto ativo precisa do cordão pivô→mouse"
         );
+        bridge.pointer_position = pointer;
+        assert_eq!(bridge.view_model().drag_link_commands, link);
         // ...e some ao confirmar a operação.
         assert!(bridge.end_viewport_transform());
         let link_active = bridge.drag.is_some()
@@ -10152,6 +10841,7 @@ mod tests {
             || bridge.state.session.tools.modal.is_some();
         assert!(!link_active);
         assert!(compute_drag_link(&bridge.state, 1024.0, 768.0, pointer, link_active).is_empty());
+        assert!(bridge.view_model().drag_link_commands.is_empty());
     }
 
     #[test]
@@ -10283,6 +10973,7 @@ mod tests {
                 .map(|m| m.constraint),
             Some(petunia_core::ModalConstraint::Axis(0))
         );
+        assert_eq!(bridge.view_model().gizmo_constraint_axes, [0, -1]);
         assert!(
             bridge
                 .view_model()
@@ -10292,6 +10983,7 @@ mod tests {
             "eixo travado aparece no HUD"
         );
         assert!(bridge.route_shortcut("X", false, false, false));
+        assert_eq!(bridge.view_model().gizmo_constraint_axes, [-1, -1]);
         assert_eq!(
             bridge
                 .state
@@ -10302,7 +10994,7 @@ mod tests {
                 .map(|m| m.constraint),
             Some(petunia_core::ModalConstraint::Free)
         );
-        // Shift+Y trava o plano YZ.
+        // Shift+Y exclui Y e trava o plano XZ.
         assert!(bridge.route_shortcut("Y", false, true, false));
         assert_eq!(
             bridge
@@ -10314,6 +11006,7 @@ mod tests {
                 .map(|m| m.constraint),
             Some(petunia_core::ModalConstraint::Plane(1))
         );
+        assert_eq!(bridge.view_model().gizmo_constraint_axes, [2, 0]);
         // Entrada numérica acumula, mostra Input no HUD e aceita Backspace.
         assert!(bridge.route_shortcut("2", false, false, false));
         assert!(bridge.route_shortcut(".", false, false, false));
@@ -10363,7 +11056,7 @@ mod tests {
         bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
         bridge.state.sync_selection();
         let overlay = bridge.view_model().selection_overlay;
-        assert!(overlay.point_commands.is_empty());
+        assert_eq!(overlay.point_commands.matches('M').count(), 1);
         assert_eq!(
             overlay.unselected_point_commands.matches('M').count(),
             7,
@@ -10437,6 +11130,26 @@ mod tests {
         // continua aberta até o arrasto ou o Apply.
         bridge.select_viewport(0.5, 0.5, false);
         assert!(bridge.tool_modal.is_some());
+    }
+
+    #[test]
+    fn extrude_shortcut_uses_instant_pointer_even_with_drag_preference() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().tool_activation, "drag");
+
+        assert!(bridge.route_shortcut("E", false, false, false));
+        assert!(bridge.keyboard_tool_modal_active);
+        assert!(bridge.view_model().keyboard_tool_modal_active);
+        assert!(bridge.scrub_tool_modal(-32.0, false));
+        assert!(bridge.tool_modal_value > 0.0);
+        bridge.select_viewport(0.5, 0.5, false);
+        assert!(bridge.tool_modal.is_none());
+        assert!(!bridge.keyboard_tool_modal_active);
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
     }
 
     #[test]
@@ -10541,6 +11254,22 @@ mod tests {
         assert!(!bridge.set_xray_opacity(f32::NAN));
         assert!((bridge.view_model().xray_opacity - 0.1).abs() < 1.0e-6);
         assert!(!bridge.set_xray_opacity(0.1), "sem mudança real");
+    }
+
+    #[test]
+    fn xray_command_toggles_the_viewport_state_without_changing_selection() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.sync_selection();
+        let selection_before = bridge.state.session.selection.clone();
+        assert!(!bridge.view_model().show_xray);
+        bridge.execute_core_command("view.toggle_xray").unwrap();
+        assert!(bridge.view_model().show_xray);
+        bridge.execute_core_command("view.toggle_xray").unwrap();
+        assert!(!bridge.view_model().show_xray);
+        assert_eq!(
+            bridge.state.session.selection.assets,
+            selection_before.assets
+        );
     }
 
     #[test]

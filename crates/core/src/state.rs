@@ -932,6 +932,11 @@ pub struct UiState {
     pub active_icon_pack_id: String,
     pub active_keymap_id: String,
     pub asset_thumbnail_size: f32,
+    /// Preferência de entrada: inverte o arrasto vertical das ferramentas,
+    /// sem alterar a navegação da câmera nem os dados do documento.
+    pub invert_vertical_drag: bool,
+    pub selection_rgb: [u8; 3],
+    pub selection_thickness: f32,
     pub inspector_detached: bool,
     /// Fração da altura do dock direito ocupada pelo Outliner (Wave 2).
     /// Persistente na sessão; ajustada pelo divisor arrastável (0.25..=0.75).
@@ -1012,6 +1017,9 @@ impl UiState {
             active_icon_pack_id: "petunia".to_string(),
             active_keymap_id: "petunia-default".to_string(),
             asset_thumbnail_size: 64.0,
+            invert_vertical_drag: false,
+            selection_rgb: [233, 106, 0],
+            selection_thickness: 2.0,
             inspector_detached: false,
             right_dock_split: 0.42,
             outliner_collapsed: false,
