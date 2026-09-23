@@ -261,6 +261,9 @@ pub mod text_id {
     pub const PAINT_FILL_SELECTED_FACES: TextId = TextId::new("paint.fill_selected_faces");
     pub const PAINT_FILL_UV_ISLAND: TextId = TextId::new("paint.fill_uv_island");
     pub const PAINT_FILL_OBJECT: TextId = TextId::new("paint.fill_object");
+    pub const PAINT_BRUSH: TextId = TextId::new("paint.brush");
+    pub const PAINT_CANVAS: TextId = TextId::new("paint.canvas");
+    pub const PAINT_PREPARE_SURFACE: TextId = TextId::new("paint.prepare_surface");
     pub const PAINT_VIEW_MODE: TextId = TextId::new("paint.view_mode");
     pub const PAINT_VIEW_3D: TextId = TextId::new("paint.view_3d");
     pub const PAINT_VIEW_2D: TextId = TextId::new("paint.view_2d");
@@ -466,6 +469,9 @@ pub mod text_id {
         PAINT_FILL_SELECTED_FACES,
         PAINT_FILL_UV_ISLAND,
         PAINT_FILL_OBJECT,
+        PAINT_BRUSH,
+        PAINT_CANVAS,
+        PAINT_PREPARE_SURFACE,
         PAINT_VIEW_MODE,
         PAINT_VIEW_3D,
         PAINT_VIEW_2D,

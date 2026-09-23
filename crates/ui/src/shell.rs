@@ -889,6 +889,7 @@ mod tests {
     #[test]
     fn paint_context_renders_brush_controls_instead_of_model_properties() {
         let ctx = Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let mut state = state();
         state.switch_workspace(petunia_core::Workspace::Paint);
         let tools = ToolRegistry::new();

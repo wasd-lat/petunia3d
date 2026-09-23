@@ -624,13 +624,75 @@ pub fn draw_paint_panel(
 /// O shell aplica rolagem ao Context do PAINT; deixar esta composição sem uma
 /// segunda rolagem mantém todos os controles numa única região navegável.
 pub fn draw_brush_contents(ui: &mut Ui, state: &mut AppState) {
-    draw_brush_block(ui, state);
+    inspector_section(
+        ui,
+        state,
+        "paint.inspector.brush",
+        text_id::PAINT_BRUSH,
+        true,
+        draw_brush_block,
+    );
     ui.separator();
-    draw_color_block(ui, state);
+    inspector_section(
+        ui,
+        state,
+        "paint.inspector.color",
+        text_id::PAINT_COLOR,
+        true,
+        draw_color_block,
+    );
     ui.separator();
-    draw_canvas_block(ui, state);
+    inspector_section(
+        ui,
+        state,
+        "paint.inspector.texture",
+        text_id::PAINT_CANVAS,
+        false,
+        draw_canvas_block,
+    );
     ui.separator();
-    draw_surface_block(ui, state);
+    inspector_section(
+        ui,
+        state,
+        "paint.inspector.projection",
+        text_id::PAINT_PREPARE_SURFACE,
+        false,
+        draw_surface_block,
+    );
+}
+
+/// Seção recolhível do Inspector de pintura. IDs semânticos preservam o estado
+/// entre frames; o componente Petunia controla cabeçalho, foco e animação.
+fn inspector_section(
+    ui: &mut Ui,
+    state: &mut AppState,
+    id: &'static str,
+    title: TextId,
+    default_open: bool,
+    draw_contents: impl FnOnce(&mut Ui, &mut AppState),
+) {
+    let section_id = Id::new(id);
+    let open_id = section_id.with("open");
+    let mut open = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(open_id))
+        .unwrap_or(default_open);
+    let tip = state.t(if open { "ui.collapse" } else { "ui.expand" });
+    ui.horizontal(|ui| {
+        if widgets::chevron_toggle(ui, &tip, open).clicked() {
+            open = !open;
+            ui.ctx().data_mut(|data| data.insert_temp(open_id, open));
+        }
+        ui.label(
+            RichText::new(state.t_id(title))
+                .size(12.0)
+                .strong()
+                .color(tokens::TEXT_PRIMARY),
+        );
+    });
+    PetuniaMotion::section(ui, section_id.with("body"), open, |ui| {
+        draw_contents(ui, state);
+    });
 }
 
 /// Bloco de cor: **cor atual**, **paleta do projeto** e ações.
@@ -1670,6 +1732,68 @@ fn apply_layer_actions(state: &mut AppState, actions: Vec<LayerAction>) {
 mod tests {
     use super::*;
     use petunia_project::Canvas;
+
+    fn shape_contains_text(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(shape) => shape.galley.text() == text,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| shape_contains_text(shape, text)),
+            _ => false,
+        }
+    }
+
+    fn output_contains_text(output: &egui::FullOutput, text: &str) -> bool {
+        output
+            .shapes
+            .iter()
+            .any(|shape| shape_contains_text(&shape.shape, text))
+    }
+
+    #[test]
+    fn paint_inspector_opens_brush_and_color_and_collapses_secondary_sections() {
+        let context = egui::Context::default();
+        context.all_styles_mut(|style| style.animation_time = 0.0);
+        let mut state = AppState::new("en");
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            draw_brush_contents(ui, &mut state);
+        });
+        output.textures_delta.clear();
+
+        for id in [
+            text_id::PAINT_BRUSH,
+            text_id::PAINT_COLOR,
+            text_id::PAINT_CANVAS,
+            text_id::PAINT_PREPARE_SURFACE,
+        ] {
+            assert!(output_contains_text(&output, &state.t_id(id)));
+        }
+        assert!(output_contains_text(&output, &state.t("paint.size")));
+        assert!(output_contains_text(
+            &output,
+            &state.t("paint.color_current")
+        ));
+        assert!(
+            !output_contains_text(&output, &state.t("paint.channel")),
+            "texture controls are closed by default"
+        );
+        assert!(
+            !output_contains_text(&output, &state.t("paint.prepare_surface_hint")),
+            "projection controls are closed by default"
+        );
+
+        context.data_mut(|data| {
+            data.insert_temp(Id::new("paint.inspector.texture").with("open"), true);
+            data.insert_temp(Id::new("paint.inspector.projection").with("open"), true);
+        });
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            draw_brush_contents(ui, &mut state);
+        });
+        output.textures_delta.clear();
+        assert!(output_contains_text(&output, &state.t("paint.channel")));
+        assert!(output_contains_text(
+            &output,
+            &state.t("paint.prepare_surface_hint")
+        ));
+    }
 
     #[test]
     fn fill_scope_selector_covers_all_five_domain_scopes() {
