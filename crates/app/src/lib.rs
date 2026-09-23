@@ -894,6 +894,7 @@ impl winit::raw_window_handle::HasDisplayHandle for SafeDisplayTarget {
 struct WgpuApp {
     core: Core,
     gfx: Option<WgpuGfx>,
+    pending_texture_delta: egui::TexturesDelta,
     fps_acc: f32,
     fps_n: u32,
 }
@@ -903,6 +904,7 @@ impl WgpuApp {
         Self {
             core: Core::new(),
             gfx: None,
+            pending_texture_delta: egui::TexturesDelta::default(),
             fps_acc: 0.0,
             fps_n: 0,
         }
@@ -1007,7 +1009,7 @@ impl WgpuApp {
 
         let raw_input = gfx.egui_state.take_egui_input(&gfx.window);
         let mut quit = false;
-        let full_output = gfx.egui_ctx.run_ui(raw_input, |ui| {
+        let mut full_output = gfx.egui_ctx.run_ui(raw_input, |ui| {
             let mut act = petunia_ui::UiAction::none();
             petunia_ui::draw(
                 ui,
@@ -1034,6 +1036,10 @@ impl WgpuApp {
             }
             quit = act.quit;
         });
+        // Keep texture changes until a frame can be submitted. A failed/lost
+        // surface must not drop an unapplied `TexturesDelta`.
+        self.pending_texture_delta
+            .append(std::mem::take(&mut full_output.textures_delta));
         gfx.egui_state
             .handle_platform_output(&gfx.window, full_output.platform_output.clone());
         self.core.dispatch_events();
@@ -1160,7 +1166,7 @@ impl WgpuApp {
             }
         }
 
-        for (id, deltas) in &full_output.textures_delta.set {
+        for (id, deltas) in &self.pending_texture_delta.set {
             for delta in deltas {
                 gfx.egui_renderer
                     .update_texture(&gfx.device, &gfx.queue, *id, delta);
@@ -1193,13 +1199,14 @@ impl WgpuApp {
             gfx.egui_renderer
                 .render(&mut pass.forget_lifetime(), &paint_jobs, &screen_desc);
         }
-        for id in &full_output.textures_delta.free {
+        for id in &self.pending_texture_delta.free {
             gfx.egui_renderer.free_texture(id);
         }
 
         gfx.queue
             .submit(user_cmds.into_iter().chain([encoder.finish()]));
         gfx.queue.present(frame);
+        self.pending_texture_delta.clear();
 
         self.update_stats(t0);
         if quit {
@@ -1312,6 +1319,14 @@ async fn pick_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Que
                     format!("wgpu device creation failed with downlevel limits: {error}")
                 })
         }
+    }
+}
+
+impl Drop for WgpuApp {
+    fn drop(&mut self) {
+        // Pending texture commands can be discarded only when the app itself
+        // is shutting down and no later frame can consume them.
+        self.pending_texture_delta.clear();
     }
 }
 
