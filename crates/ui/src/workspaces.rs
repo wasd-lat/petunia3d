@@ -9,9 +9,8 @@
 //! ## Centro e dock por workspace
 //!
 //! O perfil não descreve apenas a paleta esquerda: ele diz **o que cada seção do
-//! dock mostra** e **se o centro é a tela 2D**. É esse campo que permite o
-//! workspace PAINT ser um ambiente de pintura (tela no centro, ferramentas na
-//! esquerda, camadas e pincel no dock) sem criar um segundo shell: o
+//! dock mostra** e **se o workspace oferece editor 2D**. O modo de visualização
+//! escolhido pelo usuário define se a tela usa 3D, 2D ou split: o
 //! `adapters::tile_layout` continua dono da geometria, e o desenho de cada seção
 //! é escolhido aqui.
 
@@ -47,7 +46,7 @@ pub enum DockSectionKind {
 pub enum CenterKind {
     /// Viewport 3D único em toda a área central.
     Viewport3D,
-    /// Tela 2D protagonista com a viewport 3D em aba alternativa (PAINT).
+    /// O workspace oferece editor 2D de textura como modo opcional (PAINT).
     Canvas2D,
 }
 
@@ -81,8 +80,8 @@ pub struct WorkspaceLayoutProfile {
 }
 
 impl WorkspaceLayoutProfile {
-    /// O centro deste workspace é a tela 2D (com a 3D em aba alternativa)?
-    pub fn paints_on_canvas(&self) -> bool {
+    /// Este workspace oferece a superfície de textura 2D?
+    pub fn supports_canvas_2d(&self) -> bool {
         self.center == CenterKind::Canvas2D
     }
 }
@@ -174,13 +173,13 @@ mod tests {
     #[test]
     fn legacy_uv_uses_the_normal_viewport() {
         assert_eq!(profile_for(Workspace::Uv).center, CenterKind::Viewport3D);
-        assert!(!profile_for(Workspace::Uv).paints_on_canvas());
+        assert!(!profile_for(Workspace::Uv).supports_canvas_2d());
     }
 
     #[test]
     fn paint_is_the_canvas_workspace() {
         let paint = profile_for(Workspace::Paint);
-        assert!(paint.paints_on_canvas(), "a tela 2D divide o centro");
+        assert!(paint.supports_canvas_2d(), "PAINT oferece editor 2D");
         assert_eq!(paint.dock_top, DockSectionKind::Layers);
         assert_eq!(
             paint.dock_bottom,
@@ -195,7 +194,7 @@ mod tests {
         let model = profile_for(Workspace::Model);
         assert_eq!(model.dock_top, DockSectionKind::Scene);
         assert_eq!(model.dock_bottom, DockSectionKind::Properties);
-        assert!(!model.paints_on_canvas());
+        assert!(!model.supports_canvas_2d());
     }
 
     #[cfg(feature = "animation-workspace")]

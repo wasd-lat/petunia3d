@@ -509,7 +509,7 @@ pub(crate) fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
 // aqui: ele é o paine `PetuniaPane::PaintCanvas` do `adapters::tile_layout`
 // (§31), que é dono da divisória, dos mínimos das duas superfícies e da largura
 // persistida. O produto só declara o perfil do workspace
-// (`workspaces::profile_for(..).paints_on_canvas()`) e desenha cada paine.
+// (`workspaces::profile_for(..).supports_canvas_2d()`) e desenha cada paine.
 
 /// Centro UV legado mantido apenas para compatibilidade de código antigo; não é
 /// alcançável pela UI V1.

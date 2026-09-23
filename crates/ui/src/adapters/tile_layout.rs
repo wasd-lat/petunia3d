@@ -70,7 +70,7 @@ pub enum PetuniaPane {
     /// Tela 2D de pintura, ao lado da viewport no centro (workspace PAINT).
     ///
     /// É um paine de primeira classe, não um `Panel::right` do produto: a
-    /// divisória, os mínimos das duas superfícies e a largura persistida saem
+    /// divisória, os mínimos das superfícies no modo Split e a largura persistida saem
     /// daqui, junto com o resto do macro-layout (§31).
     PaintCanvas,
     /// Cabeçalho do dock de contexto (lado + orientação).
@@ -299,7 +299,7 @@ impl PetuniaShellLayout {
             .clamp(MIN_RIGHT_WIDTH, MAX_RIGHT_WIDTH)
             .max(dock_floor);
         out.right_width = out.right_width.clamp(dock_floor, dock_ceiling);
-        // Centro com duas superfícies: o piso do centro cresce com a tela 2D —
+        // Centro em Split: o piso cresce com a tela 2D —
         // viewport-first também aqui — e a largura da tela é presa à faixa dos
         // tokens antes de qualquer conta, para o produto nunca validar o valor.
         let center_floor = if out.canvas_enabled {
@@ -322,7 +322,7 @@ impl PetuniaShellLayout {
             out.left_width -= shrink;
         }
         if out.canvas_enabled {
-            // Sobrou menos que o mínimo das duas superfícies: a tela cede até o
+            // Sobrou menos que o mínimo das superfícies: a tela cede até o
             // próprio piso em vez de comer a viewport.
             let center_room =
                 (available_w - out.left_width - out.right_width - spacing::TIGHT).max(0.0);
@@ -356,7 +356,7 @@ impl PetuniaShellLayout {
         (left, center, right)
     }
 
-    /// Larguras das duas superfícies do centro: `(viewport, tela 2D)`.
+    /// Larguras do centro: `(viewport, tela 2D)` no modo Split.
     ///
     /// A tela 2D recebe a largura desejada presa entre o próprio mínimo e o que
     /// sobra depois de a viewport ficar com [`MIN_VIEWPORT_WIDTH`]; com a tela
@@ -545,7 +545,7 @@ impl PetuniaLayoutAdapter {
     /// ├── horizontal
     /// │   ├── Tools
     /// │   ├── Viewport
-    /// │   │   └── horizontal     (só com `canvas_enabled`, workspace PAINT)
+    /// │   │   └── horizontal     (só com `canvas_enabled`, modo Split de PAINT)
     /// │   │       └── PaintCanvas
     /// │   └── vertical            (coluna do dock)
     /// │       ├── DockHeader
@@ -556,8 +556,8 @@ impl PetuniaLayoutAdapter {
     /// ```
     ///
     /// O dock pode nascer à esquerda (`dock_side`): a ordem dentro do container
-    /// horizontal muda, a topologia não. A tela 2D vive **dentro** do centro (à
-    /// direita da viewport), então ela nunca atravessa a coluna do dock.
+    /// horizontal muda, a topologia não. Em Split, a tela 2D vive **dentro** do
+    /// centro (à direita da viewport), sem atravessar a coluna do dock.
     pub fn tree(&self, layout: &PetuniaShellLayout, available: Vec2) -> Tree<PetuniaPane> {
         let layout = layout.clamped(available);
         let (left_w, center_w, right_w) = layout.horizontal_widths(available.x);
@@ -595,8 +595,8 @@ impl PetuniaLayoutAdapter {
         set_share(&mut dock.shares, inner, second.max(0.0));
         let dock = tree.tiles.insert_container(dock);
 
-        // Centro: viewport + tela 2D lado a lado quando o perfil do workspace
-        // pinta no canvas (a tela fica **à direita** da viewport). O container
+        // Centro: viewport + tela 2D lado a lado quando o modo Split está ativo
+        // (a tela fica **à direita** da viewport). O container
         // existe sempre — com a tela desabilitada ela fica invisível e com share
         // zero, em vez de sair da árvore: um paine que entra e sai do layout é um
         // paine que perde o próprio controle de reabrir.

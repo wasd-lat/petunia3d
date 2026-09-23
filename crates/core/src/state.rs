@@ -912,6 +912,18 @@ pub enum AssetRenameError {
     NameTooLong,
 }
 
+/// Composição da região central do workspace PAINT.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PaintViewMode {
+    /// Mantém a viewport 3D como única superfície central (baseline inicial).
+    #[default]
+    Viewport3D,
+    /// Usa a região central inteira como editor de textura 2D.
+    Texture2D,
+    /// Exibe a viewport 3D e o editor de textura lado a lado.
+    Split,
+}
+
 /// 4. ESTADO DE APRESENTAÇÃO E WIDGETS UI: campos visuais, abas, pesquisas e preferências.
 pub struct UiState {
     pub viewport_rect: Option<crate::viewport::LogicalRect>,
@@ -947,6 +959,8 @@ pub struct UiState {
     pub workspace_memory: [WorkspaceUiMemory; Workspace::COUNT],
     /// No workspace UV estreito, alterna entre editor UV e prévia 3D (Wave 3).
     pub uv_show_preview: bool,
+    /// Modo de visualização central do workspace Paint. O editor 2D é opt-in.
+    pub paint_view_mode: PaintViewMode,
     /// Exibe a shelf contextual sobre a viewport (Wave 5: preferência real).
     pub show_shelf: bool,
     /// Densidade global da UI (linhas, espaçamentos, hitboxes).
@@ -1021,6 +1035,7 @@ impl UiState {
             inspector_collapsed: false,
             workspace_memory: Default::default(),
             uv_show_preview: true,
+            paint_view_mode: PaintViewMode::Viewport3D,
             show_shelf: true,
             density: UiDensity::Comfortable,
             scene_split_auto: true,

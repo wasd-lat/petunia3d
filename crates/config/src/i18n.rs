@@ -261,6 +261,10 @@ pub mod text_id {
     pub const PAINT_FILL_SELECTED_FACES: TextId = TextId::new("paint.fill_selected_faces");
     pub const PAINT_FILL_UV_ISLAND: TextId = TextId::new("paint.fill_uv_island");
     pub const PAINT_FILL_OBJECT: TextId = TextId::new("paint.fill_object");
+    pub const PAINT_VIEW_MODE: TextId = TextId::new("paint.view_mode");
+    pub const PAINT_VIEW_3D: TextId = TextId::new("paint.view_3d");
+    pub const PAINT_VIEW_2D: TextId = TextId::new("paint.view_2d");
+    pub const PAINT_VIEW_SPLIT: TextId = TextId::new("paint.view_split");
 
     pub const ANIMATE_HUMANOID: TextId = TextId::new("animate.humanoid");
     pub const ANIMATE_AUTO_RIG: TextId = TextId::new("animate.auto_rig");
@@ -462,6 +466,10 @@ pub mod text_id {
         PAINT_FILL_SELECTED_FACES,
         PAINT_FILL_UV_ISLAND,
         PAINT_FILL_OBJECT,
+        PAINT_VIEW_MODE,
+        PAINT_VIEW_3D,
+        PAINT_VIEW_2D,
+        PAINT_VIEW_SPLIT,
         SETTINGS_INTERFACE,
         SETTINGS_IMPORT_EXPORT,
         SETTINGS_SHOW_SHELF,

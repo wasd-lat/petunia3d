@@ -2,6 +2,7 @@
 //! Menus do sistema (File, Edit, Render, Window, Help) e abas de Workspaces em pílulas arredondadas.
 
 use egui::{Color32, Ui};
+use petunia_config::text_id;
 use petunia_core::{AppState, DocsTopic, Workspace};
 
 use crate::UiAction;
@@ -453,11 +454,58 @@ fn draw_workspace_pills(ui: &mut Ui, state: &mut AppState) {
             state.switch_workspace(ws);
         }
     }
+
+    if state.workspace == Workspace::Paint {
+        ui.separator();
+        ui.label(
+            egui::RichText::new(state.t_id(text_id::PAINT_VIEW_MODE))
+                .size(TextRole::Caption.size())
+                .color(tokens::TEXT_MUTED),
+        );
+        for (mode, label_id) in [
+            (
+                petunia_core::PaintViewMode::Viewport3D,
+                text_id::PAINT_VIEW_3D,
+            ),
+            (
+                petunia_core::PaintViewMode::Texture2D,
+                text_id::PAINT_VIEW_2D,
+            ),
+            (
+                petunia_core::PaintViewMode::Split,
+                text_id::PAINT_VIEW_SPLIT,
+            ),
+        ] {
+            let label = state.t_id(label_id);
+            if widgets::PetuniaWorkspacePill::new(&label, state.ui.paint_view_mode == mode)
+                .show(ui)
+                .clicked()
+            {
+                state.ui.paint_view_mode = mode;
+                state.render.canvas_dirty = true;
+                state.mark_dirty();
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn contains_text(shapes: &[egui::epaint::ClippedShape], text: &str) -> bool {
+        fn shape_contains(shape: &egui::Shape, text: &str) -> bool {
+            match shape {
+                egui::Shape::Text(shape) => shape.galley.text() == text,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| shape_contains(shape, text)),
+                _ => false,
+            }
+        }
+
+        shapes
+            .iter()
+            .any(|shape| shape_contains(&shape.shape, text))
+    }
 
     #[test]
     fn test_main_header_renders_without_panic() {
@@ -493,6 +541,31 @@ mod tests {
             })
             .textures_delta
             .clear();
+        }
+    }
+
+    #[test]
+    fn paint_header_offers_three_center_compositions() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::new("en");
+        state.switch_workspace(Workspace::Paint);
+        let mut action = UiAction::none();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1_400.0, 72.0));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| draw(ui, &mut state, &mut action),
+        );
+        output.textures_delta.clear();
+
+        for id in [
+            text_id::PAINT_VIEW_3D,
+            text_id::PAINT_VIEW_2D,
+            text_id::PAINT_VIEW_SPLIT,
+        ] {
+            assert!(contains_text(&output.shapes, &state.t_id(id)));
         }
     }
 }

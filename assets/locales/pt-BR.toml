@@ -443,6 +443,10 @@ tip_caps = "Fecha topo e base com tampas planas."
 tip_body_length = "Comprimento do corpo reto entre as calotas."
 
 [paint]
+view_mode = "Visualização"
+view_3d = "3D"
+view_2d = "2D"
+view_split = "Dividir"
 vertex = "Pintura no modelo"
 prepare_surface = "Preparar superfície"
 surface_planar = "Planar"

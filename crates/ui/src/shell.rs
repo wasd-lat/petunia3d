@@ -13,7 +13,7 @@
 //!     └── árvore do macro-layout
 //!         ├── Tools      (esquerda)
 //!         ├── Viewport   (centro: barra de contexto + viewport 3D)
-//!         ├── PaintCanvas (centro, à direita da viewport: só no PAINT)
+//!         ├── PaintCanvas (centro, à direita da viewport: PAINT em Split)
 //!         ├── DockHeader ┐
 //!         ├── Parts      │ coluna do dock de contexto
 //!         ├── Context    ┘
@@ -35,7 +35,7 @@
 
 use egui::{Context, Ui};
 use petunia_config::text_id;
-use petunia_core::{AppState, DockOrientation, DockSide, ModuleRegistry};
+use petunia_core::{AppState, DockOrientation, DockSide, ModuleRegistry, PaintViewMode, Workspace};
 use petunia_module_model::ToolRegistry;
 
 use crate::adapters::tile_layout::{
@@ -64,9 +64,9 @@ pub fn layout_for(state: &AppState) -> PetuniaShellLayout {
         right_dock_orientation: state.ui.dock_orientation,
         dock_auto: state.ui.scene_split_auto,
         parts_content_height: dock_top_content_height(state),
-        // O perfil do workspace decide se o centro tem duas superfícies; a largura
-        // arrastada pelo usuário entra depois, em [`draw`] (memória do adapter).
-        canvas_enabled: profile.paints_on_canvas(),
+        // O editor 2D é opcional e fechado por padrão; só divide o centro em Split.
+        canvas_enabled: profile.supports_canvas_2d()
+            && state.ui.paint_view_mode == PaintViewMode::Split,
         canvas_width: tokens::PAINT_CANVAS_DEFAULT_WIDTH,
         bottom_enabled: profile.bottom != workspaces::BottomPaneKind::None,
         parts_collapsed: state.ui.outliner_collapsed,
@@ -145,7 +145,7 @@ pub fn draw(
         },
     );
 
-    record_regions(ui.ctx(), &response);
+    record_regions(ui.ctx(), &response, state);
     paint_dock_edge(ui, state, &response);
     persist(ui.ctx(), &adapter, state, &layout, &response);
     draw_detached_inspector(ui.ctx(), state, tools, registry);
@@ -174,7 +174,7 @@ fn paint_dock_edge(ui: &Ui, state: &AppState, response: &PetuniaLayoutResponse) 
 ///
 /// O adapter é dono da geometria; o shell é dono do registro. `RightDock` é a
 /// união do cabeçalho com as seções visíveis — nenhuma conta de pixel aqui.
-fn record_regions(ctx: &Context, response: &PetuniaLayoutResponse) {
+fn record_regions(ctx: &Context, response: &PetuniaLayoutResponse, state: &AppState) {
     let record = |pane: PetuniaPane, slot: RegionSlot| {
         if let Some(rect) = response.rect(pane) {
             regions::record(ctx, slot, rect);
@@ -182,6 +182,12 @@ fn record_regions(ctx: &Context, response: &PetuniaLayoutResponse) {
     };
     record(PetuniaPane::Tools, RegionSlot::LeftTools);
     record(PetuniaPane::PaintCanvas, RegionSlot::PaintCanvas);
+    if state.workspace == Workspace::Paint
+        && state.ui.paint_view_mode == PaintViewMode::Texture2D
+        && let Some(rect) = response.rect(PetuniaPane::Viewport)
+    {
+        regions::record(ctx, RegionSlot::PaintCanvas, rect);
+    }
     record(PetuniaPane::Parts, RegionSlot::RightOutliner);
     record(PetuniaPane::Context, RegionSlot::RightInspector);
     record(PetuniaPane::Bottom, RegionSlot::BottomDock);
@@ -266,14 +272,16 @@ fn draw_pane(
 ) {
     match pane {
         PetuniaPane::Tools => toolbar::draw_contents(ui, state, tools),
-        PetuniaPane::Viewport => viewport_region(ui, state),
-        PetuniaPane::PaintCanvas => {
-            egui::Frame::new()
-                .fill(tokens::bg_canvas(state))
-                .show(ui, |ui| {
-                    crate::modules_ui::paint_ui::draw_canvas_surface(ui, state)
-                });
+        PetuniaPane::Viewport => {
+            if state.workspace == Workspace::Paint
+                && state.ui.paint_view_mode == PaintViewMode::Texture2D
+            {
+                paint_canvas_region(ui, state);
+            } else {
+                viewport_region(ui, state);
+            }
         }
+        PetuniaPane::PaintCanvas => paint_canvas_region(ui, state),
         PetuniaPane::DockHeader => pane_surface(ui, tokens::bg_panel(state), 4.0, |ui| {
             dock_header(ui, state)
         }),
@@ -346,6 +354,15 @@ fn pane_surface<R>(
 fn viewport_region(ui: &mut Ui, state: &mut AppState) {
     crate::viewport_bar_panel(ui, state);
     crate::viewport(ui, state);
+}
+
+/// Tela 2D de textura, exibida sozinha ou ao lado da viewport conforme o modo.
+fn paint_canvas_region(ui: &mut Ui, state: &mut AppState) {
+    egui::Frame::new()
+        .fill(tokens::bg_canvas(state))
+        .show(ui, |ui| {
+            crate::modules_ui::paint_ui::draw_canvas_surface(ui, state)
+        });
 }
 
 /// Faixa inferior (Timeline). Só existe quando o workspace a habilita.
@@ -468,6 +485,12 @@ fn pane_label(state: &AppState, pane: PetuniaPane) -> String {
     let profile = workspaces::profile_for(state.workspace);
     match pane {
         PetuniaPane::Tools => state.t("ui.tools"),
+        PetuniaPane::Viewport
+            if state.workspace == Workspace::Paint
+                && state.ui.paint_view_mode == PaintViewMode::Texture2D =>
+        {
+            state.t("paint.canvas")
+        }
         PetuniaPane::Viewport => state.t("ui.viewport"),
         PetuniaPane::PaintCanvas => state.t("paint.canvas"),
         PetuniaPane::DockHeader => state.t("dock.orientation"),
@@ -735,7 +758,13 @@ mod tests {
     fn dragging_the_center_divider_remembers_the_canvas_width() {
         let (ctx, adapter) = persist_env();
         let mut state = state();
-        state.switch_workspace(petunia_core::Workspace::Paint);
+        state.switch_workspace(Workspace::Paint);
+        assert_eq!(state.ui.paint_view_mode, PaintViewMode::Viewport3D);
+        assert!(
+            !layout_for(&state).canvas_enabled,
+            "o editor 2D começa fechado"
+        );
+        state.ui.paint_view_mode = PaintViewMode::Split;
         let layout = layout_for(&state);
         assert!(
             layout.canvas_enabled,
@@ -776,7 +805,14 @@ mod tests {
         assert!(!model.canvas_enabled, "MODEL não divide o centro");
         assert!(!model.is_visible(PetuniaPane::PaintCanvas));
         let mut painting = state();
-        painting.switch_workspace(petunia_core::Workspace::Paint);
+        painting.switch_workspace(Workspace::Paint);
+        let paint = layout_for(&painting);
+        assert!(
+            !paint.canvas_enabled,
+            "Texture Editor fica fechado inicialmente"
+        );
+        assert!(!paint.is_visible(PetuniaPane::PaintCanvas));
+        painting.ui.paint_view_mode = PaintViewMode::Split;
         let paint = layout_for(&painting);
         assert!(paint.is_visible(PetuniaPane::PaintCanvas));
         assert_eq!(paint.canvas_width, tokens::PAINT_CANVAS_DEFAULT_WIDTH);
@@ -807,7 +843,8 @@ mod tests {
     #[test]
     fn paint_workspace_splits_the_center_between_3d_and_canvas() {
         let mut state = state();
-        state.switch_workspace(petunia_core::Workspace::Paint);
+        state.switch_workspace(Workspace::Paint);
+        state.ui.paint_view_mode = PaintViewMode::Split;
         let regions = run_shell(&mut state, egui::vec2(1_280.0, 800.0), 3);
         let viewport = regions.viewport.expect("a viewport 3D divide o centro");
         let canvas = regions.paint_canvas.expect("a tela 2D divide o centro");
@@ -824,6 +861,29 @@ mod tests {
         assert!(regions.status_overlaps().is_empty());
         assert!(regions.dock_sections_disjoint());
         assert!(regions.viewport_overlays_within_viewport());
+    }
+
+    #[test]
+    fn paint_2d_mode_uses_the_center_without_a_split_or_3d_toolbar() {
+        let mut state = state();
+        state.switch_workspace(Workspace::Paint);
+        state.ui.paint_view_mode = PaintViewMode::Texture2D;
+        assert!(!layout_for(&state).canvas_enabled);
+        let regions = run_shell(&mut state, egui::vec2(1_280.0, 800.0), 3);
+        assert_eq!(state.ui.paint_view_mode, PaintViewMode::Texture2D);
+
+        assert!(
+            regions.paint_canvas.is_some(),
+            "a tela 2D ocupa e registra o centro"
+        );
+        assert!(
+            regions.viewport.is_none(),
+            "modo 2D não registra uma viewport 3D"
+        );
+        assert!(
+            regions.viewport_toolbar.is_none(),
+            "a tela 2D não exibe controles de câmera 3D"
+        );
     }
 
     #[test]

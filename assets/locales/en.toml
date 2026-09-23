@@ -441,6 +441,10 @@ tip_caps = "Close the top and bottom with flat caps."
 tip_body_length = "Length of the straight body between the rounded caps."
 
 [paint]
+view_mode = "View"
+view_3d = "3D"
+view_2d = "2D"
+view_split = "Split"
 vertex = "Paint on model"
 prepare_surface = "Prepare surface"
 surface_planar = "Planar"
