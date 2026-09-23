@@ -197,7 +197,11 @@ pub(crate) fn viewport_bar_panel(ui: &mut egui::Ui, state: &mut AppState) {
         )
         .show(ui, |ui| {
             ui.add_enabled_ui(!state.is_interacting(), |ui| {
-                viewport_bar::draw(ui, state);
+                if state.workspace == Workspace::Paint {
+                    viewport_bar::draw_paint(ui, state);
+                } else {
+                    viewport_bar::draw(ui, state);
+                }
             });
         });
     regions::record(

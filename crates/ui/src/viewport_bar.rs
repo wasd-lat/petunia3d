@@ -99,9 +99,22 @@ fn draw_slot(ui: &mut Ui, state: &mut AppState, slot: PetuniaToolbarSlot<'_>) {
 /// Faixa de visualização: alternâncias de cena (Overlays, X-Ray) e as esferas
 /// de sombreamento como **uma** unidade de barra.
 fn draw_display_cluster(ui: &mut Ui, state: &mut AppState) {
-    draw_display_toggles_cluster(ui, state);
+    draw_display_toggles_cluster(ui, state, true);
     spacing::hspace(ui, spacing::RELATED);
     draw_shading_spheres_cluster(ui, state);
+}
+
+/// Barra enxuta de visualização do workspace PAINT.
+///
+/// Mantém controles de viewport que também fazem sentido durante a pintura e
+/// omite seleção de malha, transformação e diagnósticos de triangulação.
+pub fn draw_paint(ui: &mut Ui, state: &mut AppState) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = spacing::RELATED;
+        draw_display_toggles_cluster(ui, state, false);
+        spacing::hspace(ui, spacing::RELATED);
+        draw_shading_spheres_cluster(ui, state);
+    });
 }
 
 /// Seta de overflow: faixas ocultas por falta de largura, sempre operáveis.
@@ -1180,7 +1193,7 @@ fn draw_snap_and_prop_cluster(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Cluster 6: Alternâncias de visualização de cena (Overlays e X-Ray com ícones vetoriais).
-fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
+fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState, show_triangulation: bool) {
     // Overlays (Segmented Toggle + Popover Dropdown, P3D-010)
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
@@ -1372,9 +1385,10 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
             {
                 dirty = true;
             }
-            if ui
-                .checkbox(&mut state.show_triangulation, "Triangulação (Diagonais)")
-                .changed()
+            if show_triangulation
+                && ui
+                    .checkbox(&mut state.show_triangulation, "Triangulação (Diagonais)")
+                    .changed()
             {
                 dirty = true;
             }
@@ -1441,55 +1455,57 @@ fn draw_display_toggles_cluster(ui: &mut Ui, state: &mut AppState) {
         state.mark_dirty();
     }
 
-    // Triangulação
-    let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), egui::Sense::click());
-    let tri_tip = state.t("viewport.tri_tip");
-    resp.widget_info(|| {
-        WidgetInfo::selected(
-            WidgetType::Button,
-            true,
-            state.show_triangulation,
-            tri_tip.clone(),
-        )
-    });
-    if ui.is_rect_visible(rect) {
-        let is_active = state.show_triangulation;
-        let bg = if is_active {
-            tokens::bg_surface_active_for(ui.ctx())
-        } else if resp.hovered() {
-            tokens::BG_SURFACE_HOVER
-        } else {
-            tokens::BG_SURFACE
-        };
-        let fg = if is_active {
-            tokens::TEXT_ACTIVE
-        } else {
-            tokens::TEXT_SECONDARY
-        };
-        ui.painter().rect_filled(rect, tokens::RADIUS_CONTROL, bg);
-        let r = rect.shrink(5.0);
-        ui.painter().line_segment(
-            [pos2(r.left(), r.bottom()), pos2(r.right(), r.top())],
-            egui::Stroke::new(1.5_f32, fg),
-        );
-        ui.painter().rect_stroke(
-            r,
-            1.0,
-            egui::Stroke::new(1.0_f32, fg.gamma_multiply(0.5)),
-            egui::StrokeKind::Inside,
-        );
-        if resp.has_focus() {
-            ui.painter().rect_stroke(
-                rect,
-                tokens::RADIUS_CONTROL,
-                tokens::stroke_focus(ui.ctx()),
-                StrokeKind::Inside,
+    if show_triangulation {
+        // Triangulação (diagnóstico específico de modelagem).
+        let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), egui::Sense::click());
+        let tri_tip = state.t("viewport.tri_tip");
+        resp.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::Button,
+                true,
+                state.show_triangulation,
+                tri_tip.clone(),
+            )
+        });
+        if ui.is_rect_visible(rect) {
+            let is_active = state.show_triangulation;
+            let bg = if is_active {
+                tokens::bg_surface_active_for(ui.ctx())
+            } else if resp.hovered() {
+                tokens::BG_SURFACE_HOVER
+            } else {
+                tokens::BG_SURFACE
+            };
+            let fg = if is_active {
+                tokens::TEXT_ACTIVE
+            } else {
+                tokens::TEXT_SECONDARY
+            };
+            ui.painter().rect_filled(rect, tokens::RADIUS_CONTROL, bg);
+            let r = rect.shrink(5.0);
+            ui.painter().line_segment(
+                [pos2(r.left(), r.bottom()), pos2(r.right(), r.top())],
+                egui::Stroke::new(1.5_f32, fg),
             );
+            ui.painter().rect_stroke(
+                r,
+                1.0,
+                egui::Stroke::new(1.0_f32, fg.gamma_multiply(0.5)),
+                egui::StrokeKind::Inside,
+            );
+            if resp.has_focus() {
+                ui.painter().rect_stroke(
+                    rect,
+                    tokens::RADIUS_CONTROL,
+                    tokens::stroke_focus(ui.ctx()),
+                    StrokeKind::Inside,
+                );
+            }
         }
-    }
-    if resp.on_hover_text(tri_tip).clicked() {
-        state.show_triangulation = !state.show_triangulation;
-        state.mark_dirty();
+        if resp.on_hover_text(tri_tip).clicked() {
+            state.show_triangulation = !state.show_triangulation;
+            state.mark_dirty();
+        }
     }
 }
 
