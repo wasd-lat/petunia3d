@@ -42,10 +42,9 @@ pub const MIN_LEFT_WIDTH: f32 = tokens::TOOLBAR_MIN_WIDTH;
 /// Maior largura da coluna de ferramentas (política herdada do `Panel::left`).
 pub const MAX_LEFT_WIDTH: f32 = tokens::TOOLBAR_MAX_WIDTH;
 /// Menor largura do dock de contexto (mesmo piso do documento de workspace).
-pub const MIN_RIGHT_WIDTH: f32 = 220.0;
-/// Maior largura do dock de contexto (política herdada do painel: 45% da
-/// janela, presa nesta faixa).
-pub const MAX_RIGHT_WIDTH: f32 = 420.0;
+pub const MIN_RIGHT_WIDTH: f32 = tokens::PROPERTIES_MIN_WIDTH;
+/// Maior largura do dock de contexto (45% da janela, dentro da faixa do cap. 36).
+pub const MAX_RIGHT_WIDTH: f32 = tokens::PROPERTIES_MAX_WIDTH;
 /// Faixa de tolerância do duplo-clique na divisória do dock, em pixels.
 const SPLIT_BAND: f32 = 6.0;
 /// Menor altura do dock inferior.
@@ -1020,6 +1019,17 @@ mod tests {
             left + center + right <= 700.0 + 0.01,
             "layout estourou a largura: {left} + {center} + {right}"
         );
+    }
+
+    #[test]
+    fn context_dock_width_matches_the_frozen_shell_baseline() {
+        let layout = PetuniaShellLayout::default();
+        assert_eq!(layout.right_width, 288.0);
+        assert_eq!(MIN_RIGHT_WIDTH, 240.0);
+        assert_eq!(MAX_RIGHT_WIDTH, 440.0);
+        assert_eq!(petunia_core::PROPERTIES_DEFAULT_WIDTH, layout.right_width);
+        assert_eq!(petunia_core::PROPERTIES_MIN_WIDTH, MIN_RIGHT_WIDTH);
+        assert_eq!(petunia_core::PROPERTIES_MAX_WIDTH, MAX_RIGHT_WIDTH);
     }
 
     #[test]

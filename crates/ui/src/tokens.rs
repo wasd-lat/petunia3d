@@ -89,7 +89,9 @@ pub const TOOLBAR_PANEL_MARGIN: f32 = 4.0;
 pub const TOOLBAR_MAX_WIDTH: f32 = 240.0;
 pub const STATUS_BAR_HEIGHT: f32 = 24.0;
 pub const TIMELINE_HEIGHT: f32 = 56.0;
-pub const PROPERTIES_DEFAULT_WIDTH: f32 = 290.0;
+pub const PROPERTIES_DEFAULT_WIDTH: f32 = 288.0;
+pub const PROPERTIES_MIN_WIDTH: f32 = 240.0;
+pub const PROPERTIES_MAX_WIDTH: f32 = 440.0;
 pub const OUTLINER_DEFAULT_HEIGHT: f32 = 230.0;
 /// Lado de um botão de cor da paleta (alvo de clique visível a 1x).
 pub const SWATCH_SIZE: f32 = 18.0;
