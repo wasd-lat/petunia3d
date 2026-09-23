@@ -319,6 +319,8 @@ pub struct ShellViewModel {
     pub context_menu_x: f32,
     pub context_menu_y: f32,
     pub context_menu_title: String,
+    /// "outliner" (padrão, verbetes do asset) ou "viewport" (só seleção).
+    pub context_menu_mode: String,
     pub context_menu_visible: bool,
     pub context_menu_locked: bool,
     pub boolean_operand_name: String,
@@ -510,6 +512,7 @@ impl ShellViewModel {
             context_menu_x: 0.0,
             context_menu_y: 0.0,
             context_menu_title: String::new(),
+            context_menu_mode: String::new(),
             context_menu_visible: true,
             context_menu_locked: false,
             boolean_operand_name: String::new(),
@@ -712,12 +715,17 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub pending_recovery: Option<petunia_core::RecoveryInfo>,
 }
 
-/// Menu de contexto do Outliner aberto sobre uma linha do painel Parts.
+/// Menu de contexto do Outliner aberto sobre uma linha do painel Parts,
+/// ou menu da viewport (verbetes de seleção) aberto com o botão direito
+/// sobre o espaço 3D.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContextMenuState {
     pub x: f32,
     pub y: f32,
     pub asset: uuid::Uuid,
+    /// Verdadeiro no modo viewport (sem alvo de asset): só verbetes de
+    /// seleção, nunca rename/visibility/lock.
+    pub viewport: bool,
 }
 
 /// Menus da barra superior do shell.
@@ -3080,7 +3088,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return false;
         }
         self.select_asset_by_id(asset);
-        self.context_menu = Some(ContextMenuState { x, y, asset });
+        self.context_menu = Some(ContextMenuState { x, y, asset, viewport: false });
         self.overlays.push(OverlayEntry {
             id: OverlayId::OutlinerContextMenu,
             kind: OverlayKind::ContextMenu,
@@ -3092,8 +3100,41 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Menu da viewport (botão direito no 3D): só verbetes de seleção, sem
+    /// alvo de asset. Id de overlay próprio para o Escape LIFO fechar o menu
+    /// certo quando Outliner e viewport competem.
+    pub fn open_viewport_context_menu(&mut self, x: f32, y: f32) -> bool {
+        self.context_menu = Some(ContextMenuState {
+            x,
+            y,
+            asset: uuid::Uuid::nil(),
+            viewport: true,
+        });
+        self.overlays.push(OverlayEntry {
+            id: OverlayId::ContextMenu,
+            kind: OverlayKind::ContextMenu,
+            pinned: false,
+            dismiss_on_escape: true,
+            dismiss_on_click_away: true,
+        });
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Triagem do botão direito na viewport (Blender): com sessão ativa o
+    /// clique cancela (modal, arrasto, knife...); sem sessão abre o menu.
+    /// Retorna verdadeiro quando cancelou algo.
+    pub fn viewport_context_triage(&mut self, x: f32, y: f32) -> bool {
+        if self.cancel_rename() | self.cancel_active_operation() {
+            return true;
+        }
+        self.open_viewport_context_menu(x, y);
+        false
+    }
+
     pub fn close_context_menu(&mut self) -> bool {
         self.overlays.remove(OverlayId::OutlinerContextMenu);
+        self.overlays.remove(OverlayId::ContextMenu);
         self.context_menu.take().is_some()
     }
 
@@ -3102,6 +3143,33 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Some(menu) = self.context_menu else {
             return false;
         };
+        // Modo viewport: só verbetes de seleção, sem alvo de asset.
+        if menu.viewport {
+            self.close_context_menu();
+            return match action {
+                "select_all" => {
+                    self.apply(UiIntent::SelectAll);
+                    true
+                }
+                "clear_selection" => {
+                    self.apply(UiIntent::ClearSelection);
+                    true
+                }
+                "invert_selection" => {
+                    self.apply(UiIntent::InvertSelection);
+                    true
+                }
+                "frame" => {
+                    let _ = self.state.dispatch_command("view.frame_selection");
+                    true
+                }
+                "delete" => {
+                    self.apply(UiIntent::DeleteActiveAsset);
+                    true
+                }
+                _ => false,
+            };
+        }
         let id = menu.asset.to_string();
         self.close_context_menu();
         match action {
@@ -3919,7 +3987,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.context_menu_open = true;
             vm.context_menu_x = menu.x;
             vm.context_menu_y = menu.y;
-            if let Some(asset) = self
+            if menu.viewport {
+                vm.context_menu_mode = "viewport".to_string();
+                vm.context_menu_title = "Viewport".to_string();
+            } else if let Some(asset) = self
                 .state
                 .project
                 .assets
@@ -4168,6 +4239,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             OverlayId::SceneDrawer => self.scene_drawer_visible = false,
             OverlayId::AssetLibrary => self.asset_library_visible = false,
             OverlayId::OutlinerContextMenu => self.context_menu = None,
+            OverlayId::ContextMenu => self.context_menu = None,
             OverlayId::MenuBar => self.menu_open = None,
         }
     }
@@ -4494,7 +4566,7 @@ fn compute_asset_overlay(state: &AppState, width: f32, height: f32, backend_draw
     };
 
     let mut outline = String::new();
-    let points = String::new();
+    let mut points = String::new();
     let mut unselected_outline = String::new();
     let mut unselected_points = String::new();
     let mut segments = 0usize;
@@ -4601,7 +4673,47 @@ fn compute_asset_overlay(state: &AppState, width: f32, height: f32, backend_draw
                 }
             }
         }
-        SelectionDomain::Face => {}
+        SelectionDomain::Face => {
+            // Pontos centrais das faces (Blender: face dots no modo sólido).
+            // Nenhum backend desenha dots, então o overlay desenha sempre —
+            // sem ele a face é um alvo invisível e o clique parece aleatório.
+            for (fi, face) in mesh.faces.iter().enumerate() {
+                if face.verts.is_empty() {
+                    continue;
+                }
+                if segments >= MAX_SEGMENTS {
+                    truncated = true;
+                    break;
+                }
+                let mut center = glam::Vec3::ZERO;
+                let mut count = 0u32;
+                for &vi in &face.verts {
+                    if let Some(vertex) = mesh.verts.get(vi as usize) {
+                        center += vertex.vec();
+                        count += 1;
+                    }
+                }
+                if count == 0 {
+                    continue;
+                }
+                let Some(sp) = project(center / count as f32) else {
+                    continue;
+                };
+                let target = if face.selected { &mut points } else { &mut unselected_points };
+                target.push_str(&format!(
+                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+                    sp[0],
+                    sp[1] - MARKER,
+                    sp[0] + MARKER,
+                    sp[1],
+                    sp[0],
+                    sp[1] + MARKER,
+                    sp[0] - MARKER,
+                    sp[1],
+                ));
+                segments += 1;
+            }
+        }
     }
 
     let _ = truncated;
@@ -4997,6 +5109,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_context_menu_x(vm.context_menu_x);
     window.set_context_menu_y(vm.context_menu_y);
     window.set_context_menu_title(vm.context_menu_title.as_str().into());
+    window.set_context_menu_mode(vm.context_menu_mode.as_str().into());
     window.set_context_menu_visible(vm.context_menu_visible);
     window.set_context_menu_locked(vm.context_menu_locked);
     window.set_boolean_operand_name(vm.boolean_operand_name.as_str().into());
@@ -5890,6 +6003,22 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let viewport_context_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_viewport_context_requested(move |x, y| {
+        if let Ok(mut bridge) = viewport_context_bridge.lock() {
+            bridge.viewport_context_triage(x, y);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });
@@ -9370,7 +9499,35 @@ mod tests {
         let overlay = bridge.view_model().selection_overlay;
         assert!(
             overlay.outline_commands.is_empty(),
-            "a face selecionada é desenhada pelo renderer, não pelo overlay 2D"
+            "o preenchimento da face é do renderer; o overlay 2D só marca dots"
+        );
+        assert_eq!(
+            overlay.point_commands.matches('M').count(),
+            1,
+            "a face selecionada ganha o dot central"
+        );
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            5,
+            "as outras 5 faces seguem como alvos clicáveis"
+        );
+    }
+
+    #[test]
+    fn face_domain_shows_center_dots_for_every_face() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+        // Sem seleção: os 6 dots do cubo aparecem para o usuário ver onde
+        // pode clicar, como os face dots do Blender no modo sólido.
+        let overlay = bridge.view_model().selection_overlay;
+        assert!(overlay.visible);
+        assert!(overlay.point_commands.is_empty());
+        assert_eq!(
+            overlay.unselected_point_commands.matches('M').count(),
+            6,
+            "toda face precisa de um alvo visível"
         );
     }
 
@@ -9495,6 +9652,55 @@ mod tests {
         bridge.state.project.active_mesh_mut().unwrap().deselect_all();
         bridge.state.sync_selection();
         assert_eq!(bridge.view_model().selection_summary, "No selection");
+    }
+
+    #[test]
+    fn viewport_right_click_triage_cancels_session_first() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        // Com modal ativo o botão direito cancela em vez de abrir menu.
+        assert!(bridge.begin_viewport_transform(TransformKind::Position, 512.0, 384.0));
+        assert!(bridge.viewport_context_triage(700.0, 300.0));
+        assert!(bridge.drag.is_none());
+        assert!(!bridge.view_model().context_menu_open);
+    }
+
+    #[test]
+    fn viewport_right_click_opens_selection_menu_without_session() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        assert!(!bridge.viewport_context_triage(700.0, 300.0));
+        let vm = bridge.view_model();
+        assert!(vm.context_menu_open);
+        assert_eq!(vm.context_menu_mode, "viewport");
+        assert_eq!(vm.context_menu_title, "Viewport");
+        // Verbetes de seleção funcionam e fecham o menu.
+        assert!(bridge.context_menu_action("select_all"));
+        assert!(!bridge.view_model().context_menu_open);
+    }
+
+    #[test]
+    fn viewport_menu_select_all_clear_and_escape() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        bridge.open_viewport_context_menu(100.0, 100.0);
+        assert!(bridge.context_menu_action("select_all"));
+        assert!(
+            bridge.state.project.active_mesh().unwrap().verts.iter().all(|v| v.selected),
+            "select_all do menu seleciona tudo como o atalho A"
+        );
+        bridge.open_viewport_context_menu(100.0, 100.0);
+        assert!(bridge.context_menu_action("clear_selection"));
+        assert!(
+            bridge.state.project.active_mesh().unwrap().verts.iter().all(|v| !v.selected),
+            "clear do menu limpa como Alt+A"
+        );
+        // Escape fecha o menu da viewport pelo LIFO, como o do Outliner.
+        bridge.open_viewport_context_menu(100.0, 100.0);
+        assert!(bridge.view_model().context_menu_open);
+        assert!(bridge.handle_escape());
+        assert!(!bridge.view_model().context_menu_open);
     }
 
     #[test]

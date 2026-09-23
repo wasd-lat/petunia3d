@@ -17,6 +17,9 @@ pub enum OverlayId {
     SceneDrawer,
     AssetLibrary,
     OutlinerContextMenu,
+    /// Menu da viewport (botão direito no 3D): id próprio para o Escape
+    /// LIFO fechar o menu certo quando os dois modos competem.
+    ContextMenu,
     MenuBar,
 }
 
