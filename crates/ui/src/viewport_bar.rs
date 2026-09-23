@@ -16,9 +16,10 @@
 
 use egui::{Color32, CornerRadius, Rect, StrokeKind, Ui, WidgetInfo, WidgetType, pos2, vec2};
 use petunia_core::{
-    AppState, ClearSelectionCmd, DeleteAssetCmd, DuplicateAssetCmd, EditMode, InvertSelectionCmd,
-    MergeCenterCmd, PivotPoint, PrimitiveKind, ProportionalFalloff, SelectAllCmd, SelectionDomain,
-    SnapTarget, SubdivideSelectionCmd, TransformOrientation,
+    AppState, ClearSelectionCmd, Command, DeleteAssetCmd, DuplicateAssetCmd, EditMode,
+    InvertSelectionCmd, MergeCenterCmd, PivotPoint, PrimitiveKind, ProportionalFalloff,
+    ResetAssetOriginCmd, SelectAllCmd, SelectionDomain, SnapTarget, SubdivideSelectionCmd,
+    TransformOrientation,
 };
 use petunia_render::Shading;
 
@@ -636,6 +637,17 @@ fn draw_viewport_actions_cluster(ui: &mut Ui, state: &mut AppState) {
                 .clicked()
             {
                 let _ = state.dispatch(&DeleteAssetCmd { asset_index: None });
+                ui.close();
+            }
+            petunia_menu_separator(ui);
+            let reset_origin = ResetAssetOriginCmd { asset_index: None };
+            if PetuniaMenuItem::new(&state.t("transform.reset_origin"))
+                .icon(PetuniaIcon::Transform)
+                .enabled(reset_origin.can_execute(state).is_ok())
+                .show(ui)
+                .clicked()
+            {
+                let _ = state.dispatch(&reset_origin);
                 ui.close();
             }
             petunia_menu_separator(ui);

@@ -257,7 +257,7 @@ fn text_position(shapes: &[egui::epaint::ClippedShape], text: &str) -> Option<Po
 }
 
 #[test]
-fn sidebar_duplicate_button_is_disabled_during_modal_preview() {
+fn transform_inspector_does_not_host_object_actions() {
     let ctx = egui::Context::default();
     let mut state = state();
     state.active_tool = "transform".into();
@@ -279,30 +279,8 @@ fn sidebar_duplicate_button_is_disabled_during_modal_preview() {
     };
     panel_frame(&mut state, vec![]);
     let output = panel_frame(&mut state, vec![]);
-    let pos = text_position(&output.shapes, &state.t("actions.duplicate"))
-        .expect("duplicate button is visible");
-    state.begin_modal(ModalKind::Move).unwrap();
-    state.update_modal(glam::Vec3::X, 1.0).unwrap();
-    let assets_before = state.project.assets.len();
-    panel_frame(
-        &mut state,
-        vec![
-            Event::PointerMoved(pos),
-            button(pos, PointerButton::Primary, true),
-        ],
-    );
-    panel_frame(&mut state, vec![button(pos, PointerButton::Primary, false)]);
-    // Wave 5b: o shell inteiro está no frame (paleta · viewport · dock), então a
-    // prévia modal segue o ponteiro — comparar a malha com a de antes do clique
-    // mediria o movimento do mouse, não o botão. O que este teste prova é que o
-    // botão não age: nada foi duplicado e o comando continua pendente.
-    assert_eq!(
-        state.project.assets.len(),
-        assets_before,
-        "o botão de duplicar não pode agir durante a prévia modal"
-    );
-    assert_eq!(state.project.undo.depth(), (0, 0));
-    assert!(state.modal.is_some());
+    assert!(text_position(&output.shapes, &state.t("actions.duplicate")).is_none());
+    assert!(text_position(&output.shapes, &state.t("transform.reset_origin")).is_none());
 }
 
 #[test]

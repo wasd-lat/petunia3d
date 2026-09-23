@@ -7,9 +7,9 @@ use petunia_core::command::{
     AddPrimitiveCmd, BoxSelectCmd, ClearSelectionCmd, CommandDispatcher, CommandError,
     DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd, DuplicateSelectionCmd,
     ExtrudeIndividualCmd, FlipDiagonalCmd, FlipNormalsCmd, InvertSelectionCmd, MergeCenterCmd,
-    PrimitiveKind, RevolveCmd, SelectAllCmd, SelectLinkedCmd, SetAssetCollectionCmd,
-    SubdivideSelectionCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd,
-    ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
+    PrimitiveKind, ResetAssetOriginCmd, RevolveCmd, SelectAllCmd, SelectLinkedCmd,
+    SetAssetCollectionCmd, SubdivideSelectionCmd, ToggleCollectionLockCmd,
+    ToggleCollectionVisibilityCmd, ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
 };
 use petunia_core::state::{ASSET_NAME_MAX_LEN, AppState, AssetRenameError, EditMode};
 
@@ -99,6 +99,64 @@ fn test_duplicate_and_delete_asset_cmd() {
     };
     let err = state.dispatch(&invalid_del).unwrap_err();
     assert_eq!(err, CommandError::InvalidAssetIndex(999));
+}
+
+#[test]
+fn reset_asset_origin_is_transactional_and_undoable() {
+    let mut state = AppState::default();
+    let offset = [4.0, -2.5, 3.25];
+    for vertex in &mut state.project.assets[0].mesh.verts {
+        vertex.selected = false;
+        for (axis, delta) in offset.iter().enumerate() {
+            vertex.pos[axis] += delta;
+        }
+    }
+    let original_positions: Vec<_> = state.project.assets[0]
+        .mesh
+        .verts
+        .iter()
+        .map(|vertex| vertex.pos)
+        .collect();
+
+    state
+        .dispatch(&ResetAssetOriginCmd::default())
+        .expect("reset asset origin");
+    let center = state.project.assets[0].mesh.selection_center();
+    assert!(center.iter().all(|coordinate| coordinate.abs() < 1.0e-6));
+
+    assert!(state.undo());
+    let restored_positions: Vec<_> = state.project.assets[0]
+        .mesh
+        .verts
+        .iter()
+        .map(|vertex| vertex.pos)
+        .collect();
+    assert_eq!(restored_positions, original_positions);
+
+    assert!(state.redo());
+    let redone_center = state.project.assets[0].mesh.selection_center();
+    assert!(
+        redone_center
+            .iter()
+            .all(|coordinate| coordinate.abs() < 1.0e-6)
+    );
+}
+
+#[test]
+fn reset_asset_origin_rejects_edit_mode_and_centered_mesh_without_history() {
+    let mut state = AppState::default();
+    let command = ResetAssetOriginCmd::default();
+    assert!(state.dispatch(&command).is_err());
+    assert!(!state.project.undo.can_undo());
+
+    state.project.assets[0].locked = true;
+    state.project.assets[0].mesh.verts[0].pos[0] += 2.0;
+    assert!(state.dispatch(&command).is_err());
+    assert!(!state.project.undo.can_undo());
+
+    state.set_edit_mode(EditMode::Edit);
+    assert!(state.dispatch(&command).is_err());
+    assert!(!state.project.undo.can_undo());
 }
 
 #[test]

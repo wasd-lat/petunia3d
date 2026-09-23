@@ -5,8 +5,8 @@
 use egui::{Color32, RichText, ScrollArea, Ui, vec2};
 use petunia_config::text_id;
 use petunia_core::{
-    AppState, ClearSelectionCmd, DuplicateSelectionCmd, InvertSelectionCmd, ModuleRegistry,
-    PrimitiveKind, SelectAllCmd, SelectLinkedCmd, Workspace,
+    AppState, ClearSelectionCmd, InvertSelectionCmd, ModuleRegistry, PrimitiveKind, SelectAllCmd,
+    SelectLinkedCmd, Workspace,
 };
 use petunia_module_model::ToolRegistry;
 use petunia_project::{AlphaMode, Material, ShaderProfile};
@@ -640,40 +640,6 @@ fn draw_transform_section(ui: &mut Ui, state: &mut AppState, idx: Option<usize>,
                 state.emit_mesh_changed();
                 state.mark_dirty();
             }
-
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                if widgets::petunia_action_button(
-                    ui,
-                    Some(PetuniaIcon::Transform),
-                    &state.t("transform.reset_origin"),
-                    false,
-                )
-                .clicked()
-                {
-                    state.checkpoint("reset transform to origin");
-                    if let Some(asset) = state.project.assets.get_mut(idx) {
-                        let center = asset.mesh.selection_center();
-                        for v in &mut asset.mesh.verts {
-                            v.pos[0] -= center[0];
-                            v.pos[1] -= center[1];
-                            v.pos[2] -= center[2];
-                        }
-                    }
-                    state.emit_mesh_changed();
-                    state.mark_dirty();
-                }
-                if widgets::petunia_action_button(
-                    ui,
-                    Some(PetuniaIcon::Duplicate),
-                    &state.t("actions.duplicate"),
-                    false,
-                )
-                .clicked()
-                {
-                    let _ = state.dispatch(&DuplicateSelectionCmd);
-                }
-            });
         },
     );
 }

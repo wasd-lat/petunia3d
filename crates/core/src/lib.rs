@@ -57,12 +57,13 @@ pub use command::{
     ExtrudeSelectedCmd, FlipDiagonalCmd, FlipNormalsCmd, FrameSelectionCmd, ImportObjCmd,
     InsetFacesCmd, InstantiateAssetCmd, InvertSelectionCmd, JoinObjectsCmd, KnifeToolCmd,
     LoopCutCmd, MergeCenterCmd, NewProjectCmd, OpenProjectCmd, PrimitiveKind, PushPullToolCmd,
-    RedoCmd, ResetCameraCmd, RevolveCmd, SaveActiveAsAssetCmd, SaveProjectAsCmd, SaveProjectCmd,
-    ScaleSelectionCmd, SelectAllCmd, SelectLinkedCmd, SeparateSelectionCmd, SetAssetCollectionCmd,
-    SetSelectionDomainCmd, SubdivideSelectionCmd, SymmetrizeCmd, ToggleCollectionLockCmd,
-    ToggleCollectionVisibilityCmd, ToggleCommandPaletteCmd, ToggleHelpCmd, ToggleLockAssetCmd,
-    ToggleProjectionCmd, ToggleSettingsCmd, ToggleVisibilityAssetCmd, ToggleWireframeCmd,
-    ToggleXRayCmd, UndoCmd, UnwrapAutoCmd, UvPackIslandsCmd, UvProjectFromViewCmd, WeldCmd,
+    RedoCmd, ResetAssetOriginCmd, ResetCameraCmd, RevolveCmd, SaveActiveAsAssetCmd,
+    SaveProjectAsCmd, SaveProjectCmd, ScaleSelectionCmd, SelectAllCmd, SelectLinkedCmd,
+    SeparateSelectionCmd, SetAssetCollectionCmd, SetSelectionDomainCmd, SubdivideSelectionCmd,
+    SymmetrizeCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd, ToggleCommandPaletteCmd,
+    ToggleHelpCmd, ToggleLockAssetCmd, ToggleProjectionCmd, ToggleSettingsCmd,
+    ToggleVisibilityAssetCmd, ToggleWireframeCmd, ToggleXRayCmd, UndoCmd, UnwrapAutoCmd,
+    UvPackIslandsCmd, UvProjectFromViewCmd, WeldCmd,
 };
 pub use project_service::{ProjectService, ProjectServiceError, sanitize_filename};
 

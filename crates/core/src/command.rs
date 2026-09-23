@@ -1270,6 +1270,55 @@ impl Command for DuplicateAssetCmd {
     }
 }
 
+/// Recentra a geometria do asset ativo ou especificado na origem da malha.
+#[derive(Debug, Clone, Default)]
+pub struct ResetAssetOriginCmd {
+    pub asset_index: Option<usize>,
+}
+
+impl Command for ResetAssetOriginCmd {
+    fn label(&self) -> &'static str {
+        "reset asset origin"
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        if state.edit_mode() != EditMode::Object {
+            return Err("Resetting an asset origin is available in Object mode");
+        }
+
+        let idx = self.asset_index.unwrap_or(state.project.active);
+        let Some(asset) = state.project.assets.get(idx) else {
+            return Err("No active asset to reset");
+        };
+        if asset.locked {
+            return Err("Object is locked");
+        }
+        let center = asset.mesh.selection_center();
+        if center.iter().any(|coordinate| !coordinate.is_finite()) {
+            return Err("Asset geometry has invalid coordinates");
+        }
+        if center.iter().all(|coordinate| coordinate.abs() <= 1.0e-6) {
+            return Err("Asset origin is already centered");
+        }
+
+        Ok(())
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let idx = self.asset_index.unwrap_or(state.project.active);
+        let Some(asset) = state.project.assets.get_mut(idx) else {
+            return Err(CommandError::InvalidAssetIndex(idx));
+        };
+        let center = asset.mesh.selection_center();
+        for vertex in &mut asset.mesh.verts {
+            vertex.pos[0] -= center[0];
+            vertex.pos[1] -= center[1];
+            vertex.pos[2] -= center[2];
+        }
+        Ok(())
+    }
+}
+
 /// Comando para instanciar um asset na cena em uma posição específica ou no 3D Cursor.
 #[derive(Debug, Clone)]
 pub struct InstantiateAssetCmd {
