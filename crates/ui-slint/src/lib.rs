@@ -274,6 +274,9 @@ pub struct ShellViewModel {
     pub brush_size: f32,
     pub brush_opacity: f32,
     pub status_message: String,
+    /// Resumo persistente da seleção para a pill da viewport
+    /// ("2 objects selected", "Selected: 3 points · 1 edge", "No selection").
+    pub selection_summary: String,
     pub position: [f32; 3],
     pub rotation: [f32; 3],
     pub scale: [f32; 3],
@@ -400,11 +403,17 @@ impl ShellViewModel {
         let (active_object_title, active_object_details, active_material_name) =
             if let Some(active_asset) = state.project.active() {
                 let title = active_asset.name.clone();
-                let details = format!(
+                let mut details = format!(
                     "Vertices: {}  ·  Faces: {}",
                     active_asset.mesh.verts.len(),
                     active_asset.mesh.faces.len()
                 );
+                // Segunda linha só com seleção real: o inspector mostra o
+                // que as operações vão atingir, como o Object Info do Blender.
+                let summary = format_selection_summary(state);
+                if summary != "No selection" {
+                    details.push_str(&format!("\n{summary}"));
+                }
                 let mat = active_asset
                     .material(&state.project.project)
                     .map(|m| m.name.clone())
@@ -461,6 +470,7 @@ impl ShellViewModel {
             brush_size: state.session.tools.paint_radius,
             brush_opacity: state.session.tools.paint_strength,
             status_message,
+            selection_summary: format_selection_summary(state),
             position: [0.0, 0.0, 0.0],
             rotation: [0.0, 0.0, 0.0],
             scale: [1.0, 1.0, 1.0],
@@ -4322,6 +4332,106 @@ fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoModel {
     model
 }
 
+/// Tracejado pontilhado do "cordão" entre a base da seleção (pivô) e o
+/// mouse durante uma ferramenta de manipulação ativa (Move/Rotate/Scale por
+/// arrasto ou modal de teclado, Extrude/Inset/Bevel paramétricos...).
+/// O Path do Slint não tem dash nativo, então o padrão nasce aqui em Rust:
+/// traços de 7px com 5px de intervalo ao longo do segmento base→mouse.
+/// A linha cresce/encolhe sozinha conforme o mouse se afasta/aproxima.
+fn dotted_link_commands(from: [f32; 2], to: [f32; 2]) -> String {
+    const DASH: f32 = 7.0;
+    const GAP: f32 = 5.0;
+    let dx = to[0] - from[0];
+    let dy = to[1] - from[1];
+    let length = dx.hypot(dy);
+    if length < 0.5 {
+        return String::new();
+    }
+    let (ux, uy) = (dx / length, dy / length);
+    let mut commands = String::new();
+    let mut cursor = 0.0;
+    while cursor < length {
+        let end = (cursor + DASH).min(length);
+        commands.push_str(&format!(
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            from[0] + ux * cursor,
+            from[1] + uy * cursor,
+            from[0] + ux * end,
+            from[1] + uy * end,
+        ));
+        cursor = end + GAP;
+    }
+    commands
+}
+
+/// Cordão pivô→mouse da ferramenta ativa. Fora de sessão de manipulação
+/// retorna vazio e o Path some da tela.
+fn compute_drag_link(
+    state: &AppState,
+    width: f32,
+    height: f32,
+    pointer: [f32; 2],
+    link_active: bool,
+) -> String {
+    if !link_active || width <= 1.0 || height <= 1.0 {
+        return String::new();
+    }
+    let pivot = state.calculate_pivot(state.session.pivot_point);
+    let view_proj = state.session.camera.view_proj();
+    let clip = view_proj * pivot.extend(1.0);
+    if clip.w <= 0.05 {
+        return String::new();
+    }
+    let inv_w = 1.0 / clip.w;
+    let base = [
+        (clip.x * inv_w * 0.5 + 0.5) * width,
+        (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height,
+    ];
+    dotted_link_commands(base, pointer)
+}
+
+/// Resumo legível da seleção (Object Info do Blender): o que está
+/// selecionado e quanto. Linha única para a pill da viewport e o inspector.
+fn format_selection_summary(state: &AppState) -> String {
+    fn plural(count: usize, singular: &str, plural: &str) -> Option<String> {
+        if count == 0 {
+            None
+        } else if count == 1 {
+            Some(format!("1 {singular}"))
+        } else {
+            Some(format!("{count} {plural}"))
+        }
+    }
+    if state.selection_domain() == SelectionDomain::Object {
+        // Espelha a regra da UI: ativo conta como selecionado.
+        let active_id = state.project.active().map(|a| a.id);
+        let total = state
+            .project
+            .assets
+            .iter()
+            .filter(|a| state.session.selection.assets.contains(&a.id) || active_id == Some(a.id))
+            .count();
+        return plural(total, "object selected", "objects selected")
+            .unwrap_or_else(|| "No selection".to_string());
+    }
+    let details = state.query_selection_details();
+    let mut parts = Vec::new();
+    if let Some(text) = plural(details.selected_verts_count, "point", "points") {
+        parts.push(text);
+    }
+    if let Some(text) = plural(details.selected_edges_count, "edge", "edges") {
+        parts.push(text);
+    }
+    if let Some(text) = plural(details.selected_faces_count, "face", "faces") {
+        parts.push(text);
+    }
+    if parts.is_empty() {
+        "No selection".to_string()
+    } else {
+        format!("Selected: {}", parts.join(" · "))
+    }
+}
+
 fn compute_selection_overlay(state: &AppState, width: f32, height: f32, backend_draws_guides: bool) -> SelectionOverlayModel {
     if state.selection_domain() != SelectionDomain::Object {
         return compute_asset_overlay(state, width, height, backend_draws_guides, state.project.active);
@@ -4783,6 +4893,19 @@ fn sync_viewport_overlays<V: PetuniaViewport>(window: &PetuniaSlintShell, bridge
     let selection = compute_selection_overlay(&bridge.state, width, height, bridge.viewport.draws_component_guides());
     let gizmo = compute_gizmo(&bridge.state, width, height);
     sync_overlay_models(window, &selection, &gizmo);
+    // Cordão da ferramenta ativa: arrasto na viewport, modal de teclado
+    // (Move/Rotate/Scale/Extrude/...) ou modal paramétrico com Tool Props.
+    let link_active = bridge.drag.is_some()
+        || bridge.tool_modal.is_some()
+        || bridge.state.session.tools.modal.is_some();
+    let drag_link = compute_drag_link(
+        &bridge.state,
+        width,
+        height,
+        bridge.pointer_position,
+        link_active,
+    );
+    window.set_drag_link_commands(drag_link.as_str().into());
 }
 
 fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
@@ -4814,6 +4937,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_operation_hud_hint(vm.operation_hud_hint.as_str().into());
     window.set_context_hint(vm.context_hint.as_str().into());
     window.set_hover_label(vm.hover_label.as_str().into());
+    window.set_selection_summary(vm.selection_summary.as_str().into());
     let hud_lines: Vec<slint::SharedString> = vm
         .operation_hud_lines
         .iter()
@@ -9298,6 +9422,79 @@ mod tests {
             petunia_core::HoverTarget::None,
             "hover do Model não pode vazar para o Paint"
         );
+    }
+
+    #[test]
+    fn dotted_link_is_empty_without_distance() {
+        assert!(dotted_link_commands([10.0, 10.0], [10.0, 10.0]).is_empty());
+        assert!(dotted_link_commands([10.0, 10.0], [10.2, 10.0]).is_empty());
+    }
+
+    #[test]
+    fn dotted_link_grows_with_pointer_distance() {
+        // Traço de 7px + intervalo de 5px: 100px rendem 9 segmentos.
+        let short = dotted_link_commands([0.0, 0.0], [20.0, 0.0]);
+        let long = dotted_link_commands([0.0, 0.0], [100.0, 0.0]);
+        let short_count = short.matches('M').count();
+        let long_count = long.matches('M').count();
+        assert_eq!(short_count, 2, "20px rendem 2 traços, veio {short_count}");
+        assert_eq!(long_count, 9, "100px rendem 9 traços, veio {long_count}");
+        assert!(long_count > short_count);
+    }
+
+    #[test]
+    fn drag_link_only_exists_during_a_tool_session() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        let pointer = [700.0, 300.0];
+        // Sem sessão de manipulação não há cordão, mesmo com o mouse longe.
+        assert!(compute_drag_link(&bridge.state, 1024.0, 768.0, pointer, false).is_empty());
+        // Com arrasto ativo o cordão liga o pivô ao mouse...
+        assert!(bridge.begin_viewport_transform(TransformKind::Position, 512.0, 384.0));
+        let link_active = bridge.drag.is_some()
+            || bridge.tool_modal.is_some()
+            || bridge.state.session.tools.modal.is_some();
+        let link = compute_drag_link(&bridge.state, 1024.0, 768.0, pointer, link_active);
+        assert!(!link.is_empty(), "arrasto ativo precisa do cordão pivô→mouse");
+        // ...e some ao confirmar a operação.
+        assert!(bridge.end_viewport_transform());
+        let link_active = bridge.drag.is_some()
+            || bridge.tool_modal.is_some()
+            || bridge.state.session.tools.modal.is_some();
+        assert!(!link_active);
+        assert!(compute_drag_link(&bridge.state, 1024.0, 768.0, pointer, link_active).is_empty());
+    }
+
+    #[test]
+    fn selection_summary_counts_what_operations_will_hit() {
+        let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // Estado padrão: cubo ativo conta como selecionado na UI.
+        assert_eq!(
+            bridge.view_model().selection_summary,
+            "1 object selected"
+        );
+    }
+
+    #[test]
+    fn selection_summary_and_inspector_follow_component_picks() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(1024, 768);
+        bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+        assert_eq!(bridge.view_model().selection_summary, "No selection");
+        bridge.state.project.active_mesh_mut().unwrap().verts[0].selected = true;
+        bridge.state.project.active_mesh_mut().unwrap().verts[1].selected = true;
+        bridge.state.sync_selection();
+        let vm = bridge.view_model();
+        assert_eq!(vm.selection_summary, "Selected: 2 points");
+        assert!(
+            vm.active_object_details.contains("Selected: 2 points"),
+            "o inspector mostra o que será atingido, veio: {}",
+            vm.active_object_details
+        );
+        // Limpar volta ao vazio honesto, sem número fantasma.
+        bridge.state.project.active_mesh_mut().unwrap().deselect_all();
+        bridge.state.sync_selection();
+        assert_eq!(bridge.view_model().selection_summary, "No selection");
     }
 
     #[test]

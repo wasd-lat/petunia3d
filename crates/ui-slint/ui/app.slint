@@ -634,6 +634,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> shading-popover-open: false;
     property <bool> tool-properties-collapsed: false;
     in-out property <string> operation-preview-commands: "";
+    // Cordão pontilhado pivô→mouse da ferramenta de manipulação ativa.
+    // Só existe durante a sessão (arrasto/modal); fora dela é "" e some.
+    in-out property <string> drag-link-commands: "";
     in-out property <bool> operation-hud-active: false;
     in-out property <bool> transform-instant-active: false;
     property <bool> precision-mode: false;
@@ -644,6 +647,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> operation-hud-hint: "";
     in-out property <string> context-hint: "";
     in-out property <string> hover-label: "";
+    // Resumo persistente da seleção (Object Info do Blender). Quando o mouse
+    // está sobre um alvo mostra o hover; parado, mostra o que está selecionado.
+    in-out property <string> selection-summary: "";
     in-out property <int> gizmo-hover-axis: -1;
     in-out property <int> gizmo-active-axis: -1;
     in-out property <bool> show-xray: false;
@@ -1287,6 +1293,16 @@ export component PetuniaSlintShell inherits Window {
                         stroke-width: 2px;
                     }
 
+                    // Cordão da ferramenta ativa: tracejado amarelo da base da
+                    // seleção até o mouse. Cresce/encolhe com a distância.
+                    if root.drag-link-commands != "": Path {
+                        fit: ImageFit.preserve;
+                        commands: root.drag-link-commands;
+                        fill: transparent;
+                        stroke: DesignTokens.selection-active;
+                        stroke-width: 1.5px;
+                    }
+
                     viewport-touch := TouchArea {
                         property <length> last-x;
                         property <length> last-y;
@@ -1526,8 +1542,10 @@ export component PetuniaSlintShell inherits Window {
 
                     // Pill de preselection (Object Info do Blender, topo-esquerda):
                     // rótulo do alvo sob o cursor + dica contextual do domínio.
-                    // Texto não consome ponteiro: o TouchArea abaixo segue livre.
-                    if root.hover-label != "" || root.context-hint != "": Rectangle {
+                    // Sem hover, a primeira linha vira o resumo da seleção para
+                    // o feedback nunca sumir da tela. Texto não consome
+                    // ponteiro: o TouchArea abaixo segue livre.
+                    if root.hover-label != "" || root.selection-summary != "" || root.context-hint != "": Rectangle {
                         x: 14px;
                         y: 14px;
                         width: min(280px, parent.width * 0.4);
@@ -1547,6 +1565,13 @@ export component PetuniaSlintShell inherits Window {
                             if root.hover-label != "": Text {
                                 text: root.hover-label;
                                 color: DesignTokens.hover;
+                                font-size: 11px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+                            if root.hover-label == "" && root.selection-summary != "": Text {
+                                text: root.selection-summary;
+                                color: DesignTokens.text-primary;
                                 font-size: 11px;
                                 font-weight: 700;
                                 overflow: elide;
