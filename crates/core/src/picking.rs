@@ -39,7 +39,15 @@ pub fn pick_mesh(
     mode: SelectMode,
     xray: bool,
 ) -> Option<PickHit> {
-    pick_mesh_filtered(mesh, camera, viewport_pixels, cursor_ndc, mode, xray, |_| true)
+    pick_mesh_filtered(
+        mesh,
+        camera,
+        viewport_pixels,
+        cursor_ndc,
+        mode,
+        xray,
+        |_| true,
+    )
 }
 
 /// Same component picker with an additional scene visibility predicate. It is
@@ -70,10 +78,12 @@ pub fn pick_mesh_filtered(
         let (origin, direction) = ray(inverse, cursor_ndc)?;
         return nearest_face(&triangles, origin, direction).and_then(|(face, distance)| {
             let position = origin + direction * distance;
-            project(matrix, position).filter(|_| xray || visible(position)).map(|_| PickHit {
-                component: PickComponent::Face(face),
-                position,
-            })
+            project(matrix, position)
+                .filter(|_| xray || visible(position))
+                .map(|_| PickHit {
+                    component: PickComponent::Face(face),
+                    position,
+                })
         });
     }
     let pixel_scale = viewport_pixels * 0.5;
@@ -86,7 +96,8 @@ pub fn pick_mesh_filtered(
         if pixel_distance > tolerance {
             return;
         }
-        if !xray && (occluded(&triangles, inverse, ndc.truncate(), position) || !visible(position)) {
+        if !xray && (occluded(&triangles, inverse, ndc.truncate(), position) || !visible(position))
+        {
             return;
         }
         // Pixel distance gives predictable targeting; depth breaks overlapping ties.
@@ -194,10 +205,14 @@ fn clip_depth(matrix: Mat4, mut a: Vec3, mut b: Vec3) -> Option<(Vec3, Vec3)> {
 fn triangles(mesh: &Mesh) -> Vec<Triangle> {
     let mut result = Vec::new();
     for (face_index, face) in mesh.faces.iter().enumerate() {
-        result.extend(mesh.face_triangle_corners(face_index).into_iter().map(|corners| Triangle {
-            face: face_index,
-            points: corners.map(|corner| mesh.verts[face.verts[corner] as usize].vec()),
-        }));
+        result.extend(
+            mesh.face_triangle_corners(face_index)
+                .into_iter()
+                .map(|corners| Triangle {
+                    face: face_index,
+                    points: corners.map(|corner| mesh.verts[face.verts[corner] as usize].vec()),
+                }),
+        );
     }
     result
 }

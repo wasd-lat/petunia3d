@@ -16,7 +16,6 @@ pub mod modal;
 pub mod modal_feedback;
 pub mod module;
 pub mod picking;
-pub mod transform_projection;
 pub mod primitive_session;
 pub mod project_service;
 pub mod proportional;
@@ -27,6 +26,7 @@ pub mod schema_contracts;
 pub mod selection;
 pub mod snap;
 pub mod state;
+pub mod transform_projection;
 pub mod viewport;
 pub mod viewport_query;
 
@@ -84,13 +84,12 @@ pub use snap::{
 pub use state::{
     ASSET_NAME_MAX_LEN, AnnotationItem, AnnotationStroke, AppState, AssetRenameError, DirtyReason,
     DockOrientation, DockSide, DomainState, EditMode, EditorSession, GridSettings, HoverTarget,
-    Measurement,
-    MeasurementItem, PROPERTIES_DEFAULT_WIDTH, PROPERTIES_MAX_WIDTH, PROPERTIES_MIN_WIDTH,
-    PivotPoint, ProfileState, ProjectState, RefAxis, ReferenceImage, RenderResources, RenderStats,
-    SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT, SHELL_ASSET_LIBRARY_MAX_HEIGHT,
-    SHELL_ASSET_LIBRARY_MIN_HEIGHT, SceneFilter, SceneObjectState, Shading, TOOLBAR_DEFAULT_WIDTH,
-    ToolActivation, ToolState, TransformOrientation, UiDensity, UiState, WorkspaceUiMemory,
-    workspace_index,
+    Measurement, MeasurementItem, PROPERTIES_DEFAULT_WIDTH, PROPERTIES_MAX_WIDTH,
+    PROPERTIES_MIN_WIDTH, PivotPoint, ProfileState, ProjectState, RefAxis, ReferenceImage,
+    RenderResources, RenderStats, SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT,
+    SHELL_ASSET_LIBRARY_MAX_HEIGHT, SHELL_ASSET_LIBRARY_MIN_HEIGHT, SceneFilter, SceneObjectState,
+    Shading, TOOLBAR_DEFAULT_WIDTH, ToolActivation, ToolState, TransformOrientation, UiDensity,
+    UiState, WorkspaceUiMemory, workspace_index,
 };
 pub use viewport::{
     LogicalRect, PhysicalViewport, unproject_cursor_or_vertex_snap,

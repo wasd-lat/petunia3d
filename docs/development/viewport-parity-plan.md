@@ -24,7 +24,8 @@ continuam pendentes, portanto esses resultados não fecham I04, F04 ou F05.
 `ui-guard --strict` passaram. `docs-check` e `bible-check` param no lock do site
 congelado porque `docs/.vitepress/.env.local` já não existe neste ambiente; o
 arquivo não foi recriado. A formatação global anterior ao delta também falhava
-em arquivos fora da superfície alterada; será normalizada em commit mecânico.
+em arquivos fora da superfície alterada; foi normalizada em commit mecânico
+posterior ao checkpoint funcional.
 Matriz detalhada: [viewport-gap-matrix.md](viewport-gap-matrix.md).
 
 ## 1. Interface e viewport: paridade antes de novas funções

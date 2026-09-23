@@ -210,6 +210,7 @@ impl Mesh {
 
 mod bevel;
 pub mod boolean;
+mod connect;
 pub mod half_edge;
 pub mod knife;
 pub mod loop_cut;
@@ -219,7 +220,6 @@ pub mod primitives;
 pub mod profile_geo;
 pub mod topology;
 pub mod triangulate;
-mod connect;
 pub mod uv;
 pub mod uv_tools;
 pub mod uv_xatlas;
@@ -237,28 +237,57 @@ impl Mesh {
     /// winding. Concave polygons must use the same tessellation for drawing
     /// and picking; a fan can otherwise make empty space selectable.
     pub fn face_triangle_corners(&self, face_index: usize) -> Vec<[usize; 3]> {
-        let Some(face) = self.faces.get(face_index) else { return Vec::new(); };
-        if face.verts.len() < 3 || face.verts.iter().any(|&v| v as usize >= self.verts.len() || !self.verts[v as usize].vec().is_finite()) {
+        let Some(face) = self.faces.get(face_index) else {
+            return Vec::new();
+        };
+        if face.verts.len() < 3
+            || face.verts.iter().any(|&v| {
+                v as usize >= self.verts.len() || !self.verts[v as usize].vec().is_finite()
+            })
+        {
             return Vec::new();
         }
-        if face.verts.len() == 3 { return vec![[0, 1, 2]]; }
+        if face.verts.len() == 3 {
+            return vec![[0, 1, 2]];
+        }
         let normal = self.face_normal(face_index).abs();
-        let axis = if normal.x >= normal.y && normal.x >= normal.z { 0 }
-            else if normal.y >= normal.z { 1 } else { 2 };
-        let points: Vec<[f32; 2]> = face.verts.iter().map(|&v| {
-            let p = self.verts[v as usize].pos;
-            match axis { 0 => [p[1], p[2]], 1 => [p[2], p[0]], _ => [p[0], p[1]] }
-        }).collect();
+        let axis = if normal.x >= normal.y && normal.x >= normal.z {
+            0
+        } else if normal.y >= normal.z {
+            1
+        } else {
+            2
+        };
+        let points: Vec<[f32; 2]> = face
+            .verts
+            .iter()
+            .map(|&v| {
+                let p = self.verts[v as usize].pos;
+                match axis {
+                    0 => [p[1], p[2]],
+                    1 => [p[2], p[0]],
+                    _ => [p[0], p[1]],
+                }
+            })
+            .collect();
         let area = triangulate::polygon_area(&points);
         let convex = (0..points.len()).all(|i| {
-            let a = points[i]; let b = points[(i + 1) % points.len()]; let c = points[(i + 2) % points.len()];
+            let a = points[i];
+            let b = points[(i + 1) % points.len()];
+            let c = points[(i + 2) % points.len()];
             ((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) * area >= 0.0
         });
         if convex && area.abs() > 1.0e-12 {
             return (1..face.verts.len() - 1).map(|i| [0, i, i + 1]).collect();
         }
-        let Ok(mut triangles) = triangulate::ear_clip(&points) else { return Vec::new(); };
-        if area < 0.0 { for tri in &mut triangles { tri.swap(1, 2); } }
+        let Ok(mut triangles) = triangulate::ear_clip(&points) else {
+            return Vec::new();
+        };
+        if area < 0.0 {
+            for tri in &mut triangles {
+                tri.swap(1, 2);
+            }
+        }
         triangles
     }
 

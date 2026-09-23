@@ -1318,14 +1318,22 @@ impl Mesh {
     pub fn triangulate(&mut self) {
         let mut out = Vec::new();
         for (fi, face) in self.faces.iter().enumerate() {
-            if face.verts.len() <= 3 { out.push(face.clone()); continue; }
+            if face.verts.len() <= 3 {
+                out.push(face.clone());
+                continue;
+            }
             let corners = self.face_triangle_corners(fi);
             // Never discard an unsupported polygon silently.
-            if corners.len() != face.verts.len() - 2 { out.push(face.clone()); continue; }
+            if corners.len() != face.verts.len() - 2 {
+                out.push(face.clone());
+                continue;
+            }
             for triangle in corners {
                 let mut split = face.clone();
                 split.verts = triangle.map(|i| face.verts[i]).to_vec();
-                split.uv = triangle.map(|i| face.uv.get(i).copied().unwrap_or_default()).to_vec();
+                split.uv = triangle
+                    .map(|i| face.uv.get(i).copied().unwrap_or_default())
+                    .to_vec();
                 out.push(split);
             }
         }

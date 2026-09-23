@@ -257,9 +257,20 @@ impl Keybinds {
     /// Resolve within the active workspace before global/view/window actions.
     /// Unordered map iteration must not route a Model shortcut to Paint.
     pub fn find_in_context(&self, key: KeyCode, mods: Mods2, context: &str) -> Option<&str> {
-        self.map.iter().filter(|(action, binding)| binding.key == key && binding.mods == mods
-            && (action.starts_with(&format!("{context}.")) || action.starts_with("global.") || action.starts_with("view.") || action.starts_with("window.")))
-            .min_by(|(a, _), (b, _)| (!a.starts_with(&format!("{context}.")), a.as_str()).cmp(&(!b.starts_with(&format!("{context}.")), b.as_str())))
+        self.map
+            .iter()
+            .filter(|(action, binding)| {
+                binding.key == key
+                    && binding.mods == mods
+                    && (action.starts_with(&format!("{context}."))
+                        || action.starts_with("global.")
+                        || action.starts_with("view.")
+                        || action.starts_with("window."))
+            })
+            .min_by(|(a, _), (b, _)| {
+                (!a.starts_with(&format!("{context}.")), a.as_str())
+                    .cmp(&(!b.starts_with(&format!("{context}.")), b.as_str()))
+            })
             .map(|(action, _)| action.as_str())
     }
 

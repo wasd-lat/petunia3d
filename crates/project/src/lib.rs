@@ -821,7 +821,9 @@ impl Project {
     }
 
     pub fn remove(&mut self, i: usize) {
-        if i >= self.assets.len() { return; }
+        if i >= self.assets.len() {
+            return;
+        }
         let removed = self.assets.remove(i);
         self.history_selection.retain(|id| *id != removed.id);
         if self.assets.is_empty() || self.active == usize::MAX {
@@ -949,8 +951,11 @@ impl Project {
             }
         }
         // An empty document and an explicitly cleared object selection are valid.
-        if self.assets.is_empty() { self.active = usize::MAX; }
-        else if self.active != usize::MAX { self.active = self.active.min(self.assets.len() - 1); }
+        if self.assets.is_empty() {
+            self.active = usize::MAX;
+        } else if self.active != usize::MAX {
+            self.active = self.active.min(self.assets.len() - 1);
+        }
     }
 }
 

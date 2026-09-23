@@ -1489,7 +1489,11 @@ fn draw_shading_spheres_cluster(ui: &mut Ui, state: &mut AppState) {
     let modes = [
         (Shading::Wireframe, PetuniaIcon::ShadingWireframe, wire_tip),
         (Shading::Solid, PetuniaIcon::ShadingSolid, solid_tip),
-        (Shading::MaterialPreview, PetuniaIcon::ShadingMaterial, mat_tip),
+        (
+            Shading::MaterialPreview,
+            PetuniaIcon::ShadingMaterial,
+            mat_tip,
+        ),
         (Shading::Rendered, PetuniaIcon::ShadingRendered, rend_tip),
     ];
 

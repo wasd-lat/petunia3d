@@ -226,9 +226,16 @@ impl CommandDispatcher {
     }
 
     pub fn dispatch(state: &mut AppState, cmd: &dyn Command) -> Result<(), CommandError> {
-        cmd.can_execute(state).map_err(|reason| CommandError::Execution(reason.into()))?;
-        if cmd.is_destructive() && (state.modal.is_some() || state.mesh_preview.is_some() || state.paint_stroke.is_some()) {
-            return Err(CommandError::Execution("Confirm or cancel the active operation first".into()));
+        cmd.can_execute(state)
+            .map_err(|reason| CommandError::Execution(reason.into()))?;
+        if cmd.is_destructive()
+            && (state.modal.is_some()
+                || state.mesh_preview.is_some()
+                || state.paint_stroke.is_some())
+        {
+            return Err(CommandError::Execution(
+                "Confirm or cancel the active operation first".into(),
+            ));
         }
         state.project.project.history_selection = state.session.selection.assets.clone();
         let original_selection = state.session.selection.clone();
@@ -251,8 +258,11 @@ impl CommandDispatcher {
             state.mark_document_dirty();
         }
         state.sync_selection();
-        if cmd.is_destructive() { state.emit_mesh_changed(); }
-        else { state.project.project.bump_selection(); }
+        if cmd.is_destructive() {
+            state.emit_mesh_changed();
+        } else {
+            state.project.project.bump_selection();
+        }
         state.mark_dirty();
         Ok(())
     }
@@ -1369,8 +1379,13 @@ impl Command for DeleteSelectionCmd {
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         if state.edit_mode() == EditMode::Object {
             let selected = state.session.selection.assets.clone();
-            if selected.is_empty() { return DeleteAssetCmd { asset_index: None }.execute(state); }
-            state.project.assets.retain(|asset| !selected.contains(&asset.id) || asset.locked);
+            if selected.is_empty() {
+                return DeleteAssetCmd { asset_index: None }.execute(state);
+            }
+            state
+                .project
+                .assets
+                .retain(|asset| !selected.contains(&asset.id) || asset.locked);
             state.project.active = usize::MAX;
             state.session.selection.assets.clear();
             state.sync_selection();
@@ -1413,8 +1428,16 @@ impl Command for DuplicateSelectionCmd {
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         if state.edit_mode() == EditMode::Object {
             let selected = &state.session.selection.assets;
-            let copies: Vec<_> = state.project.assets.iter().filter(|asset| selected.contains(&asset.id)).map(|asset| asset.duplicate()).collect();
-            if copies.is_empty() { return DuplicateAssetCmd { asset_index: None }.execute(state); }
+            let copies: Vec<_> = state
+                .project
+                .assets
+                .iter()
+                .filter(|asset| selected.contains(&asset.id))
+                .map(|asset| asset.duplicate())
+                .collect();
+            if copies.is_empty() {
+                return DuplicateAssetCmd { asset_index: None }.execute(state);
+            }
             state.session.selection.assets = copies.iter().map(|asset| asset.id).collect();
             state.project.assets.extend(copies);
             state.project.active = state.project.assets.len() - 1;
@@ -1446,7 +1469,9 @@ impl Command for SelectAllCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.selection_domain() != crate::SelectionDomain::Object && state.project.active_mesh().is_none() {
+        if state.selection_domain() != crate::SelectionDomain::Object
+            && state.project.active_mesh().is_none()
+        {
             Err("No active mesh")
         } else {
             Ok(())
@@ -1455,8 +1480,20 @@ impl Command for SelectAllCmd {
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         if state.selection_domain() == crate::SelectionDomain::Object {
-            state.session.selection.assets = state.project.assets.iter().filter(|a| a.visible && !a.locked).map(|a| a.id).collect();
-            state.project.active = state.session.selection.assets.last().and_then(|id| state.project.assets.iter().position(|a| a.id == *id)).unwrap_or(usize::MAX);
+            state.session.selection.assets = state
+                .project
+                .assets
+                .iter()
+                .filter(|a| a.visible && !a.locked)
+                .map(|a| a.id)
+                .collect();
+            state.project.active = state
+                .session
+                .selection
+                .assets
+                .last()
+                .and_then(|id| state.project.assets.iter().position(|a| a.id == *id))
+                .unwrap_or(usize::MAX);
             state.sync_selection();
             return Ok(());
         }
@@ -1483,7 +1520,9 @@ impl Command for ClearSelectionCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.selection_domain() != crate::SelectionDomain::Object && state.project.active_mesh().is_none() {
+        if state.selection_domain() != crate::SelectionDomain::Object
+            && state.project.active_mesh().is_none()
+        {
             Err("No active mesh")
         } else {
             Ok(())
@@ -1518,7 +1557,9 @@ impl Command for InvertSelectionCmd {
     }
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
-        if state.selection_domain() != crate::SelectionDomain::Object && state.project.active_mesh().is_none() {
+        if state.selection_domain() != crate::SelectionDomain::Object
+            && state.project.active_mesh().is_none()
+        {
             Err("No active mesh")
         } else {
             Ok(())
@@ -1528,8 +1569,17 @@ impl Command for InvertSelectionCmd {
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         if state.selection_domain() == crate::SelectionDomain::Object {
             let selected = &state.session.selection.assets;
-            let ids: Vec<_> = state.project.assets.iter().filter(|a| a.visible && !a.locked && !selected.contains(&a.id)).map(|a| a.id).collect();
-            state.project.active = ids.last().and_then(|id| state.project.assets.iter().position(|a| a.id == *id)).unwrap_or(usize::MAX);
+            let ids: Vec<_> = state
+                .project
+                .assets
+                .iter()
+                .filter(|a| a.visible && !a.locked && !selected.contains(&a.id))
+                .map(|a| a.id)
+                .collect();
+            state.project.active = ids
+                .last()
+                .and_then(|id| state.project.assets.iter().position(|a| a.id == *id))
+                .unwrap_or(usize::MAX);
             state.session.selection.assets = ids;
             state.sync_selection();
             return Ok(());
@@ -3180,8 +3230,12 @@ impl Command for ConnectLoopsCmd {
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         if state.selection_domain() == crate::SelectionDomain::Edge {
-            let mesh = state.project.active_mesh_mut().ok_or(CommandError::NoActiveAsset)?;
-            mesh.connect_selected_edges().map_err(CommandError::Execution)?;
+            let mesh = state
+                .project
+                .active_mesh_mut()
+                .ok_or(CommandError::NoActiveAsset)?;
+            mesh.connect_selected_edges()
+                .map_err(CommandError::Execution)?;
             state.set_status("Connected selected boundaries");
             return Ok(());
         }

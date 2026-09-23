@@ -535,8 +535,14 @@ fn mcp_must_not_own_project_or_undo() {
 fn cli_and_ffi_must_not_call_tool_apply() {
     let cli = fs::read_to_string(root_dir().join("crates/cli/src/main.rs")).unwrap();
     let ffi = fs::read_to_string(root_dir().join("crates/ffi/src/lib.rs")).unwrap();
-    assert!(!cli.contains("ExtrudeTool::"), "CLI não pode chamar ExtrudeTool");
-    assert!(!ffi.contains("ExtrudeTool::"), "FFI não pode chamar ExtrudeTool");
+    assert!(
+        !cli.contains("ExtrudeTool::"),
+        "CLI não pode chamar ExtrudeTool"
+    );
+    assert!(
+        !ffi.contains("ExtrudeTool::"),
+        "FFI não pode chamar ExtrudeTool"
+    );
     assert!(
         !ffi.contains("PrimitivesTool::"),
         "FFI não pode chamar PrimitivesTool"

@@ -301,9 +301,7 @@ fn fractions_mode(cuts: usize, slide: f32, even: bool) -> Result<Vec<f32>, LoopC
         return Err(LoopCutError::InvalidParameters);
     }
     if even {
-        return Ok((1..=cuts)
-            .map(|i| i as f32 / (cuts + 1) as f32)
-            .collect());
+        return Ok((1..=cuts).map(|i| i as f32 / (cuts + 1) as f32).collect());
     }
     let slide = slide.clamp(-0.999, 0.999);
     Ok((1..=cuts)

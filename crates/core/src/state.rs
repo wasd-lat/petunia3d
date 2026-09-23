@@ -835,8 +835,16 @@ impl EditorSession {
         let mut sel = Selection::default();
         if let Some(a) = project.assets.get(project.active) {
             sel.asset = Some(a.id);
-            sel.assets = self.selection.assets.iter().copied().filter(|id| project.assets.iter().any(|asset| asset.id == *id)).collect();
-            if !sel.assets.contains(&a.id) { sel.assets = vec![a.id]; }
+            sel.assets = self
+                .selection
+                .assets
+                .iter()
+                .copied()
+                .filter(|id| project.assets.iter().any(|asset| asset.id == *id))
+                .collect();
+            if !sel.assets.contains(&a.id) {
+                sel.assets = vec![a.id];
+            }
             sel.verts = a
                 .mesh
                 .verts
@@ -1720,8 +1728,15 @@ impl AppState {
 
     /// Shared object selection authority for Parts, viewport and automation.
     pub fn select_object(&mut self, index: Option<usize>, extend: bool) {
-        if self.modal.is_some() || self.mesh_preview.is_some() || self.paint_stroke.is_some() { return; }
-        let Some(index) = index.filter(|&i| self.project.assets.get(i).is_some_and(|a| a.visible && !a.locked)) else {
+        if self.modal.is_some() || self.mesh_preview.is_some() || self.paint_stroke.is_some() {
+            return;
+        }
+        let Some(index) = index.filter(|&i| {
+            self.project
+                .assets
+                .get(i)
+                .is_some_and(|a| a.visible && !a.locked)
+        }) else {
             if !extend {
                 self.project.active = usize::MAX;
                 self.session.selection = Selection::default();
@@ -1730,11 +1745,21 @@ impl AppState {
             return;
         };
         let id = self.project.assets[index].id;
-        if !extend { self.session.selection.assets.clear(); }
+        if !extend {
+            self.session.selection.assets.clear();
+        }
         if extend && self.session.selection.assets.contains(&id) {
-            self.session.selection.assets.retain(|selected| *selected != id);
-            self.project.active = self.session.selection.assets.last().and_then(|last|
-                self.project.assets.iter().position(|a| a.id == *last)).unwrap_or(usize::MAX);
+            self.session
+                .selection
+                .assets
+                .retain(|selected| *selected != id);
+            self.project.active = self
+                .session
+                .selection
+                .assets
+                .last()
+                .and_then(|last| self.project.assets.iter().position(|a| a.id == *last))
+                .unwrap_or(usize::MAX);
         } else {
             self.session.selection.assets.push(id);
             self.project.active = index;
@@ -1886,13 +1911,30 @@ impl AppState {
     /// Calcula a posição no espaço de mundo do pivô selecionado (P3D-027).
     pub fn calculate_pivot(&self, pivot: PivotPoint) -> glam::Vec3 {
         if self.selection_domain() == SelectionDomain::Object && pivot != PivotPoint::Cursor3D {
-            let points: Vec<_> = self.project.assets.iter()
-                .filter(|a| !a.locked && (self.session.selection.assets.contains(&a.id) || self.project.active().is_some_and(|active| active.id == a.id)))
-                .flat_map(|a| a.mesh.verts.iter().map(|v| v.vec())).collect();
+            let points: Vec<_> = self
+                .project
+                .assets
+                .iter()
+                .filter(|a| {
+                    !a.locked
+                        && (self.session.selection.assets.contains(&a.id)
+                            || self
+                                .project
+                                .active()
+                                .is_some_and(|active| active.id == a.id))
+                })
+                .flat_map(|a| a.mesh.verts.iter().map(|v| v.vec()))
+                .collect();
             if !points.is_empty() {
                 if pivot == PivotPoint::BoundingBoxCenter {
-                    let min = points.iter().copied().fold(glam::Vec3::splat(f32::INFINITY), glam::Vec3::min);
-                    let max = points.iter().copied().fold(glam::Vec3::splat(f32::NEG_INFINITY), glam::Vec3::max);
+                    let min = points
+                        .iter()
+                        .copied()
+                        .fold(glam::Vec3::splat(f32::INFINITY), glam::Vec3::min);
+                    let max = points
+                        .iter()
+                        .copied()
+                        .fold(glam::Vec3::splat(f32::NEG_INFINITY), glam::Vec3::max);
                     return (min + max) * 0.5;
                 }
                 return points.iter().sum::<glam::Vec3>() / points.len() as f32;

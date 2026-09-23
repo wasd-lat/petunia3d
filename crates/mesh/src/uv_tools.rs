@@ -121,7 +121,11 @@ impl Mesh {
         if islands.is_empty() {
             return 0;
         }
-        islands.sort_by(|a, b| b.area().partial_cmp(&a.area()).unwrap_or(std::cmp::Ordering::Equal));
+        islands.sort_by(|a, b| {
+            b.area()
+                .partial_cmp(&a.area())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let n = islands.len();
         let cols = (n as f32).sqrt().ceil().max(1.0) as usize;
         let cell = (1.0 / cols as f32).max(1e-6);
@@ -182,7 +186,12 @@ impl Mesh {
         }
     }
 
-    pub fn project_from_view(&mut self, view_x: glam::Vec3, view_y: glam::Vec3, view_origin: glam::Vec3) {
+    pub fn project_from_view(
+        &mut self,
+        view_x: glam::Vec3,
+        view_y: glam::Vec3,
+        view_origin: glam::Vec3,
+    ) {
         let vx = view_x.normalize_or_zero();
         let vy = view_y.normalize_or_zero();
         if vx.length_squared() < 1e-8 || vy.length_squared() < 1e-8 {
@@ -219,7 +228,12 @@ impl Mesh {
         let mut overlapping = 0;
         for i in 0..islands.len() {
             for j in (i + 1)..islands.len() {
-                if aabb_overlap(islands[i].min, islands[i].max, islands[j].min, islands[j].max) {
+                if aabb_overlap(
+                    islands[i].min,
+                    islands[i].max,
+                    islands[j].min,
+                    islands[j].max,
+                ) {
                     overlapping += 1;
                 }
             }
