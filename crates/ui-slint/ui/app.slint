@@ -3184,11 +3184,8 @@ export component PetuniaSlintShell inherits Window {
 
                                 TouchArea {
                                     property <bool> extend: false;
-                                    pointer-event(event) => { self.extend = event.modifiers.shift; }
-                                    clicked => { root.scene-select(item.id, self.extend); }
-                                    horizontal-stretch: 1;
-
                                     pointer-event(event) => {
+                                        self.extend = event.modifiers.shift;
                                         if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
                                             root.scene-context-requested(
                                                 item.id,
@@ -3197,6 +3194,8 @@ export component PetuniaSlintShell inherits Window {
                                             );
                                         }
                                     }
+                                    clicked => { root.scene-select(item.id, self.extend); }
+                                    horizontal-stretch: 1;
 
                                     HorizontalLayout {
                                         spacing: 6px;
