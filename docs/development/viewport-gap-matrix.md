@@ -21,6 +21,7 @@ reprodução manual nos dois backends.
 | Fallback software | RUDIMENTARY | Shadings iguais; guias sem profundidade; grade incondicional | Textura/material/luz, opacidade, depth, hover e grade adaptativa | Pendente |
 | X-Ray WGPU | PARTIALLY_COMPLIANT | Seleção conservava pipeline com profundidade | Pipelines próprios para seleção através | Pendente |
 | Câmera e resize | BROKEN | Imagem atualizada sem reprojetar overlays | Atualização leve dos overlays e sincronização após primeiro layout | Pendente |
+| Layout compacto Slint | PARTIALLY_COMPLIANT | Inspector invisível reservava 290 px; pill de pré-seleção sem altura cobria a viewport; breakpoint de 1100 px oculta os editores 2D Paint/UV na largura inicial | Reserva indevida e scrim em tela inteira corrigidos; breakpoint mantido porque Inspector inline força janela de ~1800 px quando visível nessa largura | Smoke visual WGPU MODEL em 1092×1012 e 1400×900; drawer/split Paint/UV compacto e software pendentes |
 | Botões Duplicate/Delete | BROKEN | Sliders de brush sobrepostos | Sliders indevidos removidos | Pendente |
 | Loop Cut Slide | BROKEN | Campo Slide chamava alteração de Cuts | Callback específico com validação numérica | Pendente |
 | Clique com Move/Rotate/Scale | BROKEN | Pointer down iniciava operação imediatamente | Limiar de 4 px; clique continua seleção | Pendente |

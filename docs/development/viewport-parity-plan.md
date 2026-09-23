@@ -18,8 +18,13 @@ trabalho focado. Estimativas de esforço relativo, não compromisso de prazo.
 
 Os checkpoints de 22/09/2026 foram publicados como **não testados**. Em 23/09,
 após esta rodada de implementação, passaram 22 testes Paint, 4 UV e 169 Slint
-com Rust 1.98.1. A validação visual real e os testes manuais de GPU/software
-continuam pendentes, portanto esses resultados não fecham I04, F04 ou F05.
+com Rust 1.98.1. Um smoke visual real do MODEL/WGPU em 1092×1012 e 1400×900
+detectou e confirmou a correção da pill que cobria a viewport e do Inspector
+que reservava espaço no layout compacto. Um smoke de PAINT/UV revelou que o
+breakpoint de 1100 px ainda oculta os editores 2D na largura inicial. Baixar
+o limite sem reestruturar o Inspector força a janela a ~1800 px, então esse
+experimento foi revertido; drawer/split compacto e backend software seguem
+pendentes. Isso não fecha I04, F04 ou F05.
 `cargo check --workspace`, Clippy estrito das crates envolvidas, `arch-check` e
 `ui-guard --strict` passaram. `docs-check` e `bible-check` param no lock do site
 congelado porque `docs/.vitepress/.env.local` já não existe neste ambiente; o
@@ -38,7 +43,7 @@ Matriz detalhada: [viewport-gap-matrix.md](viewport-gap-matrix.md).
 | I03 | P0 | M | Feedback Object/Point/Edge/Face com ativa/hover/ocluída e tamanho fixo de tela; overlays sem diamantes nem volumes indevidos. | I02 | Implementado, não testado: paths em coordenadas preservadas; guias e seleção com profundidade em WGPU/software; tripé confinado em 108 px. |
 | I04 | P0 | G | Wire, Solid, Material e Rendered produzem resultados diferentes com material/textura/luz reais; fallback software honesto, paridade e testes de pixels. | I01 | Implementado, não testado: software diferencia Solid/Material/Rendered, amostra textura com UV em perspectiva e usa luz da cena; paridade de pixels pendente. |
 | I05 | P0 | M | X-Ray controla transparência, teste de profundidade e alcance de seleção em todos os domínios; opção independente de shading. | I02–I04 | Implementado, não testado: pipelines de seleção WGPU ignoram profundidade apenas com X-Ray; software aplica opacidade e seleção através; matriz completa pendente. |
-| I06 | P0 | M | Viewport mantém proporção, responde ao resize e DPI, entrada na coordenada correta, barra e Inspector legíveis de 480 px até 1920 px. | I01 | Parcial: inicialização usa tamanho real do layout; overlays acompanham câmera e resize; revisão responsiva pendente. |
+| I06 | P0 | M | Viewport mantém proporção, responde ao resize e DPI, entrada na coordenada correta, barra e Inspector legíveis de 480 px até 1920 px. | I01 | Parcial: inicialização usa tamanho real do layout; overlays acompanham câmera e resize; pill de pré-seleção não encobre mais a viewport e Inspector oculto não reserva espaço. Smoke WGPU em 1092 e 1400 px; Paint/UV compactos, DPI/extremos e software pendentes. |
 | I07 | P1 | M | Grade adaptativa, eixos, cursor, bounds e referências com profundidade/opacidade/hierarquia que não compete com a malha. | I04 | Parcial: grade adaptativa nova; revisão visual e configurações faltam. |
 | I08 | P1 | M | Orbit/pan/zoom/frame/ortográfica em torno do pivô, captura do mouse, foco e limiar de drag; clique não inicia transformação. | I02 | Implementado, não testado: limiar de drag, cancelamento, navegação com pivô selecionado e viewport real; smoke de mouse pendente. |
 | I09 | P1 | G | Gizmos com picking de handle, tamanho fixo, eixo/plano, hover/drag/lock e feedback legível em zoom e ângulos extremos. | I02,I08 | Parcial, não testado: hastes, cubos de escala e anéis de rotação; handles de plano/livre e orientação Local pendentes no estado retomado. |
@@ -101,3 +106,10 @@ Matriz detalhada: [viewport-gap-matrix.md](viewport-gap-matrix.md).
   pincel/conta-gotas e seleção sincronizada; suíte Slint passou de 158/169 para
   169/169 após atualizar testes que pressupunham semântica anterior de seleção,
   Cut e gizmos. Ver matriz para limites de aceite.
+- 23/09/2026: captura real do MODEL/WGPU revelou um scrim de pré-seleção que
+  ocupava a altura da viewport e 290 px vazios reservados pelo Inspector oculto.
+  As duas causas foram corrigidas no layout declarativo e recapturadas em
+  tamanhos compacto e amplo. Smoke posterior de Paint/UV expôs que o breakpoint
+  de 1100 px escondia os editores 2D na largura inicial. Reduzir o breakpoint
+  sem extrair um drawer expandiu a janela para ~1800 px; a tentativa foi
+  revertida e segue como lacuna de layout. Isso não certifica Paint/UV.

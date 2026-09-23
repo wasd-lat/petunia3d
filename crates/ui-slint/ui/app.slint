@@ -1582,12 +1582,13 @@ export component PetuniaSlintShell inherits Window {
                         x: 14px;
                         y: 14px;
                         width: min(280px, parent.width * 0.4);
+                        height: preselection-content.preferred-height;
                         border-radius: 8px;
                         background: DesignTokens.scrim;
                         border-width: 1px;
                         border-color: DesignTokens.border;
 
-                        VerticalLayout {
+                        preselection-content := VerticalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
                             padding-top: 6px;
@@ -2096,9 +2097,8 @@ export component PetuniaSlintShell inherits Window {
                     moved(width) => { root.inspector-width-changed(width / 1px); }
                 }
 
-                Rectangle {
+                if inspector-visible && !compact-shell: Rectangle {
                     width: inspector-width;
-                    visible: inspector-visible && !compact-shell;
                     y: 0;
                     height: 100%;
                     background: DesignTokens.surface;
