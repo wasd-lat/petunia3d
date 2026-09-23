@@ -5,8 +5,8 @@
 - Current phase: **Wave 11 — Extensibility, Plugins & Automation (Ativa)**
 - Canonical Specification & SSOT: [`docs/bible/`](docs/bible/index.md) (155 P3D specs, 17 capítulos constitucionais, 15 seções, 3 adendos e 36 capítulos de fundação unificados)
 - Canonical UI Golden Reference: [`docs/image-references/Blender.svg`](file:///home/raillen/Documentos/Projetos/simple3d-modeling/docs/image-references/Blender.svg) (component catalog in [`docs/image-references/extracted/`](file:///home/raillen/Documentos/Projetos/simple3d-modeling/docs/image-references/extracted/))
-- Current implementation status: **Conformidade em revisão**. A alegação histórica de Waves 0–10 totalmente concluídas não certifica o frontend Slint. Ver [plano de paridade](docs/development/viewport-parity-plan.md) e [matriz de gaps](docs/development/viewport-gap-matrix.md). Checkpoints de 22/09/2026 permanecem sem testes por orientação do usuário até o fim da implementação.
-- **Frontend de produção**: `petunia_ui_slint` (Slint 1.18) — shell declarativo, 55 testes unitários, bridge de intents, viewport WGPU/software fallback. UI egui (`crates/ui/`) arquivada como legado de transição (`--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`).
+- Current implementation status: **Conformidade em revisão**. A alegação histórica de Waves 0–10 totalmente concluídas não certifica o frontend Slint. Ver [plano de paridade](docs/development/viewport-parity-plan.md) e [matriz de gaps](docs/development/viewport-gap-matrix.md). Nesta rodada, 169 testes Slint, 22 Paint e 4 UV passaram; a paridade visual e a reprodução manual seguem pendentes.
+- **Frontend de produção**: `petunia_ui_slint` (Slint 1.18) — shell declarativo, 169 testes unitários, bridge de intents, viewport WGPU/software fallback. UI egui (`crates/ui/`) arquivada como legado de transição (`--legacy-egui` / `PETUNIA_LEGACY_EGUI=1`).
 - Context methodology: **Lean Progressive Context (LPC)**
 - Last updated: `2026-09-23`
 
@@ -23,8 +23,8 @@ projetadas, campos numéricos transacionais, histórico com identidades de estad
 e o algoritmo ampliado de Connect. Handles de plano/livre, escolha do anel de
 Loop Cut por hover e clipping completo do fallback software não estão presentes
 nesta retomada e permanecem pendentes no plano. Não se alega recuperação integral
-dos dois commits ausentes. Testes e compilação continuam adiados por orientação
-do usuário.
+dos dois commits ausentes. Os checkpoints de 22/09 não tinham aceite; a
+validação de 23/09 está registrada no plano de paridade.
 
 ## Current status
 

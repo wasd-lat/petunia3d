@@ -238,9 +238,13 @@ pub fn uv_hit(state: &AppState, u: f32, v: f32) -> Option<usize> {
         if f.uv.len() < 3 {
             continue;
         }
-        // fan a partir do vértice 0
-        for k in 1..f.uv.len() - 1 {
-            if point_in_tri_uv([u, v], f.uv[0], f.uv[k], f.uv[k + 1]) {
+        // A ilha UV pode ser côncava mesmo quando a face 3D não é. O hit test
+        // precisa respeitar o polígono UV, sem selecionar seu espaço vazio.
+        let Ok(triangles) = petunia_mesh::triangulate::ear_clip(&f.uv) else {
+            continue;
+        };
+        for [a, b, c] in triangles {
+            if point_in_tri_uv([u, v], f.uv[a], f.uv[b], f.uv[c]) {
                 return Some(fi);
             }
         }
@@ -271,6 +275,28 @@ fn point_in_tri_uv(p: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uv_hit_respects_a_concave_island() {
+        use petunia_mesh::{Face, Vertex};
+
+        let mut state = AppState::new("en");
+        let mesh = state.project.active_mesh_mut().expect("active mesh");
+        mesh.verts = (0..5).map(|x| Vertex::new(x as f32, 0.0, 0.0)).collect();
+        mesh.faces = vec![Face::with_uv(
+            vec![0, 1, 2, 3, 4],
+            vec![
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.5, 1.0 / 3.0],
+                [0.0, 1.0],
+            ],
+        )];
+
+        assert_eq!(uv_hit(&state, 0.25, 0.1), Some(0));
+        assert_eq!(uv_hit(&state, 0.5, 0.5), None);
+    }
 
     #[test]
     fn test_uv_planar_and_cube_projections() {

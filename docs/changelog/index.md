@@ -5,6 +5,12 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Corrigido — integração Paint/UV e viewport (23/09/2026)
+- A projeção de tinta 3D e o picking UV usam triangulação correta de polígonos côncavos; o Paint não alcança o vazio da concavidade.
+- A cor escolhida no Slint chega ao pincel real; o conta-gotas 3D amostra a textura composta e mantém os dois caminhos de cor sincronizados.
+- Shift e clique vazio no editor UV mantêm a seleção de UV e a seleção 3D coerentes; transformações UV sem alvo não alteram toda a malha.
+- A suíte Slint voltou a passar (169/169) com provas alinhadas à seleção por domínio, ao Cut multissegmento e ao encurtamento visual dos eixos projetados. Paint (22/22) e UV (4/4) também passaram; aceite visual ainda pendente.
+
 ### Adicionado
 - **Frontend Slint (`petunia_ui_slint`)**: nova crate no workspace implementando o shell declarativo moderno em Slint 1.18 (`crates/ui-slint/`).
   - Top bar com alternador de domínio de seleção (`Object`, `Point`, `Edge`, `Face`) alinhado ao vocabulário canônico (AGENTS.md §3).

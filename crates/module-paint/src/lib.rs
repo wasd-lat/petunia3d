@@ -68,10 +68,15 @@ impl PaintModule {
 
     /// Eyedropper: copia a cor do vértice para o pincel.
     pub fn eyedrop_vertex(state: &mut AppState, vi: usize) {
-        if let Some(o) = state.project.assets.get(state.project.active)
-            && let Some(v) = o.mesh.verts.get(vi)
+        if let Some(color) = state
+            .project
+            .assets
+            .get(state.project.active)
+            .and_then(|asset| asset.mesh.verts.get(vi))
+            .map(|vertex| vertex.color)
         {
-            state.paint_color = v.color;
+            state.paint_color = color;
+            state.session.tools.paint_color = color;
             state.mark_dirty();
         }
     }
@@ -602,6 +607,7 @@ impl PaintModule {
         }
         if let Some(c) = picked {
             state.paint_color = c;
+            state.session.tools.paint_color = c;
         }
 
         if s.kind != BrushType::Eyedropper {
@@ -878,20 +884,21 @@ impl PaintModule {
             return None;
         }
 
-        // Decompõe face em triângulos fan a partir do vértice 0
-        for i in 1..m - 1 {
-            let idx0 = face.verts[0] as usize;
-            let idx1 = face.verts[i] as usize;
-            let idx2 = face.verts[i + 1] as usize;
+        // Usa exatamente os triângulos do renderer e do picking. Um fan cobre
+        // espaço vazio em faces côncavas e projeta tinta na UV errada.
+        for [a, b, c] in mesh.face_triangle_corners(face_idx) {
+            let idx0 = face.verts[a] as usize;
+            let idx1 = face.verts[b] as usize;
+            let idx2 = face.verts[c] as usize;
 
             if idx0 < mesh.verts.len() && idx1 < mesh.verts.len() && idx2 < mesh.verts.len() {
                 let v0 = mesh.verts[idx0].vec();
                 let v1 = mesh.verts[idx1].vec();
                 let v2 = mesh.verts[idx2].vec();
 
-                let uv0 = face.uv[0];
-                let uv1 = face.uv[i];
-                let uv2 = face.uv[i + 1];
+                let uv0 = face.uv[a];
+                let uv1 = face.uv[b];
+                let uv2 = face.uv[c];
 
                 if let Some(interpolated) = barycentric_uv(hit_pos, v0, v1, v2, uv0, uv1, uv2) {
                     return Some(interpolated);
@@ -1141,7 +1148,7 @@ pub fn barycentric_uv(
     let u = 1.0 - v - w;
 
     // Tolerância para pontos na borda ou levemente fora do triângulo
-    let eps = -0.05;
+    let eps = -1.0e-4;
     if u >= eps && v >= eps && w >= eps {
         let interpolated_u = u * uv_a[0] + v * uv_b[0] + w * uv_c[0];
         let interpolated_v = u * uv_a[1] + v * uv_b[1] + w * uv_c[1];
@@ -1176,6 +1183,42 @@ impl Module for PaintModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vertex_eyedropper_updates_both_paint_paths() {
+        let mut state = AppState::new("en");
+        state.project.active_mesh_mut().unwrap().verts[0].color = [0.2, 0.4, 0.8];
+        PaintModule::eyedrop_vertex(&mut state, 0);
+        assert_eq!(state.paint_color, [0.2, 0.4, 0.8]);
+        assert_eq!(state.session.tools.paint_color, state.paint_color);
+    }
+
+    #[test]
+    fn paint_uv_hit_uses_render_triangles_for_a_concave_face() {
+        use petunia_mesh::{Face, Vertex};
+
+        let mut state = AppState::new("en");
+        let mesh = state.project.active_mesh_mut().expect("active mesh");
+        mesh.verts = [[0.0, 0.0], [3.0, 0.0], [3.0, 3.0], [1.5, 1.0], [0.0, 3.0]]
+            .map(|[x, y]| Vertex::new(x, y, 0.0))
+            .to_vec();
+        mesh.faces = vec![Face::with_uv(
+            vec![0, 1, 2, 3, 4],
+            vec![
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.5, 1.0 / 3.0],
+                [0.0, 1.0],
+            ],
+        )];
+
+        assert!(PaintModule::face_hit_uv(&state, 0, Vec3::new(1.0, 0.5, 0.0), false).is_some());
+        assert!(
+            PaintModule::face_hit_uv(&state, 0, Vec3::new(1.5, 1.4, 0.0), false).is_none(),
+            "the concave notch must not receive paint"
+        );
+    }
 
     #[test]
     fn test_push_and_set_palette_sync() {

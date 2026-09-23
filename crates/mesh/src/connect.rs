@@ -115,7 +115,12 @@ impl Mesh {
             let mut face = Face::with_uv(verts, uv);
             face.selected = true; face.material_slot = material;
             faces.push(face);
-            if advance_a { i += 1; } if advance_b { j += 1; }
+            if advance_a {
+                i += 1;
+            }
+            if advance_b {
+                j += 1;
+            }
         }
         self.deselect_all();
         self.faces.extend(faces);

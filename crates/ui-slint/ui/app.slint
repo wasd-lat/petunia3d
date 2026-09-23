@@ -1264,7 +1264,10 @@ export component PetuniaSlintShell inherits Window {
                     if selection-overlay-visible: Path {
                         fit: ImageFit.preserve;
                         fill: transparent;
-                        stroke: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
+                        // Modo componente usa o mesmo laranja da seleção
+                        // (Blender não pinta seleção de edit-mode de azul):
+                        // o accent virou vestígio e sai na próxima limpeza.
+                        stroke: DesignTokens.selection;
                         stroke-width: 1.5px;
                         commands: root.selection-outline-commands;
                     }
@@ -1283,7 +1286,7 @@ export component PetuniaSlintShell inherits Window {
                     }
                     if selection-overlay-visible: Path {
                         fit: ImageFit.preserve;
-                        fill: selection-overlay-accent ? DesignTokens.axis-z : DesignTokens.selection;
+                        fill: DesignTokens.selection;
                         stroke: transparent;
                         commands: root.selection-point-commands;
                     }

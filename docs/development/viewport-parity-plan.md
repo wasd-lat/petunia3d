@@ -16,10 +16,15 @@ trabalho focado. Estimativas de esforço relativo, não compromisso de prazo.
 
 ## Execução atual
 
-Por orientação explícita do usuário em 22/09/2026, executar os testes somente
-após terminar a implementação. Checkpoints podem ser publicados antes disso;
-eles são identificados como **não testados** e não alteram o critério de aceite.
-Nenhum resultado de testes de outra sessão é presumido válido neste ramo.
+Os checkpoints de 22/09/2026 foram publicados como **não testados**. Em 23/09,
+após esta rodada de implementação, passaram 22 testes Paint, 4 UV e 169 Slint
+com Rust 1.98.1. A validação visual real e os testes manuais de GPU/software
+continuam pendentes, portanto esses resultados não fecham I04, F04 ou F05.
+`cargo check --workspace`, Clippy estrito das crates envolvidas, `arch-check` e
+`ui-guard --strict` passaram. `docs-check` e `bible-check` param no lock do site
+congelado porque `docs/.vitepress/.env.local` já não existe neste ambiente; o
+arquivo não foi recriado. A formatação global anterior ao delta também falhava
+em arquivos fora da superfície alterada; será normalizada em commit mecânico.
 Matriz detalhada: [viewport-gap-matrix.md](viewport-gap-matrix.md).
 
 ## 1. Interface e viewport: paridade antes de novas funções
@@ -91,3 +96,7 @@ Matriz detalhada: [viewport-gap-matrix.md](viewport-gap-matrix.md).
   de preservação de atributos em Knife/Loop Cut. Esses itens continuam pendentes.
 - O usuário solicitou push seguido de merge na `main`, mantendo os testes para
   o fim da implementação. Este checkpoint não certifica paridade ou qualidade final.
+- 23/09/2026: integração Paint/UV corrigida na triangulação côncava, cor de
+  pincel/conta-gotas e seleção sincronizada; suíte Slint passou de 158/169 para
+  169/169 após atualizar testes que pressupunham semântica anterior de seleção,
+  Cut e gizmos. Ver matriz para limites de aceite.

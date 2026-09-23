@@ -51,8 +51,8 @@ fn append_point_marker(
     } else {
         1.0
     };
-    let radius = camera.visible_height() * perspective_scale * radius_px
-        / viewport_height.max(1) as f32;
+    let radius =
+        camera.visible_height() * perspective_scale * radius_px / viewport_height.max(1) as f32;
     for axis in [camera.right(), camera.up()] {
         lines.push(SelectionVertex {
             pos: (point - axis * radius).to_array(),
@@ -732,11 +732,19 @@ impl Renderer {
                     })],
                     compilation_options: Default::default(),
                 }),
-                primitive: wgpu::PrimitiveState { topology, cull_mode: None, ..Default::default() },
+                primitive: wgpu::PrimitiveState {
+                    topology,
+                    cull_mode: None,
+                    ..Default::default()
+                },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth24Plus,
                     depth_write_enabled: Some(false),
-                    depth_compare: Some(if xray { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::LessEqual }),
+                    depth_compare: Some(if xray {
+                        wgpu::CompareFunction::Always
+                    } else {
+                        wgpu::CompareFunction::LessEqual
+                    }),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -745,10 +753,23 @@ impl Renderer {
                 cache: None,
             })
         };
-        let selection_tri_pipeline = selection_pipeline("selection-tri", wgpu::PrimitiveTopology::TriangleList, false);
-        let selection_line_pipeline = selection_pipeline("selection-line", wgpu::PrimitiveTopology::LineList, false);
-        let selection_tri_xray_pipeline = selection_pipeline("selection-tri-xray", wgpu::PrimitiveTopology::TriangleList, true);
-        let selection_line_xray_pipeline = selection_pipeline("selection-line-xray", wgpu::PrimitiveTopology::LineList, true);
+        let selection_tri_pipeline = selection_pipeline(
+            "selection-tri",
+            wgpu::PrimitiveTopology::TriangleList,
+            false,
+        );
+        let selection_line_pipeline =
+            selection_pipeline("selection-line", wgpu::PrimitiveTopology::LineList, false);
+        let selection_tri_xray_pipeline = selection_pipeline(
+            "selection-tri-xray",
+            wgpu::PrimitiveTopology::TriangleList,
+            true,
+        );
+        let selection_line_xray_pipeline = selection_pipeline(
+            "selection-line-xray",
+            wgpu::PrimitiveTopology::LineList,
+            true,
+        );
 
         // refs: layout do grupo 1 (params + textura + sampler)
         let ref_tex_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1456,12 +1477,18 @@ impl Renderer {
             }
 
             if domain == petunia_core::SelectionDomain::Face {
-                for (fi, face) in mesh.faces.iter().enumerate().filter(|(_, face)| face.selected) {
+                for (fi, face) in mesh
+                    .faces
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, face)| face.selected)
+                {
                     if face.verts.len() < 3 {
                         continue;
                     }
                     for corners in mesh.face_triangle_corners(fi) {
-                        let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                        let [p0, p1, p2] =
+                            corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
                         for point in [p0, p1, p2] {
                             sel_tri.push(SelectionVertex {
                                 pos: point.to_array(),
@@ -1505,8 +1532,10 @@ impl Renderer {
         }
         // Preselection: mesma linguagem da seleção, porém mais fraca — o
         // usuário vê o que vai clicar sem confundir com o que já selecionou.
-        let hover_line = [0.62f32, 0.72, 0.88, 0.85];
-        let hover_tri = [0.62f32, 0.72, 0.88, 0.18];
+        // Ciano #7DDCFF único em GPU, software e shell (era cinza-azulado
+        // só aqui, destoando do hover do restante da UI).
+        let hover_line = [0.49f32, 0.86, 1.0, 0.85];
+        let hover_tri = [0.49f32, 0.86, 1.0, 0.18];
         if let Some(asset) = scene.assets.get(scene.active) {
             let mesh = asset.evaluated_mesh();
             match hover {
@@ -1537,16 +1566,17 @@ impl Renderer {
                     }
                 }
                 petunia_core::HoverTarget::Face(index) => {
-                    if let Some(face) = mesh.faces.get(index) {
-                        if face.verts.len() >= 3 {
-                            for corners in mesh.face_triangle_corners(index) {
-                                let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
-                                for point in [p0, p1, p2] {
-                                    sel_tri.push(SelectionVertex {
-                                        pos: point.to_array(),
-                                        color: hover_tri,
-                                    });
-                                }
+                    if let Some(face) = mesh.faces.get(index)
+                        && face.verts.len() >= 3
+                    {
+                        for corners in mesh.face_triangle_corners(index) {
+                            let [p0, p1, p2] =
+                                corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
+                            for point in [p0, p1, p2] {
+                                sel_tri.push(SelectionVertex {
+                                    pos: point.to_array(),
+                                    color: hover_tri,
+                                });
                             }
                         }
                     }
@@ -1884,12 +1914,20 @@ impl Renderer {
         // depth test. Fica depois da geometria e antes das arestas para que o
         // wireframe permaneça legível por cima da seleção.
         if let Some(vb) = &self.selection_tri_vb {
-            pass.set_pipeline(if self.xray { &self.selection_tri_xray_pipeline } else { &self.selection_tri_pipeline });
+            pass.set_pipeline(if self.xray {
+                &self.selection_tri_xray_pipeline
+            } else {
+                &self.selection_tri_pipeline
+            });
             pass.set_vertex_buffer(0, vb.slice(..));
             pass.draw(0..self.selection_tri_count, 0..1);
         }
         if let Some(vb) = &self.selection_line_vb {
-            pass.set_pipeline(if self.xray { &self.selection_line_xray_pipeline } else { &self.selection_line_pipeline });
+            pass.set_pipeline(if self.xray {
+                &self.selection_line_xray_pipeline
+            } else {
+                &self.selection_line_pipeline
+            });
             pass.set_vertex_buffer(0, vb.slice(..));
             pass.draw(0..self.selection_line_count, 0..1);
         }

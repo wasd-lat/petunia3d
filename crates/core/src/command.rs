@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use petunia_mesh::Mesh;
-use petunia_project::Asset;
 
 use crate::camera::ViewPreset;
 use crate::docs::DocsTopic;

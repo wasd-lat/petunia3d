@@ -30,7 +30,7 @@ Roteador central de intenção e mapa canônico de navegação do projeto **Petu
 
 - [Visão Geral e Introdução](../README.md) — O que é o Petunia3D e como começar
 - [Manual de Uso e Navegação](manual/usage.md) — Controles de viewport, modos de seleção e atalhos
-- [Workspaces e Design System](ui/README.md) — Os 4 workspaces (MODEL, PAINT, UV, EXPORT) e fluxos
+- [Workspaces e Design System](ui/README.md) — workspaces MODEL, PAINT e UV e seus fluxos
 - [Guia de Instalação e Requisitos](manual/installation.md) — Instalação via Cargo, requisitos de GPU e binários
 - [Referência de Atalhos](../../assets/keybinds/petunia.toml) — Arquivo TOML configurável de atalhos de teclado
 
