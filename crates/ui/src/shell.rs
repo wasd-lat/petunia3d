@@ -290,22 +290,30 @@ fn draw_pane(
                 },
             )
         }
-        PetuniaPane::Context => {
-            pane_surface(
-                ui,
-                tokens::bg_panel(state),
-                6.0,
-                |ui| match workspaces::profile_for(state.workspace).dock_bottom {
-                    // O workspace legado de UV não tem cartão flutuante: a seção
-                    // inferior dele é o conteúdo de pincel (a V1 não expõe o UV).
-                    workspaces::DockSectionKind::Brush => {
-                        crate::modules_ui::paint_ui::draw_brush_contents(ui, state)
-                    }
-                    _ => properties_panel::draw(ui, state, tools, registry),
-                },
-            )
-        }
+        PetuniaPane::Context => pane_surface(ui, tokens::bg_panel(state), 6.0, |ui| {
+            draw_context_contents(ui, state, tools, registry)
+        }),
         PetuniaPane::Bottom => bottom_region(ui, state),
+    }
+}
+
+/// Desenha o conteúdo Context definido pelo perfil do workspace.
+fn draw_context_contents(
+    ui: &mut Ui,
+    state: &mut AppState,
+    tools: &ToolRegistry,
+    registry: &mut ModuleRegistry,
+) {
+    match workspaces::profile_for(state.workspace).dock_bottom {
+        workspaces::DockSectionKind::Brush => {
+            egui::ScrollArea::vertical()
+                .id_salt("paint_inspector_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    crate::modules_ui::paint_ui::draw_brush_contents(ui, state)
+                });
+        }
+        _ => properties_panel::draw(ui, state, tools, registry),
     }
 }
 
@@ -428,7 +436,8 @@ fn draw_detached_inspector(
         egui::vec2(220.0, 200.0),
         egui::vec2(640.0, 760.0),
     );
-    let win = egui::Window::new(state.t_id(text_id::UI_PROPERTIES))
+    let title = state.t(workspaces::profile_for(state.workspace).dock_bottom_label);
+    let win = egui::Window::new(title)
         .open(&mut is_open)
         .default_size(default_size)
         .min_size(min_size)
@@ -441,7 +450,7 @@ fn draw_detached_inspector(
         )
         .show(ctx, |ui| {
             ui.push_id("detached_inspector", |ui| {
-                properties_panel::draw(ui, state, tools, registry);
+                draw_context_contents(ui, state, tools, registry);
             });
         });
     if let Some(win) = win {
@@ -482,6 +491,14 @@ mod tests {
         state.project.add("Vase", Mesh::cylinder(12, 0.4, 2.0));
         state.project.active = 0;
         state
+    }
+
+    fn shape_contains_text(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(shape) => shape.galley.text() == text,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| shape_contains_text(shape, text)),
+            _ => false,
+        }
     }
 
     /// Roda o shell num contexto real e devolve as regiões do último frame.
@@ -807,6 +824,42 @@ mod tests {
         assert!(regions.status_overlaps().is_empty());
         assert!(regions.dock_sections_disjoint());
         assert!(regions.viewport_overlays_within_viewport());
+    }
+
+    #[test]
+    fn paint_context_renders_brush_controls_instead_of_model_properties() {
+        let ctx = Context::default();
+        let mut state = state();
+        state.switch_workspace(petunia_core::Workspace::Paint);
+        let tools = ToolRegistry::new();
+        let mut registry = ModuleRegistry::new();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 620.0));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                let mut context = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                draw_pane(
+                    &mut context,
+                    &mut state,
+                    &tools,
+                    &mut registry,
+                    PetuniaPane::Context,
+                );
+            },
+        );
+        output.textures_delta.clear();
+        let has_text = |text: &str| {
+            output
+                .shapes
+                .iter()
+                .any(|shape| shape_contains_text(&shape.shape, text))
+        };
+
+        assert!(has_text(&state.t("paint.size")));
+        assert!(!has_text(&state.t("transform.position")));
     }
 
     #[test]

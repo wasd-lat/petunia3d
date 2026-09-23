@@ -106,11 +106,11 @@ const PROFILES: [WorkspaceLayoutProfile; Workspace::COUNT] = [
         center: CenterKind::Canvas2D,
         bottom: BottomPaneKind::None,
         dock_top: DockSectionKind::Layers,
-        // O pincel mora no cartão flutuante da ferramenta (§34), não no dock:
-        // a coluna da direita é a pilha de camadas + o inspector do objeto.
-        dock_bottom: DockSectionKind::Properties,
+        // Context é dedicado à pintura: cor, pincel, canal e tela. A pilha de
+        // camadas fica na seção superior do mesmo dock.
+        dock_bottom: DockSectionKind::Brush,
         dock_top_label: "paint.layers",
-        dock_bottom_label: "ui.properties",
+        dock_bottom_label: "paint.brush",
         default_inspector_tab: "object",
         overlay_shelf: false,
     },
@@ -184,8 +184,8 @@ mod tests {
         assert_eq!(paint.dock_top, DockSectionKind::Layers);
         assert_eq!(
             paint.dock_bottom,
-            DockSectionKind::Properties,
-            "o pincel é cartão flutuante: o dock fica com camadas + inspector"
+            DockSectionKind::Brush,
+            "Context apresenta os controles de pintura"
         );
         assert_eq!(paint.left_tools, ToolPaletteKind::Paint);
     }

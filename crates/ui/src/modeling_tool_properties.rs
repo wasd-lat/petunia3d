@@ -61,9 +61,8 @@ pub fn draw(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-// O cartão do pincel não mora aqui: ele é o cartão flutuante do módulo de
-// pintura (`crate::tool_properties_popover::PAINT_CARD_ID`), montado sobre
-// `paint_ui::draw_brush_contents`. Uma fonte só para os controles de pincel.
+// Os controles de pincel pertencem ao Context de PAINT e são desenhados por
+// `paint_ui::draw_brush_contents`; este popover cuida das ferramentas MODEL.
 
 fn edit_guard(state: &AppState) -> Option<String> {
     if state.project.active_mesh().is_none() {

@@ -29,7 +29,6 @@ use petunia_module_uv::UvModule;
 use petunia_project::{LayerBlendMode, LayerKind, PaintEffect, PaintLayer, TextureChannel};
 
 use crate::adapters::drag_drop::{PetuniaDragList, PetuniaDragSpec};
-use crate::adapters::popup::PetuniaPopup;
 use crate::adapters::tool_grid::{PetuniaToolCell, PetuniaToolGridSpec};
 use crate::foundation::motion::PetuniaMotion;
 use crate::icon_registry::PetuniaIcon;
@@ -237,9 +236,6 @@ fn draw_paint_tool(ui: &mut Ui, state: &mut AppState, tool: &PaintTool, cell: Pe
     {
         state.active_tool = "paint".into();
         state.paint_brush_kind = tool.kind;
-        // Escolher a ferramenta traz o cartão flutuante de volta: ele recolhe ao
-        // perder o foco, e este é o gesto que o reabre (§34).
-        PetuniaPopup::reveal(ui.ctx(), crate::tool_properties_popover::PAINT_CARD_ID);
         state.mark_dirty();
     }
 }
@@ -623,15 +619,14 @@ pub fn draw_paint_panel(
     draw_brush_contents(ui, state);
 }
 
-/// Conteúdo do pincel **sem** área de rolagem própria.
+/// Conteúdo de pintura **sem** área de rolagem própria.
 ///
-/// É o corpo do cartão flutuante da ferramenta (`PetuniaPopup::panel`, que já
-/// rola o corpo) e da seção legada do workspace UV: duas rolagens aninhadas
-/// esmagam o conteúdo em vez de rolar.
+/// O shell aplica rolagem ao Context do PAINT; deixar esta composição sem uma
+/// segunda rolagem mantém todos os controles numa única região navegável.
 pub fn draw_brush_contents(ui: &mut Ui, state: &mut AppState) {
-    draw_color_block(ui, state);
-    ui.separator();
     draw_brush_block(ui, state);
+    ui.separator();
+    draw_color_block(ui, state);
     ui.separator();
     draw_canvas_block(ui, state);
     ui.separator();

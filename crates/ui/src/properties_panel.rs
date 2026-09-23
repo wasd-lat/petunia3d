@@ -45,10 +45,9 @@ pub fn draw(
         }
         _ => {}
     }
-    // PAINT usa o mesmo inspector do MODEL: no layout de pintura o pincel mora no
-    // cartão flutuante da ferramenta (§34) e a coluna do dock mostra camadas
-    // (topo) + inspector do objeto (base). Só o UV legado tem painel próprio.
-    if !matches!(state.workspace, Workspace::Model | Workspace::Paint) {
+    // O Context de PAINT é montado pelo módulo de pintura no shell. Este painel
+    // contém as propriedades do MODEL e os inspetores de workspaces legados.
+    if state.workspace != Workspace::Model {
         draw_workspace_inspector(ui, state);
         return;
     }
