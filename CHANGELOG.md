@@ -5,6 +5,12 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Outliner / Parts Hierarchy & UV Editor Seams (24/09/2026, Master MVP)
+- Reordenação transacional de assets na hierarquia (`ReorderAssetCmd`, `Project::reorder_asset`) com persistência da seleção ativa e suporte a desfazer/refazer.
+- Ações completas no menu de contexto de peças/assets: Isolar / Desisolar (`scene.isolate` / `scene.un_isolate`), Mover para Cima (`scene.move_up`) e Mover para Baixo (`scene.move_down`).
+- Exibição direta da densidade da malha em cada item de Parts (`{verts}v · {tris}t`).
+- Sincronização visual bidirecional do editor UV: arestas de costura (`uv_seams`) e faces selecionadas são projetadas em subcaminhos dedicados para destaque no canvas Slint.
+
 ### Revisão do Inspector MODEL (24/09/2026, ADR 004)
 - Painel e rail colapsado com fundo translúcido (viewport visível através); seções mantêm fundo opaco para legibilidade.
 - Alça de recolhimento revelada por proximidade na borda do painel; header com "Inspetor"/seta/"MODEL" removido; respiro maior na borda direita.

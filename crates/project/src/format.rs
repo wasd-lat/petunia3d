@@ -59,8 +59,11 @@ pub fn save(project: &Project, path: &std::path::Path) -> Result<(), ProjectErro
     save_atomic(project, path)
 }
 
-/// Serializes `project` as a ZIP V1 container (no extra Project clone).
+/// Serializes `project` as a normalized ZIP V1 container (P3D-001).
 pub fn encode_zip(project: &Project) -> Result<Vec<u8>, ProjectError> {
+    let mut normalized = project.clone();
+    normalized.validate();
+    let project = &normalized;
     let manifest = ManifestV1 {
         format: "petunia".into(),
         version: PROJECT_VERSION,

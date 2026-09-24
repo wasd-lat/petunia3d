@@ -1408,6 +1408,108 @@ fn context_menu_refuses_an_unknown_asset() {
 }
 
 #[test]
+fn context_menu_isolate_toggles_isolate_mode_and_preserves_view_model_state() {
+    // Validates that right-click context menu "isolate" toggles local isolation mode
+    // Valida que o menu de contexto "isolate" alterna o modo de isolamento local
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+    assert_eq!(bridge.state.project.assets.len(), 2);
+    let sphere_id = bridge.state.project.assets[1].id.to_string();
+
+    assert!(!bridge.state.session.isolate_active);
+    bridge.open_context_menu(&sphere_id, 20.0, 20.0);
+    assert!(!bridge.view_model().context_menu_isolated);
+    assert!(bridge.context_menu_action("isolate"));
+
+    // Isolate is now active, only Sphere is visible
+    // Isolamento agora ativo, apenas Sphere visível
+    assert!(bridge.state.session.isolate_active);
+    assert!(!bridge.state.project.assets[0].visible);
+    assert!(bridge.state.project.assets[1].visible);
+
+    // Reopening context menu reflects isolated state
+    // Reabrir o menu reflete o estado isolado
+    bridge.open_context_menu(&sphere_id, 20.0, 20.0);
+    assert!(bridge.view_model().context_menu_isolated);
+    assert!(bridge.context_menu_action("isolate"));
+
+    // Un-isolate restores visibility for all assets
+    // Desisolar restaura a visibilidade de todos os assets
+    assert!(!bridge.state.session.isolate_active);
+    assert!(bridge.state.project.assets[0].visible);
+    assert!(bridge.state.project.assets[1].visible);
+}
+
+#[test]
+fn context_menu_move_up_and_down_reorders_scene_assets() {
+    // Validates reordering assets up and down through the context menu
+    // Valida reordenação de assets para cima e para baixo através do menu de contexto
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Sphere));
+    let cube_id = bridge.state.project.assets[0].id.to_string();
+    let sphere_id = bridge.state.project.assets[1].id.to_string();
+
+    // Cube at 0 cannot move up, but can move down
+    // Cube no índice 0 não pode subir, mas pode descer
+    bridge.open_context_menu(&cube_id, 10.0, 10.0);
+    let vm = bridge.view_model();
+    assert!(!vm.context_menu_can_move_up);
+    assert!(vm.context_menu_can_move_down);
+    assert!(!bridge.context_menu_action("move_up")); // Rejects invalid move up
+
+    // Sphere at 1 can move up, but cannot move down
+    // Sphere no índice 1 pode subir, mas não pode descer
+    bridge.open_context_menu(&sphere_id, 10.0, 10.0);
+    let vm = bridge.view_model();
+    assert!(vm.context_menu_can_move_up);
+    assert!(!vm.context_menu_can_move_down);
+    assert!(bridge.context_menu_action("move_up"));
+
+    // Now Sphere is at index 0 and Cube is at index 1
+    // Agora Sphere está no índice 0 e Cube no índice 1
+    assert_eq!(bridge.state.project.assets[0].name, "Sphere");
+    assert_eq!(bridge.state.project.assets[1].name, "Cube");
+
+    // Move Sphere back down
+    // Move Sphere de volta para baixo
+    bridge.open_context_menu(&sphere_id, 10.0, 10.0);
+    assert!(bridge.context_menu_action("move_down"));
+    assert_eq!(bridge.state.project.assets[0].name, "Cube");
+    assert_eq!(bridge.state.project.assets[1].name, "Sphere");
+}
+
+#[test]
+fn move_scene_asset_intent_reorders_transactionally_with_undo() {
+    // Validates MoveSceneAsset intent and undo/redo roundtrip
+    // Valida intent MoveSceneAsset e o ciclo transacional de undo/redo
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::AddPrimitive(
+        petunia_core::PrimitiveKind::Cylinder,
+    ));
+    let cyl_id = bridge.state.project.assets[1].id.to_string();
+
+    // Move Cylinder up (delta -1)
+    // Move Cilindro para cima (delta -1)
+    bridge.apply(UiIntent::MoveSceneAsset {
+        id: cyl_id.clone(),
+        delta: -1,
+    });
+    assert_eq!(bridge.state.project.assets[0].name, "Cylinder");
+    assert_eq!(bridge.state.project.assets[1].name, "Cube");
+
+    // Undo restores original order
+    // Undo restaura a ordem original
+    bridge.apply(UiIntent::Undo);
+    assert_eq!(bridge.state.project.assets[0].name, "Cube");
+    assert_eq!(bridge.state.project.assets[1].name, "Cylinder");
+
+    // Redo reaplica
+    bridge.apply(UiIntent::Redo);
+    assert_eq!(bridge.state.project.assets[0].name, "Cylinder");
+    assert_eq!(bridge.state.project.assets[1].name, "Cube");
+}
+
+#[test]
 fn menu_bar_labels_come_from_the_i18n_catalog() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     let vm = bridge.view_model();
@@ -2108,6 +2210,35 @@ fn clearing_uv_seams_is_idempotent_and_reports_when_empty() {
             .uv_seams
             .is_empty()
     );
+}
+
+#[test]
+fn uv_editor_generates_seam_and_selection_paths() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // Initially no seams or selected faces / Inicialmente sem costuras ou faces selecionadas
+    let vm = bridge.view_model();
+    assert!(vm.uv_editor.seam_commands.is_empty());
+    assert!(vm.uv_editor.selected_commands.is_empty());
+
+    // Select face 0 / Seleciona a face 0
+    bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+    bridge.state.sync_selection();
+    let vm = bridge.view_model();
+    assert!(
+        !vm.uv_editor.selected_commands.is_empty(),
+        "selected face should produce path commands / face selecionada deve gerar comandos de caminho"
+    );
+    assert!(vm.uv_editor.selected_commands.starts_with('M'));
+
+    // Toggle seams on selected face / Alterna costuras na face selecionada
+    assert!(bridge.toggle_selected_uv_seams());
+    let vm = bridge.view_model();
+    assert!(
+        !vm.uv_editor.seam_commands.is_empty(),
+        "marked seams should produce path commands / costuras marcadas devem gerar comandos de caminho"
+    );
+    assert!(vm.uv_editor.seam_commands.starts_with('M'));
 }
 
 #[test]

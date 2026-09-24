@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **750**.
+Total de chaves de localização cadastradas: **755**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -702,6 +702,11 @@ Total de chaves de localização cadastradas: **750**.
 | `ui.search` | Search | Buscar |
 | `ui.search_assets` | Search assets | Buscar assets |
 | `ui.search_parts` | Search parts | Buscar peças |
+| `ui.section_dock` | Dock panel | Ancorar painel |
+| `ui.section_drag` | Drag to move | Arrastar para mover |
+| `ui.section_pin_asset` | Pin to active asset | Fixar no asset ativo |
+| `ui.section_pin_open` | Keep open | Manter aberto |
+| `ui.section_unpin_asset` | Unpin asset | Desfixar asset |
 | `ui.selected_parts_only` | Show selected parts only | Mostrar apenas peças selecionadas |
 | `ui.selection_color` | Selection color (#RRGGBB) | Cor da seleção (#RRGGBB) |
 | `ui.selection_color_invalid` | Selection color must use #RRGGBB | A cor da seleção deve usar #RRGGBB |

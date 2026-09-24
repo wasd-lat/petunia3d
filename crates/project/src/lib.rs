@@ -835,6 +835,23 @@ impl Project {
         }
     }
 
+    /// Reordena um asset da posição `from` para a posição `to`, mantendo o asset ativo selecionado.
+    /// Reorders an asset from position `from` to position `to`, preserving the active asset selection.
+    pub fn reorder_asset(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.assets.len() || to >= self.assets.len() || from == to {
+            return false;
+        }
+        let active_id = self.assets.get(self.active).map(|a| a.id);
+        let asset = self.assets.remove(from);
+        self.assets.insert(to, asset);
+        if let Some(id) = active_id
+            && let Some(idx) = self.find(id)
+        {
+            self.active = idx;
+        }
+        true
+    }
+
     pub fn totals(&self) -> (usize, usize) {
         let (mut v, mut f) = (0, 0);
         for o in &self.assets {

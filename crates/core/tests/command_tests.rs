@@ -7,9 +7,9 @@ use petunia_core::command::{
     AddPrimitiveCmd, BoxSelectCmd, ClearSelectionCmd, CommandDispatcher, CommandError,
     DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd, DuplicateSelectionCmd,
     ExtrudeIndividualCmd, FlipDiagonalCmd, FlipNormalsCmd, InvertSelectionCmd, MergeCenterCmd,
-    PrimitiveKind, RevolveCmd, SelectAllCmd, SelectLinkedCmd, SetAssetCollectionCmd,
-    SubdivideSelectionCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd,
-    ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
+    PrimitiveKind, ReorderAssetCmd, RevolveCmd, SelectAllCmd, SelectLinkedCmd,
+    SetAssetCollectionCmd, SubdivideSelectionCmd, ToggleCollectionLockCmd,
+    ToggleCollectionVisibilityCmd, ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
 };
 use petunia_core::state::{ASSET_NAME_MAX_LEN, AppState, AssetRenameError, EditMode};
 
@@ -106,6 +106,49 @@ fn test_duplicate_and_delete_asset_cmd() {
         "esperava erro ao tentar deletar índice inexistente, obteve: {:?}",
         err
     );
+}
+
+#[test]
+fn test_reorder_asset_cmd_and_undo() {
+    // Reorders assets in the scene and verifies active index tracking and undo/redo
+    // Reordena assets na cena e valida rastreamento do índice ativo e undo/redo
+    let mut state = AppState::default();
+    let add_sphere = AddPrimitiveCmd::new(PrimitiveKind::Sphere);
+    state.dispatch(&add_sphere).expect("adiciona esfera");
+    assert_eq!(state.project.assets.len(), 2);
+    assert_eq!(state.project.assets[0].name, "Cube");
+    assert_eq!(state.project.assets[1].name, "Sphere");
+    assert_eq!(state.project.active, 1);
+
+    // Reordena 0 -> 1 (Cube vai para a posição 1, Sphere vai para a posição 0)
+    let reorder_cmd = ReorderAssetCmd { from: 0, to: 1 };
+    state.dispatch(&reorder_cmd).expect("reordena assets");
+    assert_eq!(state.project.assets[0].name, "Sphere");
+    assert_eq!(state.project.assets[1].name, "Cube");
+    // O asset ativo era Sphere, que agora está no índice 0
+    // Active asset was Sphere, which is now at index 0
+    assert_eq!(state.project.active, 0);
+
+    // Undo restaura a ordem e o índice ativo original
+    // Undo restores original order and active index
+    assert!(state.undo());
+    assert_eq!(state.project.assets[0].name, "Cube");
+    assert_eq!(state.project.assets[1].name, "Sphere");
+    assert_eq!(state.project.active, 1);
+
+    // Redo reaplica a reordenação
+    // Redo reapplies the reorder
+    assert!(state.redo());
+    assert_eq!(state.project.assets[0].name, "Sphere");
+    assert_eq!(state.project.assets[1].name, "Cube");
+    assert_eq!(state.project.active, 0);
+
+    // Tentativa com índices inválidos é rejeitada
+    // Attempt with invalid indices is rejected
+    let invalid_reorder = ReorderAssetCmd { from: 0, to: 0 };
+    assert!(state.dispatch(&invalid_reorder).is_err());
+    let out_of_bounds = ReorderAssetCmd { from: 0, to: 99 };
+    assert!(state.dispatch(&out_of_bounds).is_err());
 }
 
 #[test]

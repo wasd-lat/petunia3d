@@ -151,6 +151,15 @@ pub struct ShellViewModel {
     pub context_menu_mode: String,
     pub context_menu_visible: bool,
     pub context_menu_locked: bool,
+    /// Indicates if scene isolation is active for this target.
+    /// Indica se o modo de isolamento da cena está ativo para este alvo.
+    pub context_menu_isolated: bool,
+    /// Indicates if the item can be moved up in the hierarchy.
+    /// Indica se o item pode ser movido para cima na hierarquia.
+    pub context_menu_can_move_up: bool,
+    /// Indicates if the item can be moved down in the hierarchy.
+    /// Indica se o item pode ser movido para baixo na hierarquia.
+    pub context_menu_can_move_down: bool,
     pub boolean_operand_name: String,
     pub boolean_ready: bool,
     pub boolean_keep_parts: bool,
@@ -181,6 +190,11 @@ pub struct ShellViewModel {
     pub label_expand_inspector: String,
     pub label_collapse_inspector: String,
     pub label_resize_panel_width: String,
+    pub label_section_dock: String,
+    pub label_section_drag: String,
+    pub label_section_pin_open: String,
+    pub label_section_pin_asset: String,
+    pub label_section_unpin_asset: String,
     pub label_object_name: String,
     pub label_object_visibility: String,
     pub label_object_lock: String,
@@ -571,6 +585,9 @@ impl ShellViewModel {
             context_menu_mode: String::new(),
             context_menu_visible: true,
             context_menu_locked: false,
+            context_menu_isolated: false,
+            context_menu_can_move_up: false,
+            context_menu_can_move_down: false,
             boolean_operand_name: String::new(),
             boolean_ready: false,
             boolean_keep_parts: false,
@@ -601,6 +618,11 @@ impl ShellViewModel {
             label_expand_inspector: String::new(),
             label_collapse_inspector: String::new(),
             label_resize_panel_width: String::new(),
+            label_section_dock: String::new(),
+            label_section_drag: String::new(),
+            label_section_pin_open: String::new(),
+            label_section_pin_asset: String::new(),
+            label_section_unpin_asset: String::new(),
             label_object_name: String::new(),
             label_object_visibility: String::new(),
             label_object_lock: String::new(),
@@ -842,8 +864,12 @@ impl ShellViewModel {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UvEditorModel {
-    /// Comandos SVG-like do `Path` do Slint (`M x y L x y ...`).
+    /// SVG-like Path commands for UV mesh wireframe / Comandos SVG-like para malha de arame UV
     pub layout_commands: String,
+    /// SVG-like Path commands for highlighted seam edges / Comandos SVG-like para arestas de costura destacadas
+    pub seam_commands: String,
+    /// SVG-like Path commands for selected UV faces / Comandos SVG-like para faces UV selecionadas
+    pub selected_commands: String,
     pub island_count: usize,
     pub face_count: usize,
     pub selected_face: i32,

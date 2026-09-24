@@ -249,6 +249,9 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_context_menu_mode(vm.context_menu_mode.as_str().into());
     window.set_context_menu_visible(vm.context_menu_visible);
     window.set_context_menu_locked(vm.context_menu_locked);
+    window.set_context_menu_isolated(vm.context_menu_isolated);
+    window.set_context_menu_can_move_up(vm.context_menu_can_move_up);
+    window.set_context_menu_can_move_down(vm.context_menu_can_move_down);
     window.set_boolean_operand_name(vm.boolean_operand_name.as_str().into());
     window.set_boolean_ready(vm.boolean_ready);
     window.set_boolean_keep_parts(vm.boolean_keep_parts);
@@ -288,6 +291,11 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_label_search_parts(vm.label_search_parts.as_str().into());
     window.set_label_inspector(vm.label_inspector.as_str().into());
     window.set_label_resize_panel_width(vm.label_resize_panel_width.as_str().into());
+    window.set_label_section_dock(vm.label_section_dock.as_str().into());
+    window.set_label_section_drag(vm.label_section_drag.as_str().into());
+    window.set_label_section_pin_open(vm.label_section_pin_open.as_str().into());
+    window.set_label_section_pin_asset(vm.label_section_pin_asset.as_str().into());
+    window.set_label_section_unpin_asset(vm.label_section_unpin_asset.as_str().into());
     window.set_label_expand_inspector(vm.label_expand_inspector.as_str().into());
     window.set_label_collapse_inspector(vm.label_collapse_inspector.as_str().into());
     window.set_label_tab_parts(vm.label_tab_parts.as_str().into());
@@ -454,6 +462,8 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_inspector_width(vm.inspector_width);
     window.set_asset_library_height(vm.asset_library_height);
     window.set_uv_layout_commands(vm.uv_editor.layout_commands.as_str().into());
+    window.set_uv_seam_commands(vm.uv_editor.seam_commands.as_str().into());
+    window.set_uv_selected_commands(vm.uv_editor.selected_commands.as_str().into());
     window.set_uv_island_count(vm.uv_editor.island_count as i32);
     window.set_uv_face_count(vm.uv_editor.face_count as i32);
     window.set_uv_selected_face(vm.uv_editor.selected_face);
@@ -602,6 +612,30 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
         })
         .collect();
     window.set_modifier_rows(std::rc::Rc::new(slint::VecModel::from(modifier_rows)).into());
+    let section_states: Vec<SectionState> = vm
+        .section_states
+        .iter()
+        .map(|state| SectionState {
+            id: state.id.as_str().into(),
+            docked: state.docked,
+            x: state.x,
+            y: state.y,
+            pin_open: state.pin_open,
+            pinned_asset: state.pinned_asset.as_deref().unwrap_or_default().into(),
+        })
+        .collect();
+    window.set_section_states(std::rc::Rc::new(slint::VecModel::from(section_states)).into());
+    for state in &vm.section_states {
+        match state.id.as_str() {
+            "parts" => window.set_parts_docked(state.docked),
+            "transform" => window.set_transform_docked(state.docked),
+            "material" => window.set_material_docked(state.docked),
+            "object" => window.set_object_docked(state.docked),
+            "modifiers" => window.set_modifiers_docked(state.docked),
+            "quick_actions" => window.set_quick_actions_docked(state.docked),
+            _ => {}
+        }
+    }
     window.set_paint_pixel_grid(vm.paint_pixel_grid);
     window.set_paint_canvas_zoom(vm.paint_canvas_zoom);
 
@@ -609,14 +643,19 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
 }
 
 pub(crate) fn persist_user_preferences<V: PetuniaViewport>(bridge: &mut SlintUiBridge<V>) {
-    let preferences = petunia_config::UserPreferences {
-        invert_vertical_drag: bridge.state.ui.invert_vertical_drag,
-        selection_rgb: bridge.state.ui.selection_rgb,
-        selection_thickness: bridge.state.ui.selection_thickness,
-        model_quick_actions: bridge.state.ui.model_quick_actions.clone(),
-        ..Default::default()
-    };
-    if let Err(error) = preferences.save() {
+    // Single source of truth: live UI state refreshes the cache (which owns
+    // the section layouts), then the whole cache is saved. Building a fresh
+    // struct here would silently wipe persisted section layouts.
+    // Fonte única da verdade: o estado vivo atualiza o cache (que detém os
+    // layouts), depois o cache inteiro é salvo. Construir struct nova aqui
+    // apagaria silenciosamente os layouts persistidos.
+    bridge.sync_preferences_from_state();
+    let preferences = bridge.preferences.clone();
+    let path = bridge
+        .preferences_path_override
+        .clone()
+        .unwrap_or_else(petunia_config::UserPreferences::default_path);
+    if let Err(error) = preferences.save_to_path(&path) {
         let message = bridge
             .state
             .t_id(petunia_config::text_id::UI_PREFERENCES_SAVE_FAILED);
@@ -2703,6 +2742,26 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let move_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    // Reorders an asset in the scene hierarchy / Reordena um asset na hierarquia da cena
+    window.on_scene_move(move |id, delta| {
+        if let Ok(mut bridge) = move_bridge.lock() {
+            bridge.apply(UiIntent::MoveSceneAsset {
+                id: id.as_str().to_string(),
+                delta,
+            });
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let theme_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_theme_changed(move |theme_id| {
@@ -3197,6 +3256,83 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_modifier_direction_changed(move |id, direction| {
         if let Ok(mut bridge) = modifier_direction_bridge.lock() {
             bridge.set_modifier_direction(id.as_str(), direction);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let toggle_all_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_all_sections(move || {
+        if let (Ok(bridge), Some(window)) = (toggle_all_bridge.lock(), window_weak.upgrade()) {
+            let open = [
+                window.get_model_parts_open(),
+                window.get_model_transform_open(),
+                window.get_model_material_open(),
+                window.get_model_object_open(),
+                window.get_model_modifiers_open(),
+                window.get_quick_actions_section_open(),
+            ];
+            let next = bridge.toggle_all_sections(open);
+            window.set_model_parts_open(next[0]);
+            window.set_model_transform_open(next[1]);
+            window.set_model_material_open(next[2]);
+            window.set_model_object_open(next[3]);
+            window.set_model_modifiers_open(next[4]);
+            window.set_quick_actions_section_open(next[5]);
+        }
+    });
+    let section_moved_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_section_moved(move |id, x, y| {
+        if let Ok(mut bridge) = section_moved_bridge.lock() {
+            if let Some(section) = crate::section_layout::section_id_from_str(id.as_str()) {
+                bridge.move_section_float(section, x, y);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let section_dock_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_section_dock_toggled(move |id| {
+        if let Ok(mut bridge) = section_dock_bridge.lock() {
+            if let Some(section) = crate::section_layout::section_id_from_str(id.as_str()) {
+                let docked =
+                    bridge.section_layouts[crate::section_layout::section_index(section)].docked;
+                bridge.set_section_docked(section, !docked);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let section_pin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_section_pin_open_toggled(move |id| {
+        if let Ok(mut bridge) = section_pin_bridge.lock() {
+            if let Some(section) = crate::section_layout::section_id_from_str(id.as_str()) {
+                let pin_open =
+                    bridge.section_layouts[crate::section_layout::section_index(section)].pin_open;
+                bridge.set_section_pin_open(section, !pin_open);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let section_asset_pin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_section_asset_pin_changed(move |id, asset| {
+        if let Ok(mut bridge) = section_asset_pin_bridge.lock() {
+            if let Some(section) = crate::section_layout::section_id_from_str(id.as_str()) {
+                let asset = asset.as_str();
+                bridge.set_section_pinned_asset(
+                    section,
+                    (!asset.is_empty()).then(|| asset.to_string()),
+                );
+            }
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
             }

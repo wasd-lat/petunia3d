@@ -262,6 +262,21 @@ pub enum UiIntent {
     SelectSceneAsset(String),
     ToggleSceneAssetVisibility(String),
     ToggleSceneAssetLock(String),
+    /// Reorders an asset by directional delta (-1: up, +1: down)
+    /// Reordena um asset por delta direcional (-1: para cima, +1: para baixo)
+    MoveSceneAsset {
+        id: String,
+        delta: i32,
+    },
+    /// Reorders an asset from index to index
+    /// Reordena um asset de um índice de origem para um de destino
+    ReorderSceneAsset {
+        from: usize,
+        to: usize,
+    },
+    /// Alternates local isolation mode for the active asset
+    /// Alterna o modo de isolamento local para o asset ativo
+    ToggleIsolateActiveAsset,
     SetTheme(String),
     DuplicateActiveAsset,
     SelectAll,
@@ -983,6 +998,33 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 {
                     self.state.set_status(error.to_string());
                 }
+            }
+            UiIntent::MoveSceneAsset { id, delta } => {
+                // Moves asset by delta in scene hierarchy / Move asset por delta na hierarquia da cena
+                if let Some(uuid) = uuid::Uuid::parse_str(&id).ok()
+                    && let Some(idx) = self.state.project.find(uuid)
+                {
+                    let len = self.state.project.assets.len();
+                    let target = (idx as isize + delta as isize)
+                        .clamp(0, (len.saturating_sub(1)) as isize)
+                        as usize;
+                    if target != idx {
+                        let _ = self.state.dispatch(&petunia_core::ReorderAssetCmd {
+                            from: idx,
+                            to: target,
+                        });
+                    }
+                }
+            }
+            UiIntent::ReorderSceneAsset { from, to } => {
+                // Reorders asset explicitly from index to index / Reordena asset explicitamente entre índices
+                let _ = self
+                    .state
+                    .dispatch(&petunia_core::ReorderAssetCmd { from, to });
+            }
+            UiIntent::ToggleIsolateActiveAsset => {
+                // Toggles isolation of active asset / Alterna isolamento do asset ativo
+                self.state.toggle_isolate();
             }
             UiIntent::SetTheme(theme_id) => {
                 self.state.ui.active_theme_id = theme_id;
@@ -3526,10 +3568,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         };
         let face_count = mesh.faces.len();
         let mut commands = String::new();
-        for face in mesh.faces.iter().take(MAX_FACES) {
+        let mut seam_commands = String::new();
+        let mut selected_commands = String::new();
+
+        for (face_idx, face) in mesh.faces.iter().enumerate().take(MAX_FACES) {
             if face.uv.len() < 3 {
                 continue;
             }
+            let is_selected = face.selected || self.state.session.uv_selected.contains(&face_idx);
+
+            // Base wireframe path / Caminho da malha de arame base
             for (index, uv) in face.uv.iter().enumerate() {
                 if !uv[0].is_finite() || !uv[1].is_finite() {
                     continue;
@@ -3543,10 +3591,53 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
             }
             commands.push_str("Z ");
+
+            // Selected face highlight path / Destaque de faces UV selecionadas
+            if is_selected {
+                for (index, uv) in face.uv.iter().enumerate() {
+                    if !uv[0].is_finite() || !uv[1].is_finite() {
+                        continue;
+                    }
+                    let x = uv[0] * BOX;
+                    let y = (1.0 - uv[1]) * BOX;
+                    if index == 0 {
+                        selected_commands.push_str(&format!("M {x:.2} {y:.2} "));
+                    } else {
+                        selected_commands.push_str(&format!("L {x:.2} {y:.2} "));
+                    }
+                }
+                selected_commands.push_str("Z ");
+            }
+
+            // Highlighted seam edges / Arestas de costura destacadas
+            let n = face.verts.len();
+            for i in 0..n {
+                let v0 = face.verts[i];
+                let v1 = face.verts[(i + 1) % n];
+                let edge = (v0.min(v1), v0.max(v1));
+                if mesh.uv_seams.contains(&edge) && i < face.uv.len() && (i + 1) % n < face.uv.len()
+                {
+                    let uv0 = face.uv[i];
+                    let uv1 = face.uv[(i + 1) % n];
+                    if uv0[0].is_finite()
+                        && uv0[1].is_finite()
+                        && uv1[0].is_finite()
+                        && uv1[1].is_finite()
+                    {
+                        let x0 = uv0[0] * BOX;
+                        let y0 = (1.0 - uv0[1]) * BOX;
+                        let x1 = uv1[0] * BOX;
+                        let y1 = (1.0 - uv1[1]) * BOX;
+                        seam_commands.push_str(&format!("M {x0:.2} {y0:.2} L {x1:.2} {y1:.2} "));
+                    }
+                }
+            }
         }
         let islands = mesh.uv_islands();
         UvEditorModel {
             layout_commands: commands,
+            seam_commands,
+            selected_commands,
             island_count: islands.len(),
             face_count,
             selected_face: mesh
@@ -3891,9 +3982,21 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.section_layouts = section_layout::restore_section_layouts(preferences);
     }
 
+    /// Refresh the cached preferences from live UI state (section layouts are
+    /// owned by the cache itself and left untouched here).
+    /// Atualiza o cache de preferências a partir do estado vivo da UI (os layouts
+    /// pertencem ao próprio cache e ficam intocados aqui).
+    pub(crate) fn sync_preferences_from_state(&mut self) {
+        self.preferences.invert_vertical_drag = self.state.ui.invert_vertical_drag;
+        self.preferences.selection_rgb = self.state.ui.selection_rgb;
+        self.preferences.selection_thickness = self.state.ui.selection_thickness;
+        self.preferences.model_quick_actions = self.state.ui.model_quick_actions.clone();
+    }
+
     /// Persist runtime section layouts; failures surface as status, never panic.
     /// Persiste os layouts das seções; falhas viram status, nunca pânico.
     fn persist_section_layouts(&mut self) {
+        self.sync_preferences_from_state();
         for id in petunia_config::InspectorSectionId::all() {
             let layout = self.section_layouts[section_layout::section_index(id)].clone();
             self.preferences.set_section_layout(id, layout);
@@ -3955,6 +4058,23 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         section_layout::set_pinned_asset(&mut self.section_layouts, section, asset);
         self.persist_section_layouts();
         true
+    }
+
+    /// Collapse-all toggle honoring pinned-open sections: if every section is
+    /// open, close the unpinned ones; otherwise open them. Pinned sections
+    /// stay open either way. Takes and returns open flags in canonical order.
+    /// Alternador de recolher-tudo respeitando pins: se tudo está aberto, fecha
+    /// as não-fixadas; senão, abre-as. Fixadas seguem abertas. Recebe e devolve
+    /// flags de aberto em ordem canônica.
+    pub fn toggle_all_sections(&self, open: [bool; 6]) -> [bool; 6] {
+        let close_all = open.iter().all(|flag| *flag);
+        let mut next = open;
+        for id in petunia_config::InspectorSectionId::all() {
+            if !self.section_layouts[section_layout::section_index(id)].pin_open {
+                next[section_layout::section_index(id)] = !close_all;
+            }
+        }
+        next
     }
 
     /// Presentation snapshot of the six section layouts, in canonical order.
@@ -4681,6 +4801,38 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             "lock" => {
                 self.toggle_asset_lock(&id);
                 true
+            }
+            "isolate" => {
+                // Toggles isolation for the targeted asset / Alterna isolamento para o asset alvo
+                self.select_asset_by_id(menu.asset);
+                self.state.toggle_isolate();
+                true
+            }
+            "move_up" => {
+                // Moves target asset up in the scene list / Move o asset alvo para cima na lista da cena
+                if let Some(idx) = self.state.project.find(menu.asset)
+                    && idx > 0
+                {
+                    let _ = self.state.dispatch(&petunia_core::ReorderAssetCmd {
+                        from: idx,
+                        to: idx - 1,
+                    });
+                    return true;
+                }
+                false
+            }
+            "move_down" => {
+                // Moves target asset down in the scene list / Move o asset alvo para baixo na lista da cena
+                if let Some(idx) = self.state.project.find(menu.asset)
+                    && idx + 1 < self.state.project.assets.len()
+                {
+                    let _ = self.state.dispatch(&petunia_core::ReorderAssetCmd {
+                        from: idx,
+                        to: idx + 1,
+                    });
+                    return true;
+                }
+                false
             }
             "frame" => {
                 self.select_asset_by_id(menu.asset);
@@ -5768,6 +5920,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 vm.context_menu_title = asset.name.clone();
                 vm.context_menu_visible = asset.visible;
                 vm.context_menu_locked = asset.locked;
+                vm.context_menu_isolated = self.state.session.isolate_active;
+                if let Some(idx) = self.state.project.find(menu.asset) {
+                    vm.context_menu_can_move_up = idx > 0;
+                    vm.context_menu_can_move_down = idx + 1 < self.state.project.assets.len();
+                }
             }
         }
         if let Some(operand) = self.state.session.tools.boolean_operand {
@@ -5812,6 +5969,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_expand_inspector = translated(petunia_config::text_id::UI_EXPAND_INSPECTOR);
         vm.label_collapse_inspector = translated(petunia_config::text_id::UI_COLLAPSE_INSPECTOR);
         vm.label_resize_panel_width = translated(petunia_config::text_id::UI_RESIZE_PANEL_WIDTH);
+        vm.label_section_dock = translated(petunia_config::text_id::UI_SECTION_DOCK);
+        vm.label_section_drag = translated(petunia_config::text_id::UI_SECTION_DRAG);
+        vm.label_section_pin_open = translated(petunia_config::text_id::UI_SECTION_PIN_OPEN);
+        vm.label_section_pin_asset = translated(petunia_config::text_id::UI_SECTION_PIN_ASSET);
+        vm.label_section_unpin_asset = translated(petunia_config::text_id::UI_SECTION_UNPIN_ASSET);
         vm.label_object_name = translated(petunia_config::text_id::UI_OBJECT_NAME);
         vm.label_object_visibility = translated(petunia_config::text_id::UI_OBJECT_VISIBILITY);
         vm.label_object_lock = translated(petunia_config::text_id::UI_OBJECT_LOCK);
@@ -6420,7 +6582,10 @@ pub fn run() -> Result<(), slint::PlatformError> {
         petunia_config::UserPreferences::default().selection_rgb
     };
     state.ui.selection_thickness = preferences.selection_thickness.clamp(1.0, 6.0);
-    state.ui.model_quick_actions = preferences.model_quick_actions;
+    // Clone (at most 6 short ids): `preferences` stays whole for the section
+    // restore below. / Clone (no máximo 6 ids curtos): `preferences` segue
+    // íntegro para o restore das seções abaixo.
+    state.ui.model_quick_actions = preferences.model_quick_actions.clone();
 
     let mut viewport: Box<dyn PetuniaViewport> = if let Some((_, _, device, queue)) = gpu_context {
         println!("Viewport backend: shared WGPU fast path");
@@ -6456,7 +6621,13 @@ pub fn run() -> Result<(), slint::PlatformError> {
     }
     window.set_has_gpu_viewport(true);
 
-    let bridge = Arc::new(Mutex::new(SlintUiBridge::new(state, viewport)));
+    let mut startup_bridge = SlintUiBridge::new(state, viewport);
+    // Section layouts persist per module: restore them onto the runtime state
+    // and seed the preferences cache so later mutations persist everything.
+    // Layouts de seção persistem por módulo: restaura no estado runtime e
+    // semeia o cache para mutações futuras persistirem tudo.
+    startup_bridge.restore_section_layouts(&preferences);
+    let bridge = Arc::new(Mutex::new(startup_bridge));
 
     // Ciclo de vida do autosave (P3D-002): marcador de sessão no arranque,
     // detecção de encerramento sujo e remoção no fechamento limpo.

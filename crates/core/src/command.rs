@@ -1339,6 +1339,39 @@ impl Command for DuplicateAssetCmd {
     }
 }
 
+/// Reordena um asset na cena por índices, gravando o passo no histórico de desfazer (Undo/Redo).
+/// Reorders an asset in the scene by indices, recording the step in the undo/redo history.
+#[derive(Debug, Clone)]
+pub struct ReorderAssetCmd {
+    pub from: usize,
+    pub to: usize,
+}
+
+impl Command for ReorderAssetCmd {
+    fn label(&self) -> &'static str {
+        "reorder asset"
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        let len = state.project.assets.len();
+        if self.from >= len || self.to >= len || self.from == self.to {
+            Err("Invalid reorder indices")
+        } else {
+            Ok(())
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        if state.project.reorder_asset(self.from, self.to) {
+            state.mark_dirty();
+            state.set_status("Objeto reordenado na cena".to_string());
+            Ok(())
+        } else {
+            Err(CommandError::InvalidAssetIndex(self.from))
+        }
+    }
+}
+
 /// Comando para instanciar um asset na cena em uma posição específica ou no 3D Cursor.
 #[derive(Debug, Clone)]
 pub struct InstantiateAssetCmd {

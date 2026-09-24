@@ -189,6 +189,11 @@ pub mod text_id {
     pub const UI_OBJECT_LOCK: TextId = TextId::new("ui.object_lock");
     pub const UI_OBJECT_NO_SELECTION: TextId = TextId::new("ui.object_no_selection");
     pub const UI_RESIZE_PANEL_WIDTH: TextId = TextId::new("ui.resize_panel_width");
+    pub const UI_SECTION_DOCK: TextId = TextId::new("ui.section_dock");
+    pub const UI_SECTION_DRAG: TextId = TextId::new("ui.section_drag");
+    pub const UI_SECTION_PIN_OPEN: TextId = TextId::new("ui.section_pin_open");
+    pub const UI_SECTION_PIN_ASSET: TextId = TextId::new("ui.section_pin_asset");
+    pub const UI_SECTION_UNPIN_ASSET: TextId = TextId::new("ui.section_unpin_asset");
     pub const UI_TOOL_CARD: TextId = TextId::new("ui.tool_card");
     pub const UI_TOOL_OPTIONS: TextId = TextId::new("ui.tool_options");
     pub const UI_TOOL_OPTIONS_EXPAND: TextId = TextId::new("ui.tool_options_expand");
@@ -505,6 +510,11 @@ pub mod text_id {
         UI_OBJECT_LOCK,
         UI_OBJECT_NO_SELECTION,
         UI_RESIZE_PANEL_WIDTH,
+        UI_SECTION_DOCK,
+        UI_SECTION_DRAG,
+        UI_SECTION_PIN_OPEN,
+        UI_SECTION_PIN_ASSET,
+        UI_SECTION_UNPIN_ASSET,
         UI_TOOL_CARD,
         UI_TOOL_OPTIONS,
         UI_TOOL_OPTIONS_EXPAND,

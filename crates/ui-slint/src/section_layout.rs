@@ -36,6 +36,16 @@ pub fn restore_section_layouts(preferences: &UserPreferences) -> SectionLayouts 
     InspectorSectionId::all().map(|id| preferences.section_layout(id))
 }
 
+/// Resolve a persisted section id; unknown ids are rejected (fail-safe).
+/// Slint only ever sends known ids; anything else is ignored, never panics.
+/// Resolve um id persistido de seção; ids desconhecidos são rejeitados (fail-safe).
+/// O Slint só envia ids conhecidos; o resto é ignorado, nunca pânico.
+pub fn section_id_from_str(id: &str) -> Option<InspectorSectionId> {
+    InspectorSectionId::all()
+        .into_iter()
+        .find(|known| known.as_str() == id)
+}
+
 /// Dock (`true`) or float (`false`) one section.
 /// Ancora (`true`) ou flutua (`false`) uma seção.
 pub fn set_docked(layouts: &mut SectionLayouts, id: InspectorSectionId, docked: bool) {
@@ -271,6 +281,34 @@ mod tests {
             elapsed.as_secs() < 10,
             "persist regressed: 200 saves took {elapsed:?}"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn unknown_section_ids_are_rejected() {
+        assert_eq!(section_id_from_str("nope"), None);
+        assert_eq!(section_id_from_str(""), None);
+        for id in InspectorSectionId::all() {
+            assert_eq!(section_id_from_str(id.as_str()), Some(id));
+        }
+    }
+
+    #[test]
+    fn settings_persist_keeps_section_layouts() {
+        // Regression guard for the wipe vector: settings saves must carry the
+        // section layouts instead of resetting them to empty defaults.
+        // Guarda de regressão do vetor de wipe: saves de settings devem carregar
+        // os layouts em vez de zerá-los para os padrões vazios.
+        let (mut bridge, path) = hermetic_bridge("settings-wipe");
+        bridge.apply(UiIntent::SetSectionDocked {
+            section: InspectorSectionId::Material,
+            docked: false,
+        });
+        bridge.state.ui.invert_vertical_drag = true;
+        crate::callbacks::persist_user_preferences(&mut bridge);
+        let reloaded = UserPreferences::load_from_path(&path).unwrap();
+        assert!(!reloaded.section_layout(InspectorSectionId::Material).docked);
+        assert!(reloaded.invert_vertical_drag);
         let _ = std::fs::remove_file(&path);
     }
 
