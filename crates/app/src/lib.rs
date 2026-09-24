@@ -1059,6 +1059,8 @@ impl WgpuApp {
             self.core.state.show_triangulation,
             self.core.state.textured,
             self.core.state.show_wireframe_overlay,
+            self.core.state.show_face_orientation,
+            self.core.state.show_uv_checker,
             self.core.state.selection_domain(),
             self.core.state.session.tools.hover,
         );
