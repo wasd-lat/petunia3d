@@ -1,10 +1,110 @@
 //! Preferências do usuário independentes do documento e do toolkit.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+
+/// Inspector section with independent dock/float/pin state.
+/// Seção do Inspector com estado independente de dock/flutuação/pin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum InspectorSectionId {
+    Parts,
+    Transform,
+    Material,
+    Object,
+    Modifiers,
+    QuickActions,
+}
+
+impl InspectorSectionId {
+    /// All sections in canonical Inspector order.
+    /// Todas as seções na ordem canônica do Inspector.
+    pub const fn all() -> [Self; 6] {
+        [
+            Self::Parts,
+            Self::Transform,
+            Self::Material,
+            Self::Object,
+            Self::Modifiers,
+            Self::QuickActions,
+        ]
+    }
+
+    /// Stable persistence key. Never rename: stored on disk.
+    /// Chave estável de persistência. Nunca renomear: gravada em disco.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Parts => "parts",
+            Self::Transform => "transform",
+            Self::Material => "material",
+            Self::Object => "object",
+            Self::Modifiers => "modifiers",
+            Self::QuickActions => "quick_actions",
+        }
+    }
+}
+
+/// Dock/float/pin state of one Inspector section, persisted per module.
+/// Estado de dock/flutuação/pin de uma seção do Inspector, persistido por módulo.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SectionLayout {
+    /// Docked in the Inspector column when true, floating card when false.
+    /// Ancorado na coluna do Inspector quando verdadeiro, card flutuante quando falso.
+    pub docked: bool,
+    /// Floating card position in logical px, clamped to [0, 8192] on load.
+    /// Posição do card flutuante em px lógicos, limitada a [0, 8192] ao carregar.
+    pub x: f32,
+    /// See `x`. / Ver `x`.
+    pub y: f32,
+    /// Keep the section open: ignores collapse-all and panel collapse.
+    /// Mantém a seção aberta: ignora recolher-tudo e recolhimento do painel.
+    pub pin_open: bool,
+    /// Asset UUID text this section is pinned to; follows selection when `None`.
+    /// Stored as text because `config` must not depend on `project`/`uuid`
+    /// (dependency direction: domain owns identity, config only persists it).
+    /// Texto do UUID do asset ao qual a seção está fixada; segue a seleção quando `None`.
+    /// Guardado como texto porque `config` não pode depender de `project`/`uuid`
+    /// (direção de dependência: o domínio detém a identidade, config só persiste).
+    pub pinned_asset: Option<String>,
+}
+
+impl Default for SectionLayout {
+    fn default() -> Self {
+        Self {
+            docked: true,
+            x: 12.0,
+            y: 56.0,
+            pin_open: false,
+            pinned_asset: None,
+        }
+    }
+}
+
+impl SectionLayout {
+    /// Clamp coordinates to finite viewport range and drop oversized ids.
+    /// Limita coordenadas à faixa finita da viewport e descarta ids longos demais.
+    pub fn sanitized(mut self) -> Self {
+        if !self.x.is_finite() {
+            self.x = Self::default().x;
+        }
+        if !self.y.is_finite() {
+            self.y = Self::default().y;
+        }
+        self.x = self.x.clamp(0.0, 8192.0);
+        self.y = self.y.clamp(0.0, 8192.0);
+        if self
+            .pinned_asset
+            .as_ref()
+            .is_some_and(|id| id.is_empty() || id.len() > 64)
+        {
+            self.pinned_asset = None;
+        }
+        self
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -17,6 +117,11 @@ pub struct UserPreferences {
     pub selection_thickness: f32,
     /// Ações rápidas preferidas do Inspector MODEL.
     pub model_quick_actions: Vec<String>,
+    /// Dock/float/pin por módulo do Inspector, chaveado por `InspectorSectionId::as_str`.
+    /// Chaves desconhecidas são descartadas ao carregar; módulos ausentes usam o padrão.
+    /// Dock/float/pin per Inspector module, keyed by `InspectorSectionId::as_str`.
+    /// Unknown keys are dropped on load; missing modules use the default.
+    pub section_layouts: BTreeMap<String, SectionLayout>,
 }
 
 impl Default for UserPreferences {
@@ -26,6 +131,7 @@ impl Default for UserPreferences {
             selection_rgb: [233, 106, 0],
             selection_thickness: 2.0,
             model_quick_actions: Vec::new(),
+            section_layouts: BTreeMap::new(),
         }
     }
 }
@@ -54,7 +160,33 @@ impl UserPreferences {
             .model_quick_actions
             .retain(|id| !id.is_empty() && id.len() <= 64 && seen.insert(id.clone()));
         preferences.model_quick_actions.truncate(6);
+        let known: HashSet<&str> = InspectorSectionId::all()
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        preferences
+            .section_layouts
+            .retain(|key, _| known.contains(key.as_str()));
+        for layout in preferences.section_layouts.values_mut() {
+            *layout = std::mem::take(layout).sanitized();
+        }
         Ok(preferences)
+    }
+
+    /// Layout persistido do módulo, ou o padrão quando ausente.
+    /// Persisted module layout, or the default when missing.
+    pub fn section_layout(&self, id: InspectorSectionId) -> SectionLayout {
+        self.section_layouts
+            .get(id.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Grava o layout do módulo já sanitizado.
+    /// Stores the module layout, sanitized first.
+    pub fn set_section_layout(&mut self, id: InspectorSectionId, layout: SectionLayout) {
+        self.section_layouts
+            .insert(id.as_str().to_string(), layout.sanitized());
     }
 
     pub fn load() -> Self {
@@ -102,6 +234,16 @@ mod tests {
             selection_rgb: [32, 180, 240],
             selection_thickness: 3.5,
             model_quick_actions: vec!["model.fuse".to_string()],
+            section_layouts: BTreeMap::from([(
+                InspectorSectionId::Material.as_str().to_string(),
+                SectionLayout {
+                    docked: false,
+                    x: 100.0,
+                    y: 200.0,
+                    pin_open: true,
+                    pinned_asset: None,
+                },
+            )]),
         };
         preferences.save_to_path(&path).unwrap();
         assert_eq!(UserPreferences::load_from_path(&path).unwrap(), preferences);
@@ -124,5 +266,62 @@ mod tests {
             toml::from_str::<UserPreferences>("").unwrap(),
             UserPreferences::default()
         );
+    }
+
+    #[test]
+    fn section_layout_round_trip_per_module() {
+        let path = std::env::temp_dir().join(format!(
+            "petunia-sections-roundtrip-{}.toml",
+            std::process::id()
+        ));
+        let mut preferences = UserPreferences::default();
+        assert_eq!(
+            preferences.section_layout(InspectorSectionId::Parts),
+            SectionLayout::default()
+        );
+        preferences.set_section_layout(
+            InspectorSectionId::Object,
+            SectionLayout {
+                docked: false,
+                x: 300.0,
+                y: 120.0,
+                pin_open: true,
+                pinned_asset: Some("01234567-89ab-cdef-0123-456789abcdef".to_string()),
+            },
+        );
+        preferences.save_to_path(&path).unwrap();
+        let loaded = UserPreferences::load_from_path(&path).unwrap();
+        assert_eq!(
+            loaded.section_layout(InspectorSectionId::Object),
+            preferences.section_layout(InspectorSectionId::Object)
+        );
+        assert!(!loaded.section_layout(InspectorSectionId::Object).docked);
+        assert_eq!(
+            loaded.section_layout(InspectorSectionId::Parts),
+            SectionLayout::default()
+        );
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn section_layout_load_sanitizes_coordinates_and_keys() {
+        let path = std::env::temp_dir().join(format!(
+            "petunia-sections-sanitize-{}.toml",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            "[section_layouts.material]\ndocked = false\nx = nan\ny = -50.0\npin_open = true\npinned_asset = \"\"\n\
+             [section_layouts.unknown_module]\ndocked = false\n",
+        )
+        .unwrap();
+        let loaded = UserPreferences::load_from_path(&path).unwrap();
+        let material = loaded.section_layout(InspectorSectionId::Material);
+        assert!(!material.docked);
+        assert_eq!((material.x, material.y), (12.0, 0.0));
+        assert!(material.pin_open);
+        assert_eq!(material.pinned_asset, None);
+        assert!(!loaded.section_layouts.contains_key("unknown_module"));
+        fs::remove_file(&path).unwrap();
     }
 }
