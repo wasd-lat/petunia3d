@@ -75,6 +75,11 @@ impl CutSession {
         }
 
         let normal = (camera.right() * delta_y + camera.up() * delta_x).normalize_or_zero();
+        let normal = if !normal.is_finite() || normal.length_squared() <= 1e-6 {
+            camera.right()
+        } else {
+            normal
+        };
         let center = Vec3::from_array(self.source.selection_center());
         let anchor_ndc = viewport.screen_to_ndc(anchor);
         let (origin, direction) = camera.ray(anchor_ndc[0], anchor_ndc[1]);
@@ -87,7 +92,7 @@ impl CutSession {
 
         let point = origin + direction * ((center - origin).dot(forward) / denominator);
         let mut mesh = self.source.clone();
-        mesh.slice_plane(point, normal, true);
+        mesh.slice_plane(point, normal, false);
         Some(mesh)
     }
 

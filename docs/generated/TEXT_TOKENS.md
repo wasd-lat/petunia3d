@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **604**.
+Total de chaves de localização cadastradas: **705**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -332,6 +332,10 @@ Total de chaves de localização cadastradas: **604**.
 | `paint.tool_section_sample` | Sample | Amostra |
 | `paint.tool_section_shapes` | Shapes | Formas |
 | `paint.vertex` | Paint on model | Pintura no modelo |
+| `pivot.bounds` | Bounding Box Center | Centro da caixa |
+| `pivot.cursor` | 3D Cursor | Cursor 3D |
+| `pivot.individual` | Individual Origins | Origens individuais |
+| `pivot.median` | Median Point | Ponto mediano |
 | `prims.body_length` | Body Length | Comprimento do Corpo |
 | `prims.bottom_radius` | Bottom Radius | Raio da Base |
 | `prims.cancel` | Cancel | Cancelar |
@@ -534,7 +538,9 @@ Total de chaves de localização cadastradas: **604**.
 | `tools.move` | Move | Mover |
 | `tools.paint` | Paint | Pintar |
 | `tools.picker` | Picker | Conta-gotas |
+| `tools.pivot` | Pivot | Pivô |
 | `tools.primitives` | Add | Adicionar |
+| `tools.push_pull` | Push/Pull | Push/Pull |
 | `tools.pushpull` | Push/Pull | Push/Pull |
 | `tools.revolve` | Revolve | Revolução |
 | `tools.rotate` | Rotate | Rotacionar |
@@ -559,6 +565,14 @@ Total de chaves de localização cadastradas: **604**.
 | `transform.scale` | Scale | Escala |
 | `transform.title` | Transform | Transform |
 | `transform.unlink` | Unlink axes | Desligar eixos |
+| `ui.action_cut` | Cut | Cortar |
+| `ui.action_fuse` | Fuse | Fundir |
+| `ui.action_intersect` | Intersect | Interseção |
+| `ui.action_join` | Join | Juntar |
+| `ui.action_loop_cut` | Loop Cut | Loop Cut |
+| `ui.action_merge` | Merge | Mesclar |
+| `ui.action_slice` | Slice | Fatiar |
+| `ui.action_subdivide` | Subdivide | Subdividir |
 | `ui.active_brush_color` | Active Brush Color | Cor ativa do pincel |
 | `ui.active_tool` | Active tool | Ferramenta ativa |
 | `ui.albedo_base_color` | Albedo (Base Color) | Albedo (cor base) |
@@ -566,23 +580,75 @@ Total de chaves de localização cadastradas: **604**.
 | `ui.at_3d_cursor` | at 3D Cursor | no Cursor 3D |
 | `ui.close` | Close | Fechar |
 | `ui.collapse` | Collapse section | Recolher painel |
+| `ui.collapse_inspector` | Collapse inspector | Recolher inspector |
 | `ui.dock_split_hint` | Drag to resize panels | Arraste para redimensionar os painéis |
 | `ui.duplicate` | Duplicate | Duplicar |
 | `ui.expand` | Expand section | Expandir painel |
+| `ui.expand_inspector` | Expand inspector | Expandir inspector |
 | `ui.floating_inspector` | Floating Inspector | Inspector Flutuante |
 | `ui.help` | Help | Ajuda |
+| `ui.hide_part` | Hide part | Ocultar peça |
+| `ui.highlight_thickness` | Selection highlight thickness | Espessura do destaque da seleção |
+| `ui.inspector` | Inspector | Inspector |
+| `ui.invert_vertical_drag` | Invert up/down for modeling tools | Inverter cima/baixo nas ferramentas de modelagem |
 | `ui.language` | Language | Idioma |
+| `ui.last_operation` | Last operation | Última operação |
 | `ui.lock` | Lock | Bloquear |
+| `ui.lock_part` | Lock part | Bloquear peça |
+| `ui.loop_cut_hint` | Hover a quad edge ring; scroll to change cuts, click to place, Enter confirms. Esc cancels. | Passe sobre uma aresta de quads; role para mudar cortes, clique para posicionar e Enter confirma. Esc cancela. |
+| `ui.material_advanced` | Advanced material settings | Configurações avançadas do material |
+| `ui.material_alpha_mode` | Alpha mode | Modo alfa |
+| `ui.material_editor` | Material editor | Editor de material |
+| `ui.material_emission` | Emission | Emissão |
+| `ui.material_metallic` | Metallic | Metálico |
+| `ui.material_name` | Name | Nome |
+| `ui.material_normal_scale` | Normal scale | Escala do normal |
+| `ui.material_profile` | Profile | Perfil |
+| `ui.material_roughness` | Roughness | Rugosidade |
 | `ui.mesh` | Mesh | Malha |
+| `ui.model_lasso_hint` | Draw a freeform region to select parts or mesh elements. | Desenhe uma região livre para selecionar peças ou elementos da malha. |
+| `ui.model_position_hint` | Move the selection using the axes or mouse. | Mova a seleção pelos eixos ou com o mouse. |
+| `ui.model_rotate_hint` | Rotate the selection around its pivot. | Gire a seleção ao redor do pivô. |
+| `ui.model_scale_hint` | Resize the selection along an axis. | Redimensione a seleção ao longo de um eixo. |
+| `ui.model_select_hint` | Click to select; drag on empty space for a selection box. | Clique para selecionar; arraste no espaço vazio para selecionar por caixa. |
+| `ui.model_transform_hint` | Move with arrows, scale with squares, rotate with rings. | Mova pelas setas, escale pelos quadrados e gire pelos anéis. |
+| `ui.modifier_add_mirror` | Add Mirror | Adicionar Mirror |
+| `ui.modifier_add_symmetry` | Add Symmetry | Adicionar Symmetry |
+| `ui.modifier_axis` | Axis | Eixo |
+| `ui.modifier_move_down` | Move modifier down | Mover modificador para baixo |
+| `ui.modifier_move_up` | Move modifier up | Mover modificador para cima |
+| `ui.modifier_remove` | Remove modifier | Remover modificador |
+| `ui.modifiers_empty` | No modifiers in the stack. | Sem modificadores na pilha. |
 | `ui.more` | More… | Mais… |
 | `ui.more_actions` | More actions | Mais ações |
+| `ui.more_model_tools` | More modeling tools | Mais ferramentas de modelagem |
 | `ui.no_tool` | Tool disabled in tools.toml | Ferramenta desligada no tools.toml |
+| `ui.no_tool_parameters` | Select Extrude, Inset, Bevel, Loop Cut or Profile to edit parameters here. | Selecione Extrude, Inset, Bevel, Loop Cut ou Profile para editar os parâmetros aqui. |
+| `ui.numeric_field_hint` | Click to enter an exact value, or drag to adjust. Hold Shift for precision. | Clique para digitar um valor exato ou arraste para ajustar. Segure Shift para precisão. |
 | `ui.outliner` | Outliner | Outliner |
 | `ui.pack_islands` | Pack Islands | Empacotar ilhas |
 | `ui.parts` | Parts | Peças |
+| `ui.parts_annotations` | Annotations | Anotações |
+| `ui.parts_collection` | Collection | Coleção |
+| `ui.parts_exit_isolate` | Exit isolation | Sair do isolamento |
+| `ui.parts_isolate` | Isolate active object | Isolar objeto ativo |
+| `ui.parts_measurements` | Measurements | Medições |
+| `ui.parts_new_collection` | New collection | Nova coleção |
+| `ui.parts_row_size` | Row size | Tamanho das linhas |
+| `ui.pivot_hint` | Choose the center used by Move, Rotate, and Scale. | Escolha o centro usado por Move, Rotate e Scale. |
 | `ui.place_in_scene` | Place in scene | Colocar na cena |
+| `ui.preferences_save_failed` | Could not save preferences | Não foi possível salvar as preferências |
+| `ui.profile_close` | Close Profile | Fechar Profile |
+| `ui.profile_depth` | Depth | Profundidade |
+| `ui.profile_generate` | Generate Volume | Gerar volume |
+| `ui.profile_hint` | Click to draw on the view plane; click the first point to close. Generate by extrude or revolve. | Clique para desenhar num plano da vista; clique no primeiro ponto para fechar. Depois gere por extrusão ou revolve. |
+| `ui.profile_points` | Points | Pontos |
+| `ui.profile_revolve` | Revolve | Revolve |
 | `ui.project_asset_library` | Project Asset Library | Biblioteca de Assets do Projeto |
 | `ui.properties` | Properties | Propriedades |
+| `ui.push_pull_hint` | Drag vertically or enter a distance to move selected faces without creating side walls. | Arraste verticalmente ou informe a distância para mover as faces selecionadas sem criar paredes. |
+| `ui.quick_action_customize` | Pin or unpin quick actions | Fixar ou soltar ações rápidas |
+| `ui.quick_actions` | Quick actions | Ações rápidas |
 | `ui.recovery_body` | Petunia3D found an autosave snapshot that is newer than the saved project. The previous session did not close cleanly. | O Petunia3D encontrou um snapshot de autosave mais recente que o projeto salvo. A sessão anterior não foi encerrada corretamente. |
 | `ui.recovery_discard` | Discard snapshots | Descartar snapshots |
 | `ui.recovery_keep` | Open saved project | Abrir projeto salvo |
@@ -593,12 +659,47 @@ Total de chaves de localização cadastradas: **604**.
 | `ui.rename` | Rename | Renomear |
 | `ui.save_active_as_asset` | Save Active as Asset | Salvar ativo como asset |
 | `ui.search` | Search | Buscar |
+| `ui.search_assets` | Search assets | Buscar assets |
+| `ui.search_parts` | Search parts | Buscar peças |
+| `ui.selected_parts_only` | Show selected parts only | Mostrar apenas peças selecionadas |
+| `ui.selection_color` | Selection color (#RRGGBB) | Cor da seleção (#RRGGBB) |
+| `ui.selection_color_invalid` | Selection color must use #RRGGBB | A cor da seleção deve usar #RRGGBB |
+| `ui.selection_color_low_contrast` | Selection color needs more contrast against the viewport | A cor da seleção precisa de mais contraste com a viewport |
+| `ui.show_part` | Show part | Mostrar peça |
+| `ui.slice_hint` | Drag in the viewport to define the plane; both sides are kept. Enter confirms, Esc cancels. | Arraste na viewport para definir o plano; os dois lados são mantidos. Enter confirma, Esc cancela. |
+| `ui.sort_assets` | Sort assets by name | Ordenar assets por nome |
+| `ui.sort_parts` | Sort parts by name | Ordenar peças por nome |
+| `ui.stats_selection` | Selection | Seleção |
+| `ui.stats_tris` | Tris | Tris |
+| `ui.stats_verts` | Verts | Vértices |
 | `ui.status_hint` | LMB select   ·   MMB orbit   ·   Esc cancel | LMB seleciona   ·   MMB orbita   ·   Esc cancela |
+| `ui.tab_material` | Material | Material |
+| `ui.tab_modifiers` | Modifiers | Modificadores |
+| `ui.tab_object` | Object | Objeto |
+| `ui.tab_parts` | Parts | Peças |
+| `ui.tab_transform` | Transform | Transformar |
 | `ui.theme` | Theme | Tema |
+| `ui.thumbnail_size` | Thumbnail size | Tamanho das miniaturas |
+| `ui.tool_card` | Tool | Ferramenta |
 | `ui.tools` | Tools | Ferramentas |
 | `ui.tools_menu` | Tools… | Ferramentas… |
+| `ui.unlock_part` | Unlock part | Desbloquear peça |
 | `ui.unwrap_mesh` | Unwrap Mesh | Desdobrar malha |
+| `ui.vertical_drag_inverted` | Vertical tool drag inverted | Arrasto vertical invertido |
+| `ui.vertical_drag_normal` | Vertical tool drag normal | Arrasto vertical normal |
+| `ui.vertical_tool_drag` | Vertical tool drag | Arrasto vertical das ferramentas |
+| `ui.view_lit` | Scene lighting | Iluminação da cena |
+| `ui.view_lit_hint` | Preview scene lighting and materials together. | Pré-visualiza a iluminação da cena junto com os materiais. |
+| `ui.view_material` | Material preview | Prévia de material |
+| `ui.view_material_hint` | Preview material colors and textures. | Pré-visualiza as cores e texturas do material. |
+| `ui.view_solid` | Solid view | Vista sólida |
+| `ui.view_solid_hint` | Show solid geometry with viewport lighting. | Mostra a geometria sólida com a iluminação da viewport. |
+| `ui.view_wireframe` | Wireframe view | Vista em arame |
+| `ui.view_wireframe_hint` | Show mesh edges as the base shading mode. | Mostra as arestas da malha como modo de visualização base. |
 | `ui.visible` | Visible | Visível |
+| `ui.wire_overlay` | Wire overlay | Sobreposição de arestas |
+| `ui.wire_overlay_hint` | Show mesh edges over the current view mode | Mostra as arestas sobre o modo de visualização atual |
+| `ui.xray_opacity` | X-Ray opacity | Opacidade do X-Ray |
 | `uv.faces` | Faces | Faces |
 | `uv.hint` | Click: select face. Drag: move UVs. Wheel: scale. | Clique: seleciona face. Arraste: move UVs. Scroll: escala. |
 | `uv.preview_3d` | 3D preview | Prévia 3D |

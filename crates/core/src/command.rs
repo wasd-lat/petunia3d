@@ -893,6 +893,16 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "view.toggle_wire_overlay",
+                "Toggle Wire Overlay",
+                "Display mesh edges over the active shading mode",
+                CommandCategory::View,
+            )
+            .with_docs(DocsTopic::Navigation),
+            ToggleWireOverlayCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "view.toggle_xray",
                 "Toggle X-Ray",
                 "Toggle semi-transparent see-through mesh display",
@@ -2841,6 +2851,26 @@ impl Command for ToggleWireframeCmd {
             crate::Shading::Wireframe => crate::Shading::Solid,
             _ => crate::Shading::Wireframe,
         };
+        state.mark_dirty();
+        Ok(())
+    }
+}
+
+/// Alterna somente o overlay de arestas; não altera o modo-base de shading.
+#[derive(Debug, Clone, Default)]
+pub struct ToggleWireOverlayCmd;
+
+impl Command for ToggleWireOverlayCmd {
+    fn label(&self) -> &'static str {
+        "toggle wire overlay"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state.show_wireframe_overlay = !state.show_wireframe_overlay;
         state.mark_dirty();
         Ok(())
     }

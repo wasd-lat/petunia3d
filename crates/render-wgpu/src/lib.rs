@@ -1539,7 +1539,7 @@ impl Renderer {
             let point_color = edge_color;
 
             if domain == petunia_core::SelectionDomain::Edge {
-                let guide_color = [0.62, 0.66, 0.74, 0.58];
+                let guide_color = [0.70, 0.75, 0.83, 0.76];
                 for (a, b) in mesh.edges_unique() {
                     if mesh.selected_edges.contains(&(a, b)) {
                         continue;
@@ -1561,14 +1561,14 @@ impl Renderer {
             }
 
             if domain == petunia_core::SelectionDomain::Vertex {
-                let guide_color = [0.62, 0.66, 0.74, 0.72];
+                let guide_color = [0.73, 0.78, 0.85, 0.9];
                 for vertex in mesh.verts.iter().filter(|vertex| !vertex.selected) {
                     append_point_disc(
                         &mut sel_tri,
                         vertex.vec(),
                         camera,
                         self.depth_size.1,
-                        (self.selection_thickness * 1.25).min(5.0),
+                        (self.selection_thickness * 1.5).clamp(3.5, 5.5),
                         guide_color,
                     );
                 }
@@ -1610,7 +1610,7 @@ impl Renderer {
                         vb.vec(),
                         camera,
                         self.depth_size.1,
-                        self.selection_thickness,
+                        self.selection_thickness.max(2.5),
                         edge_color,
                     );
                 }
@@ -1623,7 +1623,7 @@ impl Renderer {
                         vertex.vec(),
                         camera,
                         self.depth_size.1,
-                        (self.selection_thickness * 2.0).min(6.0),
+                        (self.selection_thickness * 2.0).clamp(5.0, 7.0),
                         point_color,
                     );
                 }
@@ -1645,7 +1645,7 @@ impl Renderer {
                             vertex.vec(),
                             camera,
                             self.depth_size.1,
-                            (self.selection_thickness * 2.5).min(7.0),
+                            (self.selection_thickness * 2.5).clamp(6.5, 8.5),
                             hover_line,
                         );
                     }

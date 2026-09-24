@@ -79,7 +79,8 @@ Responsabilidades:
 - integração com keyboard focus;
 - nenhuma lógica de domínio específica.
 
-`Parts`, `Context` e `Asset Library` reutilizam o mesmo contrato estrutural onde fizer sentido.
+`Parts` (seção do Inspector MODEL desde a revisão de 2026-09-23 do cap. 36),
+`Inspector` e `Asset Library` reutilizam o mesmo contrato estrutural onde fizer sentido.
 
 # PanelHeader
 

@@ -111,10 +111,13 @@ pub fn generate_revolve(state: &mut AppState) {
     // perfil aberto vale para revolve (não exige closed)
     match Mesh::revolve(&p.points, p.revolve_segments.max(3)) {
         Ok(mut m) => {
+            let r = glam::Vec3::from(p.right);
+            let u = glam::Vec3::from(p.up);
+            let n = glam::Vec3::from(p.normal);
             let o = glam::Vec3::from(p.origin);
             for v in &mut m.verts {
                 let q = glam::Vec3::from(v.pos);
-                v.pos = (q + o).to_array();
+                v.pos = (o + r * q.x + u * q.y + n * q.z).to_array();
             }
             state.checkpoint("revolve profile");
             state.project.add("Revolved", m);

@@ -6,7 +6,7 @@
 
 ## 0. Fonte única da verdade
 
-O caderno canônico vive em **`docs/bible/`** — 249 páginas: raiz `index.md`
+O caderno canônico vive em **`docs/bible/`** — 250 páginas: raiz `index.md`
 (Petunia3D — Livro Vivo), `constitution/` (00–16), `foundations/` (01–44),
 `specs/` (P3D-001 a P3D-168), `sections/` (A–O), `addenda/` e `status/`.
 
@@ -57,8 +57,10 @@ definido em `ui/app.slint`. Regras derivadas:
 
 - **Viewport-first**: o viewport ocupa a região central e mantém ~`480 × 360`
   logical px antes de ceder espaço a painéis (capítulo 36).
-- **Shell estrutural**: `Parts` à esquerda, `Context` à direita, `Asset Library`
-  inferior, `Top Bar` no topo. Nenhum docking irrestrito na V1.
+- **Shell estrutural**: em MODEL, barra de criação à esquerda e Inspector à direita
+  com `Parts → Transform → Material → Object` (revisão de baseline aprovada em
+  2026-09-23 no cap. 36); `Asset Library` inferior e `Top Bar` no topo. Nenhum
+  docking irrestrito na V1.
 - **Componentes reutilizáveis**: componentes Slint declarativos em `ui/app.slint`
   (ex.: `TopAction`, `ToolButton`, `NumericField`, `Vector3Field`,
   `InspectorSection`, `ColorSwatch`) são a linguagem visual pública. Não reimplemente
@@ -129,8 +131,9 @@ projeto.
 - Cadeia funcional: `Tool → Command → Algorithm → Data`. Tool não chama Tool.
 - Mutations são transacionais; documento com single-writer; jobs operam em snapshots.
 - `unsafe` isolado e auditável.
-- UI Baseline V1 congelada (cap. 36): workspaces `MODEL / PAINT / UV`, shell
-  Parts-esquerda / Context-direita / Asset Library-abaixo, dark oficial,
+- UI Baseline V1 congelada, com revisão MODEL de 2026-09-23 (cap. 36): workspaces
+  `MODEL / PAINT / UV`, barra de criação-esquerda / Inspector-direita com Parts
+  como primeira seção / Asset Library-abaixo, dark oficial,
   Petunia Components como linguagem visual. Não reintroduzir docking irrestrito,
   clone de Blender, acesso cru a egui/wgpu para plugins nem reabrir `UI-OPEN`.
 - Vocabulário de usuário (cap. 13): **Point**, **Round Edge**, **Fuse**, **Cut**,

@@ -55,14 +55,13 @@ Os workspaces devem usar o princípio de pills compactas observado no Figma: tro
 │                [ MODEL ] [ PAINT ] [ UV ]                   │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
-│ ╭────────────╮                              ╭───────────────╮ │
-│ │ PARTS   ◀  │                              │ CONTEXT    ▶  │ │
-│ │            │                              │               │ │
-│ ╰────────────╯                              ╰───────────────╯ │
-│                                                              │
-│   ╭──────────╮                                               │
-│   │ TOOLBAR  │                 VIEWPORT                      │
-│   ╰──────────╯                                               │
+│ ╭──────────╮                      ╭─────────────────────────╮ │
+│ │ CREATE   │                      │ INSPECTOR               │ │
+│ │ TOOLS    │       VIEWPORT       │ Parts                   │ │
+│ ╰──────────╯                      │ Transform               │ │
+│                                   │ Material                │ │
+│                                   │ Object                  │ │
+│                                   ╰─────────────────────────╯ │
 │                                                              │
 │                           VIEW/OVERLAY CONTROLS              │
 │                                                              │
@@ -71,11 +70,14 @@ Os workspaces devem usar o princípio de pills compactas observado no Figma: tro
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Essa composição é direcional; medidas finais serão validadas durante design/prototipagem.
+Esta composição MODEL segue a revisão de baseline de 2026-09-23 do capítulo 36.
+Em largura compacta, o Inspector pode ser substituído por drawer à direita.
 
 # PARTS em vez de Outliner
 
-O painel esquerdo deve usar linguagem amigável: **Parts** é preferível a `Outliner` para o produto principal.
+**Parts** é preferível a `Outliner` para o produto principal. No MODEL, ele é a
+primeira seção recolhível do Inspector direito, não um painel sobre a barra de
+criação esquerda (capítulo 36, revisão de 2026-09-23).
 
 Objetivo: mostrar estrutura do asset, não estrutura de uma cena de render.
 

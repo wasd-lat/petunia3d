@@ -28,7 +28,9 @@ integração**. Reabertura da arquitetura exige bloqueador estrutural real + ADR
 
 - viewport-first;
 - shell profissional simplificado, nunca “Blender amputado” nem aplicativo infantil;
-- `Parts` à esquerda, `Context` à direita, `Asset Library` inferior;
+- barra de criação à esquerda; no workspace MODEL, `Parts` é a primeira seção do
+  `Inspector` à direita, seguida por `Transform`, `Material` e `Object`;
+  `Asset Library` permanece inferior;
 - painéis semi-flutuantes, retráteis e redimensionáveis dentro de limites explícitos;
 - `MODEL / PAINT / UV` como workspaces V1;
 - toolbar contextual dentro do viewport;
@@ -47,8 +49,8 @@ Valores são em **logical px** antes de UI scaling.
 | Elemento | Baseline | Regra |
 | --- | --- | --- |
 | Top bar | 40 | menus/projeto à esquerda, workspace pills ao centro, ações globais à direita |
-| Parts | 248 default; 200–400 | recolhível e resize horizontal |
-| Context | 288 default; 240–440 | selection/tool-centric |
+| Barra de criação MODEL | 40–46 | primitivas e referências, sem duplicar edição |
+| Inspector MODEL | 320–360 default; 280–460 | Parts/Transform/Material/Object; seções recolhíveis, lista de Parts virtualizada e rolagem vertical |
 | Asset Library | 176 default; 120–360 | resize vertical + collapse |
 | Panel Header | 28 | um contrato único |
 | Control | 28 | 30–32 somente quando a hierarquia justificar |
@@ -61,7 +63,7 @@ Preservar aproximadamente `480 × 360` logical px de viewport antes de ceder mai
 
 - `>= 1280`: shell completo;
 - `1024–1279`: Asset Library inicia recolhida;
-- `< 1024`: Parts/Context podem atuar como drawers/overlays temporários para preservar viewport.
+- `< 900`: Inspector pode atuar como drawer temporário à direita para preservar viewport; Parts não volta à lateral esquerda.
 
 # Layout e docking
 
@@ -84,9 +86,9 @@ Baseline:
 ```
 Top Bar
 └ Main Workspace
-  ├ Left Region    → Parts + extension panels autorizados
+  ├ Left Region    → barra de criação MODEL + extension panels autorizados
   ├ Center Region  → Viewport / workspace editor
-  ├ Right Region   → Context + extension panels autorizados
+  ├ Right Region   → Inspector + extension panels autorizados; MODEL: Parts → Transform → Material → Object
   └ Bottom Region  → Asset Library + extension panels autorizados
 ```
 
@@ -98,6 +100,19 @@ Regras:
 - estado de layout é persistido por workspace;
 - plugin panels entram apenas em **extension slots** controlados;
 - nenhuma janela flutuante arbitrária na V1.
+
+## Revisão de baseline MODEL — 2026-09-23
+
+Esta revisão foi aprovada explicitamente pelo responsável do produto para resolver
+a sobreposição da gaveta Parts com a barra de primitivas. A regra anterior de
+`Parts` à esquerda fica substituída apenas no workspace MODEL: a barra esquerda
+contém ações de criação, enquanto a lista Parts integra o Inspector direito.
+O Inspector mantém cabeçalho fixo, corpo com rolagem vertical e seções que
+recolhem sem reservar altura. Em larguras compactas, o acesso à lista pode usar
+um drawer controlado à direita; ele não é uma segunda lista independente.
+Os slots de extensão permanecem controlados e nenhum plugin pode deslocar as
+seções centrais nem reintroduzir docking livre. PAINT e UV mantêm contratos
+próprios até revisão explícita.
 
 # Design System Final V1
 
@@ -524,7 +539,8 @@ Remapping é orientado por `CommandId`, com busca, captura de teclas, detecção
 
 ## MODEL
 
-Viewport dominante + Parts + Context + Asset Library.
+Viewport dominante + barra de criação à esquerda + Inspector direito
+(`Parts → Transform → Material → Object`) + Asset Library inferior.
 
 ## PAINT
 

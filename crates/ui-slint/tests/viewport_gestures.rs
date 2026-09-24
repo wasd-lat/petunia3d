@@ -3,13 +3,22 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use petunia_ui_slint::PetuniaSlintShell;
+use i_slint_backend_testing::{AccessibleRole, ElementHandle};
+use petunia_ui_slint::{PetuniaSlintShell, SceneItem};
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, LogicalSize};
 
 fn move_pointer(shell: &PetuniaSlintShell, x: f32, y: f32) {
     shell.window().dispatch_event(WindowEvent::PointerMoved {
         position: LogicalPosition::new(x, y),
+    });
+}
+
+fn scroll_pointer(shell: &PetuniaSlintShell, x: f32, y: f32, delta_y: f32) {
+    shell.window().dispatch_event(WindowEvent::PointerScrolled {
+        position: LogicalPosition::new(x, y),
+        delta_x: 0.0,
+        delta_y,
     });
 }
 
@@ -20,6 +29,24 @@ fn viewport_shortcut_drag_parametric_hover_and_navigation_gesture() {
     shell.window().set_size(LogicalSize::new(1280.0, 800.0));
     shell.show().expect("headless window");
     shell.set_active_workspace("MODEL".into());
+    shell.set_label_parts("Parts".into());
+    shell.set_label_search_parts("Search parts".into());
+    shell.set_label_selected_parts_only("Show selected parts only".into());
+    shell.set_label_sort_parts("Sort parts by name".into());
+    shell.set_label_parts_row_size("Row size".into());
+    let test_part = SceneItem {
+        id: "part-cube".into(),
+        name: "Cube".into(),
+        visible: true,
+        locked: false,
+        selected: true,
+        active: true,
+        verts: 8,
+        tris: 12,
+    };
+    let parts_model = std::rc::Rc::new(slint::VecModel::from(vec![test_part]));
+    shell.set_scene_items(parts_model.clone().into());
+    shell.set_parts_items(parts_model.into());
     shell.set_active_tool("move".into());
     shell.set_gizmo_hover_axis(-1);
     shell.set_transform_instant_active(true);
@@ -162,4 +189,191 @@ fn viewport_shortcut_drag_parametric_hover_and_navigation_gesture() {
         "arrasto precisa ajustar opacidade"
     );
     assert_eq!(popover_closes.get(), 0, "slider não deve fechar o popover");
+
+    shell.set_shading_popover_open(false);
+    let parts_search = ElementHandle::find_by_accessible_label(&shell, "Search parts")
+        .find(|element| element.accessible_role() == Some(AccessibleRole::Search))
+        .expect("busca acessível de Parts");
+    let selected_filter =
+        ElementHandle::find_by_accessible_label(&shell, "Show selected parts only")
+            .next()
+            .expect("filtro acessível de Parts");
+    let sort_toggle = ElementHandle::find_by_accessible_label(&shell, "Sort parts by name")
+        .next()
+        .expect("ordenação acessível de Parts");
+    assert!(
+        (parts_search.absolute_position().y - selected_filter.absolute_position().y).abs() < 0.5,
+        "busca e filtro devem compartilhar a mesma faixa"
+    );
+    assert!(
+        (parts_search.absolute_position().y - sort_toggle.absolute_position().y).abs() < 0.5,
+        "busca e ordenação devem compartilhar a mesma faixa"
+    );
+
+    let row_size_slider = ElementHandle::find_by_accessible_label(&shell, "Row size")
+        .find(|element| {
+            element.accessible_role() == Some(AccessibleRole::Slider)
+                && element.accessible_id().as_deref() == Some("model-inspector-parts-row-height")
+        })
+        .expect("slider acessível de tamanho das linhas");
+    assert_eq!(row_size_slider.accessible_value_minimum(), Some(28.0));
+    assert_eq!(row_size_slider.accessible_value_maximum(), Some(44.0));
+    assert_eq!(row_size_slider.accessible_value_step(), Some(1.0));
+    assert_eq!(row_size_slider.accessible_value().unwrap().as_str(), "28");
+    assert!(
+        row_size_slider.size().width >= 100.0,
+        "slider precisa de trilho utilizável"
+    );
+
+    let row = ElementHandle::find_by_accessible_label(&shell, "Cube")
+        .find(|element| element.accessible_role() == Some(AccessibleRole::ListItem))
+        .expect("item da lista virtualizada Parts");
+    assert_eq!(row.size().height, 28.0);
+
+    let row_size_changes = Rc::new(Cell::new(0));
+    let row_size_callback = Rc::clone(&row_size_changes);
+    let weak_shell = shell.as_weak();
+    shell.on_parts_row_height_changed(move |height| {
+        row_size_callback.set(row_size_callback.get() + 1);
+        if let Some(shell) = weak_shell.upgrade() {
+            shell.set_parts_row_height(height);
+        }
+    });
+    let slider_origin = row_size_slider.absolute_position();
+    let slider_size = row_size_slider.size();
+    let start = LogicalPosition::new(
+        slider_origin.x + slider_size.width * 0.25,
+        slider_origin.y + slider_size.height * 0.5,
+    );
+    let end = LogicalPosition::new(slider_origin.x + slider_size.width * 0.9, start.y);
+    move_pointer(&shell, start.x, start.y);
+    shell.window().dispatch_event(WindowEvent::PointerPressed {
+        position: start,
+        button: PointerEventButton::Left,
+    });
+    move_pointer(&shell, end.x, end.y);
+    shell.window().dispatch_event(WindowEvent::PointerReleased {
+        position: end,
+        button: PointerEventButton::Left,
+    });
+
+    assert!(
+        row_size_changes.get() > 0,
+        "arrastar deve alterar o tamanho das linhas"
+    );
+    assert!(
+        shell.get_parts_row_height() >= 43.0,
+        "o novo valor deve chegar ao shell"
+    );
+    assert_eq!(row.size().height, shell.get_parts_row_height());
+    assert_eq!(
+        row_size_slider.accessible_value().unwrap().as_str(),
+        format!("{}", shell.get_parts_row_height() as i32).as_str()
+    );
+
+    shell.window().set_size(LogicalSize::new(800.0, 800.0));
+    shell.set_compact_shell(true);
+    shell.set_inspector_visible(false);
+    shell.set_scene_drawer_visible(true);
+
+    let compact_search = ElementHandle::find_by_accessible_label(&shell, "Search parts")
+        .find(|element| {
+            element.accessible_label().as_deref() == Some("Search parts")
+                && element.accessible_role() == Some(AccessibleRole::Search)
+                && element.accessible_id().as_deref() == Some("compact-parts-search")
+        })
+        .expect("busca do drawer compacto");
+    assert_eq!(
+        compact_search.accessible_label().as_deref(),
+        Some("Search parts")
+    );
+    assert_eq!(
+        compact_search.accessible_role(),
+        Some(AccessibleRole::Search)
+    );
+    let compact_filter =
+        ElementHandle::find_by_accessible_label(&shell, "Show selected parts only")
+            .next()
+            .expect("filtro do drawer compacto");
+    let compact_sort = ElementHandle::find_by_accessible_label(&shell, "Sort parts by name")
+        .next()
+        .expect("ordenação do drawer compacto");
+    assert!(
+        compact_search.size().width > 0.0,
+        "busca compacta precisa estar visível"
+    );
+    assert_eq!(
+        compact_search.absolute_position().y,
+        compact_filter.absolute_position().y
+    );
+    assert_eq!(
+        compact_search.absolute_position().y,
+        compact_sort.absolute_position().y
+    );
+
+    let compact_row_size_slider = ElementHandle::find_by_accessible_label(&shell, "Row size")
+        .find(|element| {
+            element.accessible_role() == Some(AccessibleRole::Slider)
+                && element.accessible_id().as_deref() == Some("compact-parts-row-height")
+        })
+        .expect("slider do drawer compacto");
+    assert!(compact_row_size_slider.size().width >= 100.0);
+    assert_eq!(
+        compact_row_size_slider.accessible_value().unwrap().as_str(),
+        format!("{}", shell.get_parts_row_height() as i32).as_str()
+    );
+    let compact_row = ElementHandle::find_by_accessible_label(&shell, "Cube")
+        .find(|element| element.accessible_role() == Some(AccessibleRole::ListItem))
+        .expect("item da lista compacta");
+    assert_eq!(compact_row.size().height, shell.get_parts_row_height());
+
+    let compact_slider_origin = compact_row_size_slider.absolute_position();
+    let compact_slider_size = compact_row_size_slider.size();
+    let compact_drag_start = LogicalPosition::new(
+        compact_slider_origin.x + compact_slider_size.width * 0.9,
+        compact_slider_origin.y + compact_slider_size.height * 0.5,
+    );
+    let compact_drag_end = LogicalPosition::new(
+        compact_slider_origin.x + compact_slider_size.width * 0.1,
+        compact_drag_start.y,
+    );
+    move_pointer(&shell, compact_drag_start.x, compact_drag_start.y);
+    shell.window().dispatch_event(WindowEvent::PointerPressed {
+        position: compact_drag_start,
+        button: PointerEventButton::Left,
+    });
+    move_pointer(&shell, compact_drag_end.x, compact_drag_end.y);
+    shell.window().dispatch_event(WindowEvent::PointerReleased {
+        position: compact_drag_end,
+        button: PointerEventButton::Left,
+    });
+    assert!(shell.get_parts_row_height() <= 29.0);
+    assert_eq!(compact_row.size().height, shell.get_parts_row_height());
+}
+
+#[test]
+fn loop_cut_armed_tool_routes_hover_scroll_and_click_without_navigating() {
+    i_slint_backend_testing::init_no_event_loop();
+    let shell = PetuniaSlintShell::new().expect("Slint shell");
+    shell.window().set_size(LogicalSize::new(1280.0, 800.0));
+    shell.show().expect("headless window");
+    shell.set_active_workspace("MODEL".into());
+    shell.set_active_tool("loop_cut".into());
+    shell.set_loop_cut_armed(true);
+    shell.set_loop_cut_cuts(1);
+
+    let zooms = Rc::new(Cell::new(0));
+    let zoom_callback = Rc::clone(&zooms);
+    shell.on_viewport_zoom(move |_| zoom_callback.set(zoom_callback.get() + 1));
+    let counts = Rc::new(Cell::new(0));
+    let count_callback = Rc::clone(&counts);
+    shell.on_loop_cut_count_committed(move |_| count_callback.set(count_callback.get() + 1));
+
+    scroll_pointer(&shell, 600.0, 400.0, 1.0);
+    assert_eq!(counts.get(), 1, "scroll ajusta Cuts durante Loop Cut");
+    assert_eq!(
+        zooms.get(),
+        0,
+        "scroll não deve navegar durante a ferramenta"
+    );
 }

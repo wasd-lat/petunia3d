@@ -879,13 +879,13 @@ impl EditorSession {
 pub const TOOLBAR_DEFAULT_WIDTH: f32 = 74.0;
 /// Largura inicial do dock de contexto (logical px).
 ///
-/// Espelha `petunia_ui::tokens::PROPERTIES_DEFAULT_WIDTH`.
-pub const PROPERTIES_DEFAULT_WIDTH: f32 = 290.0;
+/// Largura padrão do Inspector redimensionável (logical px).
+pub const PROPERTIES_DEFAULT_WIDTH: f32 = 336.0;
 /// Piso do dock de contexto: abaixo disso os campos numéricos do inspetor
 /// deixam de caber lado a lado com o rótulo.
-pub const PROPERTIES_MIN_WIDTH: f32 = 208.0;
+pub const PROPERTIES_MIN_WIDTH: f32 = 280.0;
 /// Teto do dock de contexto: a viewport precisa manter área útil.
-pub const PROPERTIES_MAX_WIDTH: f32 = 560.0;
+pub const PROPERTIES_MAX_WIDTH: f32 = 460.0;
 /// Altura inicial da Asset Library do shell Slint (logical px).
 pub const SHELL_ASSET_LIBRARY_DEFAULT_HEIGHT: f32 = 200.0;
 /// Piso da Asset Library: cabe uma fileira de cartões com o cabeçalho.

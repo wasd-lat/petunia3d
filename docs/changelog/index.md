@@ -5,6 +5,21 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Interação de modelagem MODEL (23/09/2026)
+- Loop Cut na UI Slint agora arma sem seleção prévia, encontra edge rings válidos por hover, desenha preview no viewport e ajusta Cuts pela roda sem acionar zoom; click inicia a sessão transacional e Enter/Esc confirma/cancela.
+- Orbit, pan e zoom da viewport ficam suspensos durante Loop Cut, Slice, Profile e ferramentas modais com captura do mouse.
+- Shelf MODEL expõe Push/Pull, Slice, Loop Cut e Profile; Profile oferece prévia, fechamento, profundidade, geração por extrusão e revolve.
+- Selector de pivot localizado expõe Median Point, Bounding Box Center, 3D Cursor e Individual Origins.
+- Slice passa a manter os dois lados da malha sem cap por padrão, conforme o contrato canônico.
+
+### Implementado — MODEL Inspector e viewport (23/09/2026)
+- Baseline MODEL revisada com autorização do produto: `Parts → Transform → Material → Object` no Inspector direito, com cabeçalho fixo, corpo rolável, seções recolhíveis e acesso compacto à direita. ADR 003 e matriz de gaps registram os limites.
+- Parts agrupa busca, filtro, ordenação e contagem numa faixa; o ajuste de altura da linha atualiza a lista ao vivo nos layouts normal e compacto. Seções do Inspector usam superfície elevada e borda semântica mais visível; teste headless cobre a interação e os dois layouts.
+- Select combina clique/caixa e ganhou Lasso; a seleção por região detecta arestas cruzadas sem depender do ponto médio. Quatro ferramentas de transformação incluem gizmo combinado com handles próprios de mover, girar e escalar.
+- Ícones circulares de shading, overlay de wire independente do modo Wireframe, feedback de seleção Point/Edge mais legível e silhueta de esfera corrigida. Face deixou de exibir pontos centrais que poluíam a leitura.
+- Menus do topo alinham-se à esquerda e fecham ao perder foco; o gesto modal por atalho aceita movimento imediato e não deixa o clique de confirmação selecionar o objeto subjacente.
+- Parâmetros pós-criação das primitivas, cobertura completa de tooltips e paridade premium de viewport **ainda não estão concluídos**; ver `docs/development/model-inspector-viewport-gap-matrix.md`.
+
 ### Planejado — arquitetura de Context e workspaces (23/09/2026)
 - Plano incremental de shell rolável e seções compartilhadas, seguido por hierarquia MODEL e deduplicação das barras da viewport; PAINT/UV ficam documentados para fase posterior, sujeitos ao Livro Vivo.
 

@@ -24,6 +24,7 @@ pub fn apply_theme(window: &PetuniaSlintShell, theme_id: &str) {
     tokens.set_surface_raised(to_slint(ThemeToken::BgSurfaceActive));
     tokens.set_surface_hover(to_slint(ThemeToken::BgSurfaceHover));
     tokens.set_border(to_slint(ThemeToken::BorderSubtle));
+    tokens.set_border_strong(to_slint(ThemeToken::BorderStrong));
     tokens.set_text_primary(to_slint(ThemeToken::TextPrimary));
     tokens.set_text_secondary(to_slint(ThemeToken::TextSecondary));
     tokens.set_text_muted(to_slint(ThemeToken::TextMuted));

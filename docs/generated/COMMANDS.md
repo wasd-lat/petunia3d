@@ -14,7 +14,7 @@ description: Catálogo canônico de comandos gerados a partir do CommandDispatch
 > **Single Source of Truth (P3D-100, P3D-119)**
 > Todos os comandos do Petunia3D são registrados centralmente no `CommandDispatcher`, permitindo despacho transacional com histórico (Undo/Redo), Command Palette e telemetria.
 
-Total de comandos registrados no motor: **84**.
+Total de comandos registrados no motor: **85**.
 
 ## Tabela Geral de Comandos
 
@@ -48,7 +48,7 @@ Total de comandos registrados no motor: **84**.
 | `model.add_torus` | **Add Torus** | `Model` | Não | Modeling | Add a torus primitive |
 | `model.add_wedge` | **Add Wedge** | `Model` | Não | Modeling | Add a wedge/ramp primitive |
 | `model.bevel` | **Bevel Edges** | `Model` | Sim | Bevel | Bevel selected mesh edges |
-| `model.connect` | **Connect Loops** | `Model` | Sim | Modeling | Bridge two selected faces with connecting quads |
+| `model.connect` | **Connect Loops** | `Model` | Sim | Modeling | Connect two faces or boundary loops with quads and triangles |
 | `model.cut` | **Cut** | `Model` | Não | Modeling | Subtract the boolean operand from the active object |
 | `model.extrude` | **Extrude** | `Model` | Sim | Extrude | Extrude selected faces along surface normal |
 | `model.extrude_individual` | **Extrude Individual** | `Model` | Sim | Extrude | Extrude selected faces individually |
@@ -98,6 +98,7 @@ Total de comandos registrados no motor: **84**.
 | `view.right` | **View Right** | `View` | Não | Navigation | Align camera to Right orthographic view |
 | `view.toggle_nav_hud` | **Toggle Navigation HUD** | `View` | Não | Navigation | Toggle display of viewport orientation angle badge |
 | `view.toggle_projection` | **Toggle Projection** | `View` | Não | Navigation | Toggle perspective or orthographic view |
+| `view.toggle_wire_overlay` | **Toggle Wire Overlay** | `View` | Não | Navigation | Display mesh edges over the active shading mode |
 | `view.toggle_wireframe` | **Toggle Wireframe** | `View` | Não | Navigation | Toggle wireframe display on active mesh |
 | `view.toggle_xray` | **Toggle X-Ray** | `View` | Não | Navigation | Toggle semi-transparent see-through mesh display |
 | `view.top` | **View Top** | `View` | Não | Navigation | Align camera to Top orthographic view |

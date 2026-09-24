@@ -43,6 +43,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>Ctrl+B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>Delete</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |
@@ -82,7 +83,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 
 ## Perfis Especializados em Disco
 
-### Perfil: `3ds-max` (46 atalhos)
+### Perfil: `3ds-max` (47 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -97,6 +98,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>Ctrl+B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>Delete</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |
@@ -133,7 +135,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `blender` (46 atalhos)
+### Perfil: `blender` (47 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -148,6 +150,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>Ctrl+B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>X</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |
@@ -184,7 +187,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `blender-notebook` (46 atalhos)
+### Perfil: `blender-notebook` (47 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -199,6 +202,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>Ctrl+B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>Delete</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |
@@ -235,7 +239,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `cinema-4d` (46 atalhos)
+### Perfil: `cinema-4d` (47 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -250,6 +254,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>Backspace</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |
@@ -286,7 +291,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `maya` (46 atalhos)
+### Perfil: `maya` (47 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -301,6 +306,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>Ctrl+B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>Delete</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |
@@ -337,7 +343,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `petunia-notebook` (46 atalhos)
+### Perfil: `petunia-notebook` (47 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -352,6 +358,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>Ctrl+B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>Backspace</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |
@@ -388,7 +395,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `petunia-simple` (46 atalhos)
+### Perfil: `petunia-simple` (47 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -403,6 +410,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `global.toggle_wireframe` | <kbd>Z</kbd> |
 | `global.undo` | <kbd>Ctrl+Z</kbd> |
 | `model.bevel` | <kbd>Ctrl+B</kbd> |
+| `model.box_select` | <kbd>B</kbd> |
 | `model.connect` | <kbd>Ctrl+J</kbd> |
 | `model.delete` | <kbd>Delete</kbd> |
 | `model.dissolve` | <kbd>X</kbd> |

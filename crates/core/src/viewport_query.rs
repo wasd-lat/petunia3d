@@ -231,28 +231,74 @@ impl crate::AppState {
     /// Rectangle in NDC coordinates. Selection changes are non-destructive and
     /// preserve the active domain; depth is bypassed only by X-Ray/Wireframe.
     pub fn select_viewport_box(&mut self, a: [f32; 2], b: [f32; 2], add: bool, subtract: bool) {
-        if a.iter().chain(&b).any(|v| !v.is_finite())
-            || self.modal.is_some()
-            || self.mesh_preview.is_some()
-            || self.paint_stroke.is_some()
+        if a.iter().chain(&b).any(|v| !v.is_finite()) {
+            return;
+        }
+        self.select_viewport_region(
+            |p| {
+                p[0] >= a[0].min(b[0])
+                    && p[0] <= a[0].max(b[0])
+                    && p[1] >= a[1].min(b[1])
+                    && p[1] <= a[1].max(b[1])
+            },
+            |from, to| segment_box_hit_t(from, to, a, b),
+            add,
+            subtract,
+        );
+    }
+
+    /// Seleciona por polígono de tela em NDC; oclusão segue as mesmas regras
+    /// da seleção por caixa (X-Ray e Wireframe atravessam a malha).
+    pub fn select_viewport_lasso(&mut self, polygon: &[[f32; 2]], add: bool, subtract: bool) {
+        if polygon.len() < 3
+            || polygon.len() > 4096
+            || polygon.iter().flatten().any(|value| !value.is_finite())
         {
+            return;
+        }
+        self.select_viewport_region(
+            |p| point_in_polygon_ndc(p, polygon),
+            |from, to| segment_polygon_hit_t(from, to, polygon),
+            add,
+            subtract,
+        );
+    }
+
+    fn select_viewport_region(
+        &mut self,
+        contains: impl Fn([f32; 2]) -> bool,
+        segment_hit_t: impl Fn([f32; 2], [f32; 2]) -> Option<f32>,
+        add: bool,
+        subtract: bool,
+    ) {
+        if self.modal.is_some() || self.mesh_preview.is_some() || self.paint_stroke.is_some() {
             return;
         }
         let vp = self.session.camera.view_proj();
         let scene = ViewportSceneQuery::new(&self.project.project);
-        let inside = |point: Vec3| {
+        let project = |point: Vec3| {
             let clip = vp * point.extend(1.0);
-            if clip.w <= 0.0 || clip.z < 0.0 || clip.z > clip.w {
-                return false;
+            if !clip.is_finite() || clip.w <= 0.0 || clip.z < 0.0 || clip.z > clip.w {
+                return None;
             }
             let p = clip.truncate() / clip.w;
-            p.x >= a[0].min(b[0])
-                && p.x <= a[0].max(b[0])
-                && p.y >= a[1].min(b[1])
-                && p.y <= a[1].max(b[1])
-                && (self.session.show_xray
-                    || self.session.shading == crate::Shading::Wireframe
-                    || scene.point_visible(&self.session.camera, point))
+            Some([p.x, p.y])
+        };
+        let through = self.session.show_xray || self.session.shading == crate::Shading::Wireframe;
+        let inside = |point: Vec3| {
+            project(point).is_some_and(|p| {
+                contains(p) && (through || scene.point_visible(&self.session.camera, point))
+            })
+        };
+        let edge_inside = |a: Vec3, b: Vec3| {
+            if inside(a) || inside(b) {
+                return true;
+            }
+            let (Some(pa), Some(pb)) = (project(a), project(b)) else {
+                return false;
+            };
+            segment_hit_t(pa, pb)
+                .is_some_and(|t| through || scene.point_visible(&self.session.camera, a.lerp(b, t)))
         };
         if self.selection_domain() == crate::SelectionDomain::Object {
             let hits: Vec<_> = self
@@ -260,7 +306,13 @@ impl crate::AppState {
                 .assets
                 .iter()
                 .filter(|asset| asset.visible && !asset.locked)
-                .filter(|asset| asset.evaluated_mesh().verts.iter().any(|v| inside(v.vec())))
+                .filter(|asset| {
+                    let mesh = asset.evaluated_mesh();
+                    mesh.verts.iter().any(|v| inside(v.vec()))
+                        || mesh.edges_unique().into_iter().any(|(a, b)| {
+                            edge_inside(mesh.verts[a as usize].vec(), mesh.verts[b as usize].vec())
+                        })
+                })
                 .map(|asset| asset.id)
                 .collect();
             if !add && !subtract {
@@ -307,7 +359,7 @@ impl crate::AppState {
                 mesh.edges_unique()
                     .into_iter()
                     .filter(|&(a, b)| {
-                        inside((mesh.verts[a as usize].vec() + mesh.verts[b as usize].vec()) * 0.5)
+                        edge_inside(mesh.verts[a as usize].vec(), mesh.verts[b as usize].vec())
                     })
                     .collect()
             } else {
@@ -319,13 +371,23 @@ impl crate::AppState {
                     .enumerate()
                     .filter(|(_, face)| {
                         !face.verts.is_empty()
-                            && inside(
+                            && (inside(
                                 face.verts
                                     .iter()
                                     .map(|&v| mesh.verts[v as usize].vec())
                                     .sum::<Vec3>()
                                     / face.verts.len() as f32,
-                            )
+                            ) || face
+                                .verts
+                                .iter()
+                                .any(|&v| inside(mesh.verts[v as usize].vec()))
+                                || face.verts.iter().enumerate().any(|(i, &a)| {
+                                    let b = face.verts[(i + 1) % face.verts.len()];
+                                    edge_inside(
+                                        mesh.verts[a as usize].vec(),
+                                        mesh.verts[b as usize].vec(),
+                                    )
+                                }))
                     })
                     .map(|(i, _)| i)
                     .collect()
@@ -367,5 +429,97 @@ impl crate::AppState {
         self.session.tools.hover = crate::HoverTarget::None;
         self.sync_selection();
         self.mark_dirty();
+    }
+}
+
+fn point_in_polygon_ndc(point: [f32; 2], polygon: &[[f32; 2]]) -> bool {
+    let mut inside = false;
+    let mut previous = polygon[polygon.len() - 1];
+    for &current in polygon {
+        if (current[1] > point[1]) != (previous[1] > point[1]) {
+            let crossing = current[0]
+                + (point[1] - current[1]) * (previous[0] - current[0]) / (previous[1] - current[1]);
+            if point[0] < crossing {
+                inside = !inside;
+            }
+        }
+        previous = current;
+    }
+    inside
+}
+
+fn segment_box_hit_t(from: [f32; 2], to: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Option<f32> {
+    let min = [a[0].min(b[0]), a[1].min(b[1])];
+    let max = [a[0].max(b[0]), a[1].max(b[1])];
+    let corners = [min, [max[0], min[1]], max, [min[0], max[1]]];
+    segment_polygon_hit_t(from, to, &corners)
+}
+
+fn segment_polygon_hit_t(from: [f32; 2], to: [f32; 2], polygon: &[[f32; 2]]) -> Option<f32> {
+    polygon
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &a)| segment_intersection_t(from, to, a, polygon[(i + 1) % polygon.len()]))
+        .min_by(f32::total_cmp)
+}
+
+fn segment_intersection_t(from: [f32; 2], to: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Option<f32> {
+    let cross = |u: [f32; 2], v: [f32; 2]| u[0] * v[1] - u[1] * v[0];
+    let direction = [to[0] - from[0], to[1] - from[1]];
+    let boundary = [b[0] - a[0], b[1] - a[1]];
+    let denominator = cross(direction, boundary);
+    if denominator.abs() <= 1.0e-8 {
+        return None;
+    }
+    let offset = [a[0] - from[0], a[1] - from[1]];
+    let t = cross(offset, boundary) / denominator;
+    let u = cross(offset, direction) / denominator;
+    (0.0..=1.0)
+        .contains(&t)
+        .then_some(t)
+        .filter(|_| (0.0..=1.0).contains(&u))
+}
+
+#[cfg(test)]
+mod lasso_tests {
+    use super::{point_in_polygon_ndc, segment_box_hit_t, segment_polygon_hit_t};
+
+    #[test]
+    fn concave_lasso_does_not_select_its_bounding_box() {
+        let polygon = [
+            [-0.8, -0.8],
+            [0.8, -0.8],
+            [0.8, -0.2],
+            [-0.2, -0.2],
+            [-0.2, 0.8],
+            [-0.8, 0.8],
+        ];
+        assert!(point_in_polygon_ndc([-0.5, 0.5], &polygon));
+        assert!(point_in_polygon_ndc([0.5, -0.5], &polygon));
+        assert!(!point_in_polygon_ndc([0.5, 0.5], &polygon));
+    }
+
+    #[test]
+    fn box_detects_an_edge_crossing_without_an_endpoint_inside() {
+        let hit = segment_box_hit_t([-0.8, 0.0], [0.8, 0.0], [-0.2, -0.2], [0.2, 0.2]);
+        assert!(hit.is_some_and(|t| (0.0..1.0).contains(&t)));
+        assert_eq!(
+            segment_box_hit_t([-0.8, 0.7], [0.8, 0.7], [-0.2, -0.2], [0.2, 0.2],),
+            None
+        );
+    }
+
+    #[test]
+    fn concave_lasso_detects_only_crossings_of_its_actual_boundary() {
+        let polygon = [
+            [-0.8, -0.8],
+            [0.8, -0.8],
+            [0.8, -0.2],
+            [-0.2, -0.2],
+            [-0.2, 0.8],
+            [-0.8, 0.8],
+        ];
+        assert!(segment_polygon_hit_t([-0.6, 0.5], [0.6, 0.5], &polygon).is_some());
+        assert!(segment_polygon_hit_t([0.3, 0.3], [0.7, 0.7], &polygon).is_none());
     }
 }

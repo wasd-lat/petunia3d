@@ -177,6 +177,51 @@ pub mod text_id {
 
     // Chrome do shell Slint: títulos de painel, botões e dicas de status.
     pub const UI_PARTS: TextId = TextId::new("ui.parts");
+    pub const UI_COLLAPSE_INSPECTOR: TextId = TextId::new("ui.collapse_inspector");
+    pub const UI_EXPAND_INSPECTOR: TextId = TextId::new("ui.expand_inspector");
+    pub const UI_TAB_PARTS: TextId = TextId::new("ui.tab_parts");
+    pub const UI_TAB_TRANSFORM: TextId = TextId::new("ui.tab_transform");
+    pub const UI_TAB_MATERIAL: TextId = TextId::new("ui.tab_material");
+    pub const UI_TAB_OBJECT: TextId = TextId::new("ui.tab_object");
+    pub const UI_TAB_MODIFIERS: TextId = TextId::new("ui.tab_modifiers");
+    pub const UI_TOOL_CARD: TextId = TextId::new("ui.tool_card");
+    pub const UI_NO_TOOL_PARAMETERS: TextId = TextId::new("ui.no_tool_parameters");
+    pub const UI_LAST_OPERATION: TextId = TextId::new("ui.last_operation");
+    pub const UI_STATS_VERTS: TextId = TextId::new("ui.stats_verts");
+    pub const UI_STATS_TRIS: TextId = TextId::new("ui.stats_tris");
+    pub const UI_STATS_SELECTION: TextId = TextId::new("ui.stats_selection");
+    pub const UI_QUICK_ACTIONS: TextId = TextId::new("ui.quick_actions");
+    pub const UI_QUICK_ACTION_CUSTOMIZE: TextId = TextId::new("ui.quick_action_customize");
+    pub const UI_ACTION_SUBDIVIDE: TextId = TextId::new("ui.action_subdivide");
+    pub const UI_ACTION_FUSE: TextId = TextId::new("ui.action_fuse");
+    pub const UI_ACTION_CUT: TextId = TextId::new("ui.action_cut");
+    pub const UI_ACTION_INTERSECT: TextId = TextId::new("ui.action_intersect");
+    pub const UI_ACTION_JOIN: TextId = TextId::new("ui.action_join");
+    pub const UI_ACTION_MERGE: TextId = TextId::new("ui.action_merge");
+    pub const UI_ACTION_SLICE: TextId = TextId::new("ui.action_slice");
+    pub const UI_ACTION_LOOP_CUT: TextId = TextId::new("ui.action_loop_cut");
+    pub const UI_MATERIAL_EDITOR: TextId = TextId::new("ui.material_editor");
+    pub const UI_MATERIAL_NAME: TextId = TextId::new("ui.material_name");
+    pub const UI_MATERIAL_PROFILE: TextId = TextId::new("ui.material_profile");
+    pub const UI_MATERIAL_ROUGHNESS: TextId = TextId::new("ui.material_roughness");
+    pub const UI_MATERIAL_METALLIC: TextId = TextId::new("ui.material_metallic");
+    pub const UI_MATERIAL_NORMAL_SCALE: TextId = TextId::new("ui.material_normal_scale");
+    pub const UI_MATERIAL_EMISSION: TextId = TextId::new("ui.material_emission");
+    pub const UI_MATERIAL_ALPHA_MODE: TextId = TextId::new("ui.material_alpha_mode");
+    pub const UI_MATERIAL_ADVANCED: TextId = TextId::new("ui.material_advanced");
+    pub const UI_MODIFIERS_EMPTY: TextId = TextId::new("ui.modifiers_empty");
+    pub const UI_MODIFIER_ADD_MIRROR: TextId = TextId::new("ui.modifier_add_mirror");
+    pub const UI_MODIFIER_ADD_SYMMETRY: TextId = TextId::new("ui.modifier_add_symmetry");
+    pub const UI_MODIFIER_AXIS: TextId = TextId::new("ui.modifier_axis");
+    pub const UI_MODIFIER_REMOVE: TextId = TextId::new("ui.modifier_remove");
+    pub const UI_MODIFIER_MOVE_UP: TextId = TextId::new("ui.modifier_move_up");
+    pub const UI_MODIFIER_MOVE_DOWN: TextId = TextId::new("ui.modifier_move_down");
+    pub const UI_PARTS_COLLECTION: TextId = TextId::new("ui.parts_collection");
+    pub const UI_PARTS_ANNOTATIONS: TextId = TextId::new("ui.parts_annotations");
+    pub const UI_PARTS_MEASUREMENTS: TextId = TextId::new("ui.parts_measurements");
+    pub const UI_PARTS_ISOLATE: TextId = TextId::new("ui.parts_isolate");
+    pub const UI_PARTS_EXIT_ISOLATE: TextId = TextId::new("ui.parts_exit_isolate");
+    pub const UI_PARTS_NEW_COLLECTION: TextId = TextId::new("ui.parts_new_collection");
     pub const UI_PROJECT_ASSET_LIBRARY: TextId = TextId::new("ui.project_asset_library");
     pub const UI_SAVE_ACTIVE_AS_ASSET: TextId = TextId::new("ui.save_active_as_asset");
     pub const UI_STATUS_HINT: TextId = TextId::new("ui.status_hint");
@@ -192,6 +237,39 @@ pub mod text_id {
     pub const UI_VERTICAL_DRAG_NORMAL: TextId = TextId::new("ui.vertical_drag_normal");
     pub const UI_SEARCH_ASSETS: TextId = TextId::new("ui.search_assets");
     pub const UI_SEARCH_PARTS: TextId = TextId::new("ui.search_parts");
+    pub const UI_INSPECTOR: TextId = TextId::new("ui.inspector");
+    pub const UI_NUMERIC_FIELD_HINT: TextId = TextId::new("ui.numeric_field_hint");
+    pub const TOOLS_SELECT: TextId = TextId::new("tools.select");
+    pub const TOOLS_ROTATE: TextId = TextId::new("tools.rotate");
+    pub const TOOLS_SCALE: TextId = TextId::new("tools.scale");
+    pub const TOOLS_TRANSFORM: TextId = TextId::new("tools.transform");
+    pub const TOOLS_SELECT_LASSO: TextId = TextId::new("tools.select_lasso");
+    pub const TRANSFORM_POSITION: TextId = TextId::new("transform.position");
+    pub const TOOLS_LOOP_CUT: TextId = TextId::new("tools.loop_cut");
+    pub const TOOLS_SLICE: TextId = TextId::new("tools.slice");
+    pub const TOOLS_PUSH_PULL: TextId = TextId::new("tools.push_pull");
+    pub const TOOLS_DRAW_PROFILE: TextId = TextId::new("tools.draw_profile");
+    pub const TOOLS_PIVOT: TextId = TextId::new("tools.pivot");
+    pub const UI_PIVOT_HINT: TextId = TextId::new("ui.pivot_hint");
+    pub const UI_LOOP_CUT_HINT: TextId = TextId::new("ui.loop_cut_hint");
+    pub const UI_SLICE_HINT: TextId = TextId::new("ui.slice_hint");
+    pub const UI_PUSH_PULL_HINT: TextId = TextId::new("ui.push_pull_hint");
+    pub const UI_PROFILE_HINT: TextId = TextId::new("ui.profile_hint");
+    pub const UI_PROFILE_DEPTH: TextId = TextId::new("ui.profile_depth");
+    pub const UI_PROFILE_POINTS: TextId = TextId::new("ui.profile_points");
+    pub const UI_PROFILE_CLOSE: TextId = TextId::new("ui.profile_close");
+    pub const UI_PROFILE_GENERATE: TextId = TextId::new("ui.profile_generate");
+    pub const UI_PROFILE_REVOLVE: TextId = TextId::new("ui.profile_revolve");
+    pub const UI_MODEL_SELECT_HINT: TextId = TextId::new("ui.model_select_hint");
+    pub const UI_MODEL_POSITION_HINT: TextId = TextId::new("ui.model_position_hint");
+    pub const UI_MODEL_ROTATE_HINT: TextId = TextId::new("ui.model_rotate_hint");
+    pub const UI_MODEL_SCALE_HINT: TextId = TextId::new("ui.model_scale_hint");
+    pub const UI_MODEL_TRANSFORM_HINT: TextId = TextId::new("ui.model_transform_hint");
+    pub const UI_MODEL_LASSO_HINT: TextId = TextId::new("ui.model_lasso_hint");
+    pub const UI_HIDE_PART: TextId = TextId::new("ui.hide_part");
+    pub const UI_SHOW_PART: TextId = TextId::new("ui.show_part");
+    pub const UI_LOCK_PART: TextId = TextId::new("ui.lock_part");
+    pub const UI_UNLOCK_PART: TextId = TextId::new("ui.unlock_part");
     pub const UI_SELECTED_PARTS_ONLY: TextId = TextId::new("ui.selected_parts_only");
     pub const UI_SORT_PARTS: TextId = TextId::new("ui.sort_parts");
     pub const UI_PARTS_ROW_SIZE: TextId = TextId::new("ui.parts_row_size");
@@ -200,15 +278,25 @@ pub mod text_id {
     pub const UI_SELECTION_COLOR: TextId = TextId::new("ui.selection_color");
     pub const UI_HIGHLIGHT_THICKNESS: TextId = TextId::new("ui.highlight_thickness");
     pub const UI_VIEW_WIREFRAME: TextId = TextId::new("ui.view_wireframe");
+    pub const UI_VIEW_WIREFRAME_HINT: TextId = TextId::new("ui.view_wireframe_hint");
     pub const UI_VIEW_SOLID: TextId = TextId::new("ui.view_solid");
+    pub const UI_VIEW_SOLID_HINT: TextId = TextId::new("ui.view_solid_hint");
     pub const UI_VIEW_MATERIAL: TextId = TextId::new("ui.view_material");
+    pub const UI_VIEW_MATERIAL_HINT: TextId = TextId::new("ui.view_material_hint");
     pub const UI_VIEW_LIT: TextId = TextId::new("ui.view_lit");
+    pub const UI_VIEW_LIT_HINT: TextId = TextId::new("ui.view_lit_hint");
     pub const UI_MORE_MODEL_TOOLS: TextId = TextId::new("ui.more_model_tools");
     pub const UI_XRAY_OPACITY: TextId = TextId::new("ui.xray_opacity");
+    pub const UI_WIRE_OVERLAY: TextId = TextId::new("ui.wire_overlay");
+    pub const UI_WIRE_OVERLAY_HINT: TextId = TextId::new("ui.wire_overlay_hint");
     pub const UI_SELECTION_COLOR_INVALID: TextId = TextId::new("ui.selection_color_invalid");
     pub const UI_SELECTION_COLOR_LOW_CONTRAST: TextId =
         TextId::new("ui.selection_color_low_contrast");
     pub const UI_PREFERENCES_SAVE_FAILED: TextId = TextId::new("ui.preferences_save_failed");
+    pub const PIVOT_MEDIAN: TextId = TextId::new("pivot.median");
+    pub const PIVOT_BOUNDS: TextId = TextId::new("pivot.bounds");
+    pub const PIVOT_CURSOR: TextId = TextId::new("pivot.cursor");
+    pub const PIVOT_INDIVIDUAL: TextId = TextId::new("pivot.individual");
 
     // Diálogo de recuperação de autosave (P3D-002).
     pub const UI_RECOVERY_TITLE: TextId = TextId::new("ui.recovery_title");
@@ -358,9 +446,93 @@ pub mod text_id {
         UI_REDOCK,
         UI_AT_3D_CURSOR,
         UI_PARTS,
+        UI_COLLAPSE_INSPECTOR,
+        UI_EXPAND_INSPECTOR,
+        UI_TAB_PARTS,
+        UI_TAB_TRANSFORM,
+        UI_TAB_MATERIAL,
+        UI_TAB_OBJECT,
+        UI_TAB_MODIFIERS,
+        UI_TOOL_CARD,
+        UI_NO_TOOL_PARAMETERS,
+        UI_LAST_OPERATION,
+        UI_STATS_VERTS,
+        UI_STATS_TRIS,
+        UI_STATS_SELECTION,
+        UI_QUICK_ACTIONS,
+        UI_QUICK_ACTION_CUSTOMIZE,
+        UI_ACTION_SUBDIVIDE,
+        UI_ACTION_FUSE,
+        UI_ACTION_CUT,
+        UI_ACTION_INTERSECT,
+        UI_ACTION_JOIN,
+        UI_ACTION_MERGE,
+        UI_ACTION_SLICE,
+        UI_ACTION_LOOP_CUT,
+        UI_MATERIAL_EDITOR,
+        UI_MATERIAL_NAME,
+        UI_MATERIAL_PROFILE,
+        UI_MATERIAL_ROUGHNESS,
+        UI_MATERIAL_METALLIC,
+        UI_MATERIAL_NORMAL_SCALE,
+        UI_MATERIAL_EMISSION,
+        UI_MATERIAL_ALPHA_MODE,
+        UI_MATERIAL_ADVANCED,
+        UI_MODIFIERS_EMPTY,
+        UI_MODIFIER_ADD_MIRROR,
+        UI_MODIFIER_ADD_SYMMETRY,
+        UI_MODIFIER_AXIS,
+        UI_MODIFIER_REMOVE,
+        UI_MODIFIER_MOVE_UP,
+        UI_MODIFIER_MOVE_DOWN,
+        UI_PARTS_COLLECTION,
+        UI_PARTS_ANNOTATIONS,
+        UI_PARTS_MEASUREMENTS,
+        UI_PARTS_ISOLATE,
+        UI_PARTS_EXIT_ISOLATE,
+        UI_PARTS_NEW_COLLECTION,
+        UI_INSPECTOR,
+        UI_NUMERIC_FIELD_HINT,
+        TOOLS_SELECT,
+        TOOLS_ROTATE,
+        TOOLS_SCALE,
+        TOOLS_TRANSFORM,
+        TOOLS_SELECT_LASSO,
+        TRANSFORM_POSITION,
+        TOOLS_LOOP_CUT,
+        TOOLS_SLICE,
+        TOOLS_PUSH_PULL,
+        TOOLS_DRAW_PROFILE,
+        TOOLS_PIVOT,
+        UI_PIVOT_HINT,
+        UI_LOOP_CUT_HINT,
+        UI_SLICE_HINT,
+        UI_PUSH_PULL_HINT,
+        UI_PROFILE_HINT,
+        UI_PROFILE_DEPTH,
+        UI_PROFILE_POINTS,
+        UI_PROFILE_CLOSE,
+        UI_PROFILE_GENERATE,
+        UI_PROFILE_REVOLVE,
+        UI_MODEL_SELECT_HINT,
+        UI_MODEL_POSITION_HINT,
+        UI_MODEL_ROTATE_HINT,
+        UI_MODEL_SCALE_HINT,
+        UI_MODEL_TRANSFORM_HINT,
+        UI_MODEL_LASSO_HINT,
+        UI_HIDE_PART,
+        UI_SHOW_PART,
+        UI_LOCK_PART,
+        UI_UNLOCK_PART,
         UI_PROJECT_ASSET_LIBRARY,
         UI_SAVE_ACTIVE_AS_ASSET,
         UI_STATUS_HINT,
+        UI_WIRE_OVERLAY,
+        UI_WIRE_OVERLAY_HINT,
+        UI_VIEW_WIREFRAME_HINT,
+        UI_VIEW_SOLID_HINT,
+        UI_VIEW_MATERIAL_HINT,
+        UI_VIEW_LIT_HINT,
         UI_UNWRAP_MESH,
         UI_PACK_ISLANDS,
         UI_ACTIVE_BRUSH_COLOR,
@@ -487,6 +659,10 @@ pub mod text_id {
         PRIMS_TIP_FILL,
         PRIMS_TIP_CAPS,
         PRIMS_TIP_BODY_LENGTH,
+        PIVOT_MEDIAN,
+        PIVOT_BOUNDS,
+        PIVOT_CURSOR,
+        PIVOT_INDIVIDUAL,
     ];
 }
 
