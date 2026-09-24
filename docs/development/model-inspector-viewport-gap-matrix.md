@@ -112,3 +112,40 @@ produto e vale para o shell Slint. Detalhes em
 | R7 | PARTIALLY_COMPLIANT | Add no topo, Monitor, Chevrons + X; reorder/apply inalterados e cobertos por testes. Sem drag-grip `::::` (fora do set de ícones). |
 | R8 | PARTIALLY_COMPLIANT | Card único em `viewport-region` (12,56); params xor HUD; oculto em repouso; teste headless de presença/ausência. Painel antigo e HUD de baixo removidos. |
 | R9 | COMPLIANT | 5 novos `TextId` com en/pt-BR, plumbing no bridge e `docs-generate --check` verde. |
+
+## Rodada 4 — Módulos independentes: ancorar, flutuar e fixar (24/09/2026)
+
+Pedido explícito do responsável do produto após a rodada 3: cada módulo do
+Inspector direito passa a ser independente, com abrir/recolher, ancorar ou
+flutuar e "pin" duplo (manter aberto + fixar asset), persistência por módulo e
+arrasto do painel flutuante em qualquer ponto da tela. Decidido com o produto
+que "flutuante" = card sobreposto **dentro do canvas**, persistido e sem janela
+do sistema operacional: o cap. 36 proíbe janelas OS e docking irrestrito, e o
+termo "floating panel" em Blender/C4D significa justamente o oposto. Detalhes em
+[`ADR 005`](../architecture/adr/005-modulos-inspector-dock-float-pin.md).
+
+| # | Requisito | Estado inicial | Delta aplicado |
+| --- | --- | --- | --- |
+| M1 | Módulo com estado próprio (aberto, ancorado, posição) | PARTIALLY — um `open` booleano por seção, sem posição nem âncora | `SectionLayout` por seção (`docked`, `x`, `y`, `pin_open`, `pinned_asset`); ordem canônica preservada |
+| M2 | Card flutuante arrastável em qualquer ponto | MISSING — nenhuma camada flutuante existia | `FloatSectionCard` em `Window`, com `for` sobre `section-states`; arraste pelo header com clamp in-canvas |
+| M3 | Corpo único, instanciado ancorado e flutuante | STUB — o corpo vivia inline no painel | 6 componentes `*Body` com `@children`; coluna ancorada e camada flutuante compartilham o mesmo markup |
+| M4 | Recolher-tudo sem destruir pin aberto | BROKEN — toggle global ignorava fixação | `toggle_all_sections` pula seções com `pin_open`; semântica de mão única (`close_all` = todas abertas) |
+| M5 | Pin duplo: manter aberto + fixar asset | MISSING | Dois controles independentes no header; `pin_open` vence recolher-tudo/painel, `pinned_asset` fixa o UUID exibido |
+| M6 | Fixar asset redireciona leitura **e** escrita | MISSING — seção lia e mutava o asset ativo | `section_asset()` (UUID fixado, fallback ativo) em Material/Object/Modifiers; `find_modifier_owner` aplica mutação no asset exibido |
+| M7 | Persistência por módulo entre sessões | PARTIALLY — só tema/workspace persistiam | `UserPreferences.section_layouts`; restore no startup e gravação em cada transição |
+| M8 | Afordances por `TextId` | MISSING — "Dock"/"Drag"/"Pin" hardcoded no markup | `label-section-dock/drag/pin-open/pin-asset/unpin-asset` em en/pt-BR |
+| M9 | Reancorar devolve à ordem canônica | N/A | `section-dock-toggled` volta a seções à ordem; nenhum docking irrestrito foi introduzido |
+
+## Reconciliação da rodada 4 (24/09/2026)
+
+| # | Estado após a implementação | Evidência e limite ainda aberto |
+| --- | --- | --- |
+| M1 | COMPLIANT | 17 testes de `section_layout` cobrem restore, transições e sanitização; `toggle_all_sections_skips_pinned_open` fixa a semântica de pin aberto. |
+| M2 | PARTIALLY_COMPLIANT | `dragging_floating_card_header_reports_clamped_move` valida arraste + clamp; `floating_material_card_anchors_at_state_position` valida ancoragem. Clamp usa folga fixa de 80px em vez da largura real do card: com Inspector largo, o card encosta na borda direita. Sem QA com ponteiro físico. |
+| M3 | COMPLIANT | Um `*Body` por seção; teste headless garante cópia única do corpo quando a seção flutua. |
+| M4 | PARTIALLY_COMPLIANT | Reverter tudo com `pin_open` respeitado. Falta knob de teclado para o toggle global. |
+| M5 | PARTIALLY_COMPLIANT | Dois pins independentes no header e estado persistido; falta pin de asset por clique no Outliner (hoje segue a seleção ativa). |
+| M6 | PARTIALLY_COMPLIANT | 4 testes de bridge cobrem leitura (Object/Modifiers/Material) e escrita (`add_modifier` no asset fixado). Falta cobrir toggle/reorder/apply de modifier no asset fixado. |
+| M7 | PARTIALLY_COMPLIANT | Roundtrip dos 6 módulos e benchmark de gravação (131µs) da Fase 1; falta testar restauração com janela fora da tela (sanitização já existe, sem teste end-to-end). |
+| M8 | COMPLIANT | 5 `TextId` novos em en/pt-BR, `docs-generate --check` verde. |
+| M9 | PARTIALLY_COMPLIANT | Reancorar preserva ordem canônica; não há snap de drop nem docking irrestrito, por decisão de V1. |

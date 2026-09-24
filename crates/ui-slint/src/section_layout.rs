@@ -301,7 +301,7 @@ mod tests {
         );
         assert_eq!(
             bridge.toggle_all_sections([false, true, false, true, false, true]),
-            [true, true, true, true, true, true]
+            [false, true, true, true, true, true]
         );
         let _ = std::fs::remove_file(&_path);
     }

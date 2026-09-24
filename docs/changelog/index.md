@@ -5,6 +5,13 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Módulos independentes do Inspector: ancorar, flutuar e fixar (24/09/2026, ADR 005)
+- Cada módulo do Inspector direito (Parts, Transform, Material, Object, Modifiers, Quick Actions) tem estado próprio: ancorado ou flutuante, posição, "manter aberto" e asset fixado, com persistência individual por módulo.
+- Card flutuante arrastável dentro da viewport (arrasto pelo header, clamp nas bordas), com camada de cards sobre o canvas — sem janelas do sistema operacional, conforme a V1.
+- Pin duplo: "manter aberto" sobrevive ao recolher-tudo e ao recolhimento do painel; "fixar asset" fixa a seção a um asset e redireciona leitura **e** escrita (Material, Object e Modifiers operam no asset exibido, não no ativo).
+- Corpo de cada seção definido uma única vez e instanciado na coluna ancorada e no card flutuante; sem duplicação de markup ou callbacks.
+- Afordances de dock, arraste e pin localizadas via `TextId` (en/pt-BR).
+
 ### Decal 3D Projection, Layer Baking & Modal Tool Feedback (24/09/2026, Master MVP)
 - Manipulação paramétrica de decalques de pintura: suporte a transformação no espaço UV (`PaintLayerStack::set_decal_transform`) e rasterização destrutiva controlada (`PaintLayerStack::bake_decal_to_raster`).
 - Comandos transacionais de domínio `SetDecalTransformCmd` e `BakeDecalCmd` com histórico de desfazer/refazer completo no dispatcher de comandos.
