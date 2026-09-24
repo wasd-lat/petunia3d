@@ -9,3 +9,5 @@ Assegura consistência estilística, disciplina de implementação orientada a t
 ## Inventário
 - `coding-standards.md`: Padrões e boas práticas de código.
 - `testing-strategy.md`: O ciclo exaustivo de testes (unitários, integração, segurança, performance, stress e UI).
+- `v1-model-paint-status-matrix.md`: Matriz completa de conformidade e status das funcionalidades V1 de Modelagem e Pintura.
+
