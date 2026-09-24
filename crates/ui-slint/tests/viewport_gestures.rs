@@ -478,6 +478,82 @@ fn floating_material_card_anchors_at_state_position() {
 }
 
 #[test]
+fn floating_card_clamp_uses_real_card_size_on_all_four_borders() {
+    use petunia_ui_slint::SectionState;
+    i_slint_backend_testing::init_no_event_loop();
+    let shell = PetuniaSlintShell::new().expect("Slint shell");
+    shell.window().set_size(LogicalSize::new(1280.0, 800.0));
+    shell.show().expect("headless window");
+    shell.set_active_workspace("MODEL".into());
+    shell.set_label_tab_material("Material".into());
+    shell.set_material_docked(false);
+    shell.set_inspector_width(320.0);
+    let states = std::rc::Rc::new(slint::VecModel::from(vec![SectionState {
+        id: "material".into(),
+        docked: false,
+        x: 200.0,
+        y: 100.0,
+        pin_open: false,
+        pinned_asset: "".into(),
+    }]));
+    shell.set_section_states(states.into());
+
+    let moves = Rc::new(RefCell::new(Vec::new()));
+    let moves_callback = Rc::clone(&moves);
+    shell.on_section_moved(move |_, x, y| {
+        moves_callback.borrow_mut().push((x, y));
+    });
+
+    let drag = |shell: &PetuniaSlintShell, from: LogicalPosition, to: LogicalPosition| {
+        move_pointer(shell, from.x, from.y);
+        shell.window().dispatch_event(WindowEvent::PointerPressed {
+            position: from,
+            button: PointerEventButton::Left,
+        });
+        move_pointer(shell, to.x, to.y);
+        shell.window().dispatch_event(WindowEvent::PointerReleased {
+            position: to,
+            button: PointerEventButton::Left,
+        });
+    };
+
+    // Borda direita/inferior: o clamp usa a largura e a altura reais do card.
+    drag(
+        &shell,
+        LogicalPosition::new(300.0, 120.0),
+        LogicalPosition::new(5000.0, 5000.0),
+    );
+    let (right, bottom) = *moves.borrow().last().expect("arrasto na borda");
+    let card = ElementHandle::find_by_accessible_label(&shell, "Material")
+        .find(|element| element.accessible_role() != Some(AccessibleRole::Button))
+        .expect("card flutuante");
+    let card_size = card.size();
+    assert!(
+        (right - (1280.0 - card_size.width)).abs() < 4.0,
+        "x deve travar em container - largura do card, veio {right}"
+    );
+    assert!(
+        (bottom - (800.0 - card_size.height)).abs() < 4.0,
+        "y deve travar em container - altura do card, veio {bottom}"
+    );
+
+    // Borda esquerda/superior: o mesmo arrasto, agora a partir do card colado.
+    // O header começa 10px abaixo do topo do card (padding do conteúdo).
+    let card_pos = ElementHandle::find_by_accessible_label(&shell, "Material")
+        .find(|element| element.accessible_role() != Some(AccessibleRole::Button))
+        .expect("card flutuante")
+        .absolute_position();
+    drag(
+        &shell,
+        LogicalPosition::new(card_pos.x + 40.0, card_pos.y + 16.0),
+        LogicalPosition::new(0.0, 0.0),
+    );
+    let (left, top) = *moves.borrow().last().expect("arrasto no canto");
+    assert!(left.abs() < 4.0, "x trava em 0, veio {left}");
+    assert!(top.abs() < 4.0, "y trava em 0, veio {top}");
+}
+
+#[test]
 fn dragging_floating_card_header_reports_clamped_move() {
     use petunia_ui_slint::SectionState;
     i_slint_backend_testing::init_no_event_loop();
@@ -502,7 +578,13 @@ fn dragging_floating_card_header_reports_clamped_move() {
     shell.on_section_moved(move |id, x, y| {
         moves_callback.borrow_mut().push((id.to_string(), x, y));
     });
-    // Press center of card header, drag +50px right, release / Press no meio do header do card, arrasta +50px à direita, solta.
+    let commits = Rc::new(Cell::new(0usize));
+    let commits_callback = Rc::clone(&commits);
+    shell.on_section_move_committed(move |id| {
+        assert_eq!(id, "material");
+        commits_callback.set(commits_callback.get() + 1);
+    });
+    // Press no meio do header do card, arrasta +50px à direita, solta.
     let start = LogicalPosition::new(300.0, 120.0);
     move_pointer(&shell, start.x, start.y);
     shell.window().dispatch_event(WindowEvent::PointerPressed {
@@ -514,6 +596,7 @@ fn dragging_floating_card_header_reports_clamped_move() {
         position: LogicalPosition::new(350.0, 120.0),
         button: PointerEventButton::Left,
     });
+    assert_eq!(commits.get(), 1, "soltar o ponteiro confirma uma vez");
     let moves = moves.borrow();
     assert!(!moves.is_empty(), "arrasto deve emitir section-moved");
     let (id, x, y) = moves.last().unwrap();

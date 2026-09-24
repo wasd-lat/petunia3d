@@ -2,7 +2,7 @@
 // Registro de callbacks da UI Slint e sincronização de propriedades do shell.
 
 use petunia_core::{SelectionDomain, Workspace};
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 use std::sync::{Arc, Mutex};
 
 use crate::overlay::OverlayId;
@@ -3291,13 +3291,31 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     let section_moved_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_section_moved(move |id, x, y| {
-        if let Ok(mut bridge) = section_moved_bridge.lock() {
-            if let Some(section) = crate::section_layout::section_id_from_str(id.as_str()) {
-                bridge.move_section_float(section, x, y);
+        let Ok(mut bridge) = section_moved_bridge.lock() else {
+            return;
+        };
+        let Some(section) = crate::section_layout::section_id_from_str(id.as_str()) else {
+            return;
+        };
+        bridge.move_section_float(section, x, y);
+        // Live drag must stay O(1): patch the one row of the model instead of
+        // rebuilding the whole view model and persisting preferences per event.
+        // O arraste vivo precisa ser O(1): atualiza só a linha do modelo em vez
+        // de reconstruir o view model e persistir a cada evento.
+        if let Some(window) = window_weak.upgrade() {
+            let index = crate::section_layout::section_index(section);
+            let model = window.get_section_states();
+            if let Some(mut state) = model.row_data(index) {
+                state.x = x;
+                state.y = y;
+                model.set_row_data(index, state);
             }
-            if let Some(window) = window_weak.upgrade() {
-                sync_window_properties(&window, &bridge.view_model());
-            }
+        }
+    });
+    let section_commit_bridge = Arc::clone(&bridge);
+    window.on_section_move_committed(move |_id| {
+        if let Ok(mut bridge) = section_commit_bridge.lock() {
+            bridge.commit_section_float();
         }
     });
     let section_dock_bridge = Arc::clone(&bridge);

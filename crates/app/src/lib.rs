@@ -1007,7 +1007,7 @@ impl WgpuApp {
 
         let raw_input = gfx.egui_state.take_egui_input(&gfx.window);
         let mut quit = false;
-        let full_output = gfx.egui_ctx.run_ui(raw_input, |ui| {
+        let mut full_output = gfx.egui_ctx.run_ui(raw_input, |ui| {
             let mut act = petunia_ui::UiAction::none();
             petunia_ui::draw(
                 ui,
@@ -1084,11 +1084,15 @@ impl WgpuApp {
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 gfx.surface.configure(&gfx.device, &gfx.config);
+                full_output.textures_delta.clear();
                 return;
             }
             wgpu::CurrentSurfaceTexture::Timeout
             | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => return,
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                full_output.textures_delta.clear();
+                return;
+            }
         };
         let view = frame.texture.create_view(&Default::default());
 
@@ -1104,6 +1108,7 @@ impl WgpuApp {
         {
             let Some(depth) = gfx.renderer3d.depth_view() else {
                 eprintln!("petunia3d: render skipped: depth buffer unavailable");
+                full_output.textures_delta.clear();
                 return;
             };
             let bg = petunia_config::ThemeRegistry::global()
@@ -1198,6 +1203,7 @@ impl WgpuApp {
         for id in &full_output.textures_delta.free {
             gfx.egui_renderer.free_texture(id);
         }
+        full_output.textures_delta.clear();
 
         gfx.queue
             .submit(user_cmds.into_iter().chain([encoder.finish()]));

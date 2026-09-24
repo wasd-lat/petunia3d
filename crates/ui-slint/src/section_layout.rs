@@ -174,6 +174,42 @@ mod tests {
     }
 
     #[test]
+    fn drag_writes_to_disk_once_on_commit() {
+        let (mut bridge, path) = hermetic_bridge("drag-commit");
+        let events = 500usize;
+        let start = std::time::Instant::now();
+        for step in 0..events {
+            bridge.move_section_float(
+                InspectorSectionId::Material,
+                40.0 + (step % 200) as f32,
+                80.0,
+            );
+        }
+        let drag_elapsed = start.elapsed();
+
+        assert!(
+            !path.exists(),
+            "arrastar não pode gravar preferências antes do commit"
+        );
+        let layout = bridge.section_layouts[section_index(InspectorSectionId::Material)].clone();
+        assert_eq!(layout.x, 40.0 + ((events - 1) % 200) as f32);
+        assert_eq!(layout.y, 80.0);
+
+        bridge.commit_section_float();
+        let persisted = UserPreferences::load_from_path(&path).expect("preferências gravadas");
+        let saved = persisted
+            .section_layout(InspectorSectionId::Material)
+            .clone();
+        assert_eq!((saved.x, saved.y), (layout.x, layout.y));
+
+        eprintln!(
+            "PROBE drag path: {events} eventos em {drag_elapsed:?} = {:.2} us/evento (antes: 133.5 us/evento com I/O)",
+            drag_elapsed.as_secs_f64() * 1e6 / events as f64
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn pin_open_survives_collapse_all() {
         let mut layouts = indexed();
         let collapsed = |_: InspectorSectionId| false;

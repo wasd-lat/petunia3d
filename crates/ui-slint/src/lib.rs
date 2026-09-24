@@ -4116,8 +4116,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
-    /// Move a floating card (coordinates sanitized), then persist.
-    /// Move um card flutuante (coordenadas sanitizadas) e persiste.
+    /// Move a floating card in memory (coordinates sanitized), without I/O.
+    ///
+    /// A drag emits one event per pointer move; persisting here would write the
+    /// preferences file dozens of times per second. The UI commits once on
+    /// pointer release through [`Self::commit_section_float`].
+    /// Move um card flutuante em memória (coordenadas sanitizadas), sem I/O.
+    ///
+    /// O arraste emite um evento por movimento do ponteiro; persistir aqui
+    /// gravaria o arquivo dezenas de vezes por segundo. A UI confirma uma vez
+    /// ao soltar o ponteiro via [`Self::commit_section_float`].
     pub fn move_section_float(
         &mut self,
         section: petunia_config::InspectorSectionId,
@@ -4125,8 +4133,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         y: f32,
     ) -> bool {
         section_layout::move_floating(&mut self.section_layouts, section, x, y);
-        self.persist_section_layouts();
         true
+    }
+
+    /// Persist section layouts once, after a drag or any other live edit.
+    /// Persiste os layouts uma vez, depois do arraste ou de outra edição viva.
+    pub fn commit_section_float(&mut self) {
+        self.persist_section_layouts();
     }
 
     /// Pin a section open (ignores collapse-all), then persist.

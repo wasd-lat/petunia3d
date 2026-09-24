@@ -1057,6 +1057,7 @@ component FloatSectionCard inherits Rectangle {
     in property <length> container-width: 1280px;
     in property <length> container-height: 800px;
     callback moved(string, float, float);
+    callback move-committed(string);
     callback dock-requested(string);
     callback pin-open-toggled(string);
     callback asset-pin-changed(string, string);
@@ -1064,6 +1065,11 @@ component FloatSectionCard inherits Rectangle {
     accessible-role: groupbox;
     accessible-label: root.title;
     width: root.card-width;
+    // Hug the content: a bare Rectangle child of a non-layout parent would
+    // stretch to the whole window, hiding the viewport behind the card.
+    // Ajusta ao conteúdo: um Rectangle solto em pai sem layout esticaria pela
+    // janela inteira, escondendo a viewport atrás do card.
+    height: card-content.min-height;
     border-radius: 8px;
     background: DesignTokens.surface-raised.with-alpha(0.94);
     border-width: 1px;
@@ -1072,7 +1078,7 @@ component FloatSectionCard inherits Rectangle {
     drop-shadow-color: #00000090;
     drop-shadow-offset-y: 4px;
 
-    VerticalLayout {
+    card-content := VerticalLayout {
         padding: 10px;
         spacing: 8px;
 
@@ -1095,13 +1101,20 @@ component FloatSectionCard inherits Rectangle {
                         self.last-x = self.mouse-x;
                         self.last-y = self.mouse-y;
                     }
+                    if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                        root.move-committed(root.section-id);
+                    }
                 }
                 moved => {
                     if self.pressed {
+                        // Clamp against the real card size: a fixed margin let a
+                        // wide Inspector card stick to the right/bottom edge.
+                        // Clamp pelo tamanho real do card: margem fixa deixava
+                        // um card largo encostar na borda direita/inferior.
                         root.moved(
                             root.section-id,
-                            max(0px, min(root.card-x * 1px + self.mouse-x - self.last-x, root.container-width - 80px)) / 1px,
-                            max(40px, min(root.card-y * 1px + self.mouse-y - self.last-y, root.container-height - 80px)) / 1px
+                            max(0px, min(root.card-x * 1px + self.mouse-x - self.last-x, root.container-width - root.card-width)) / 1px,
+                            max(0px, min(root.card-y * 1px + self.mouse-y - self.last-y, root.container-height - root.height)) / 1px
                         );
                         self.last-x = self.mouse-x;
                         self.last-y = self.mouse-y;
@@ -2721,6 +2734,7 @@ export component PetuniaSlintShell inherits Window {
     callback quick-actions-reset;
     callback modifier-add(string);
     callback section-moved(string, float, float);
+    callback section-move-committed(string);
     callback section-dock-toggled(string);
     callback section-pin-open-toggled(string);
     callback section-asset-pin-changed(string, string);
@@ -2947,113 +2961,110 @@ export component PetuniaSlintShell inherits Window {
                 HorizontalLayout {
                     width: parent.width;
                     height: parent.height;
-                    padding-left: 14px;
-                    padding-right: 10px;
-                    alignment: center;
-                    spacing: 12px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 0px;
 
+                    // 1. Esquerda: Logo + Barra de Menus (alinhados à extrema esquerda)
                     HorizontalLayout {
-                        spacing: 8px;
-                        alignment: center;
+                        horizontal-stretch: 1;
+                        alignment: start;
+                        spacing: 6px;
+
                         Image {
                             source: @image-url("icons/logo.svg");
                             width: 22px;
                             height: 22px;
                         }
-                        Text {
-                            text: "Petunia";
-                            color: DesignTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            vertical-alignment: center;
+
+                        Rectangle { width: 4px; }
+
+                        MenuButton {
+                            label: root.menu-file-label;
+                            open: root.menu-open == "file";
+                            clicked => {
+                                root.menu-anchor-x = self.absolute-position.x;
+                                root.menu-toggled("file");
+                            }
+                        }
+                        MenuButton {
+                            label: root.menu-edit-label;
+                            open: root.menu-open == "edit";
+                            clicked => {
+                                root.menu-anchor-x = self.absolute-position.x;
+                                root.menu-toggled("edit");
+                            }
+                        }
+                        MenuButton {
+                            label: root.menu-view-label;
+                            open: root.menu-open == "view";
+                            clicked => {
+                                root.menu-anchor-x = self.absolute-position.x;
+                                root.menu-toggled("view");
+                            }
+                        }
+                        MenuButton {
+                            label: root.menu-window-label;
+                            open: root.menu-open == "window";
+                            clicked => {
+                                root.menu-anchor-x = self.absolute-position.x;
+                                root.menu-toggled("window");
+                            }
                         }
                     }
 
-                    MenuButton {
-                        label: root.menu-file-label;
-                        open: root.menu-open == "file";
-                        clicked => {
-                            root.menu-anchor-x = self.absolute-position.x;
-                            root.menu-toggled("file");
-                        }
-                    }
-                    MenuButton {
-                        label: root.menu-edit-label;
-                        open: root.menu-open == "edit";
-                        clicked => {
-                            root.menu-anchor-x = self.absolute-position.x;
-                            root.menu-toggled("edit");
-                        }
-                    }
-                    MenuButton {
-                        label: root.menu-view-label;
-                        open: root.menu-open == "view";
-                        clicked => {
-                            root.menu-anchor-x = self.absolute-position.x;
-                            root.menu-toggled("view");
-                        }
-                    }
-                    MenuButton {
-                        label: root.menu-window-label;
-                        open: root.menu-open == "window";
-                        clicked => {
-                            root.menu-anchor-x = self.absolute-position.x;
-                            root.menu-toggled("window");
-                        }
-                    }
-
+                    // 2. Centro: Seletor de Workspace rigorosamente centralizado
                     WorkspaceSegment {
                         active: active-workspace;
                         changed(ws) => { root.workspace-changed(ws); }
                     }
 
-                    TopAction {
-                        icon: IconSet.Undo;
-                        semantic-label: "Undo";
-                        enabled: root.can-undo;
-                        clicked => { root.undo-requested(); }
-                    }
-                    TopAction {
-                        icon: IconSet.Redo;
-                        semantic-label: "Redo";
-                        enabled: root.can-redo;
-                        clicked => { root.redo-requested(); }
-                    }
+                    // 3. Direita: Ações e Ferramentas (alinhadas à extrema direita)
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        alignment: end;
+                        spacing: 4px;
 
-                    Rectangle { horizontal-stretch: 1; }
+                        TopAction {
+                            icon: IconSet.Undo;
+                            semantic-label: "Undo";
+                            enabled: root.can-undo;
+                            clicked => { root.undo-requested(); }
+                        }
+                        TopAction {
+                            icon: IconSet.Redo;
+                            semantic-label: "Redo";
+                            enabled: root.can-redo;
+                            clicked => { root.redo-requested(); }
+                        }
 
-                    Rectangle { width: 1px; height: 16px; background: DesignTokens.border; }
+                        Rectangle { width: 1px; height: 16px; background: DesignTokens.border; }
 
-                    Text {
-                        text: saved ? "Saved" : "Unsaved";
-                        color: saved ? DesignTokens.success : DesignTokens.text-secondary;
-                        font-size: 11px;
-                        vertical-alignment: center;
-                    }
-                    TopAction {
-                        icon: IconSet.PanelLeft;
-                        semantic-label: "Parts";
-                        clicked => { root.scene-requested(); }
-                    }
-                    TopAction {
-                        icon: IconSet.FolderOpen;
-                        semantic-label: "Open project";
-                        clicked => { root.open-project-requested(); }
-                    }
-                    TopAction {
-                        icon: IconSet.Save;
-                        semantic-label: "Save project";
-                        clicked => { root.save-requested(); }
-                    }
-                    TopAction {
-                        icon: IconSet.Search;
-                        semantic-label: "Command search";
-                        clicked => { root.search-requested(); }
-                    }
-                    TopAction {
-                        icon: IconSet.Settings;
-                        semantic-label: "Settings";
-                        clicked => { root.settings-requested(); }
+                        TopAction {
+                            icon: IconSet.PanelLeft;
+                            semantic-label: "Parts";
+                            clicked => { root.scene-requested(); }
+                        }
+                        TopAction {
+                            icon: IconSet.FolderOpen;
+                            semantic-label: "Open project";
+                            clicked => { root.open-project-requested(); }
+                        }
+                        TopAction {
+                            icon: IconSet.Save;
+                            semantic-label: "Save project";
+                            clicked => { root.save-requested(); }
+                        }
+                        TopAction {
+                            icon: IconSet.Search;
+                            semantic-label: "Command search";
+                            clicked => { root.search-requested(); }
+                        }
+                        TopAction {
+                            icon: IconSet.Settings;
+                            semantic-label: "Settings";
+                            clicked => { root.settings-requested(); }
+                        }
                     }
                 }
             }
@@ -3670,60 +3681,10 @@ export component PetuniaSlintShell inherits Window {
                         stroke-width: 1.5px;
                     }
 
-                    // Pill de preselection (Object Info do Blender, topo-esquerda):
-                    // rótulo do alvo sob o cursor + dica contextual do domínio.
-                    // Sem hover, a primeira linha vira o resumo da seleção para
-                    // o feedback nunca sumir da tela. Texto não consome
-                    // ponteiro: o TouchArea abaixo segue livre.
-                    if root.hover-label != "" || root.selection-summary != "" || root.context-hint != "": Rectangle {
+                    // Pílula Flutuante da Viewport: Câmera & Projeção (Esquerda)
+                    camera-bar := Rectangle {
                         x: 14px;
-                        y: (loop-cut-active || loop-cut-armed || tool-modal-active || profile-active || operation-hud-active || root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale" || root.active-tool == "knife" || root.active-tool == "slice") ? (root.tool-properties-collapsed ? 102px : 206px) : 56px;
-                        width: min(280px, parent.width * 0.4);
-                        height: preselection-content.preferred-height;
-                        border-radius: 8px;
-                        background: DesignTokens.scrim;
-                        border-width: 1px;
-                        border-color: DesignTokens.border;
-
-                        preselection-content := VerticalLayout {
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            padding-top: 6px;
-                            padding-bottom: 6px;
-                            spacing: 2px;
-                            alignment: start;
-
-                            if root.hover-label != "": Text {
-                                text: root.hover-label;
-                                color: DesignTokens.hover;
-                                font-size: 11px;
-                                font-weight: 700;
-                                overflow: elide;
-                            }
-                            if root.hover-label == "" && root.selection-summary != "": Text {
-                                text: root.selection-summary;
-                                color: DesignTokens.text-primary;
-                                font-size: 11px;
-                                font-weight: 700;
-                                overflow: elide;
-                            }
-                            if root.context-hint != "": Text {
-                                text: root.context-hint;
-                                color: DesignTokens.text-secondary;
-                                font-size: 10px;
-                                overflow: elide;
-                            }
-                        }
-                    }
-
-                    // Grupos semânticos da viewport: não comprimir a barra a
-                    // 60% quando há espaço útil disponível.
-                    // Grupos semânticos da viewport: não comprimir a barra a
-                    // 60% quando há espaço útil disponível.
-                    viewport-bar := Rectangle {
-                        x: (parent.width - self.width) / 2;
                         y: 14px;
-                        width: min(max(viewport-bar-row.preferred-width + 28px, 320px), parent.width - 28px);
                         height: 38px;
                         border-radius: 8px;
                         background: DesignTokens.surface-raised;
@@ -3733,18 +3694,14 @@ export component PetuniaSlintShell inherits Window {
                         drop-shadow-color: #00000055;
                         drop-shadow-offset-y: 2px;
 
-                        viewport-bar-row := HorizontalLayout {
-                            x: 14px;
-                            y: 5px;
-                            width: parent.width - 28px;
-                            height: self.preferred-height;
-                            spacing: 8px;
-                            alignment: start;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 8px;
+                            padding-top: 5px;
+                            padding-bottom: 5px;
+                            spacing: 6px;
+                            alignment: center;
 
-                            // --- Visão (esquerda) ---
-                            HorizontalLayout {
-                                spacing: 6px;
-                                alignment: start;
                             if root.viewport-region-width >= 600: Text {
                                 text: is-orthographic ? "Ortho" : "Persp";
                                 color: DesignTokens.text-primary;
@@ -3752,7 +3709,7 @@ export component PetuniaSlintShell inherits Window {
                                 font-weight: 600;
                                 vertical-alignment: center;
                             }
-                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+                            if root.viewport-region-width >= 600: Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
 
                             ViewportBarButton {
                                 icon: IconSet.Camera;
@@ -3772,53 +3729,95 @@ export component PetuniaSlintShell inherits Window {
                                 active: false;
                                 clicked => { root.reset-camera-requested(); }
                             }
-                            }
+                        }
+                    }
 
-                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+                    // --- Pílulas Flutuantes da Viewport (Centro: Shading & Modelagem) ---
+                    viewport-bar := HorizontalLayout {
+                        x: (parent.width - self.width) / 2;
+                        y: 14px;
+                        spacing: 8px;
+                        alignment: center;
 
-                            // Ícones vetoriais de modo: estrutura, volume,
-                            // material e iluminação são visualmente distintos.
+                        // Pílula 2: Modos de Shading & Overlays
+                        Rectangle {
+                            height: 38px;
+                            border-radius: 8px;
+                            background: DesignTokens.surface-raised;
+                            border-width: 1px;
+                            border-color: DesignTokens.border;
+                            drop-shadow-blur: 10px;
+                            drop-shadow-color: #00000055;
+                            drop-shadow-offset-y: 2px;
+
                             HorizontalLayout {
-                                spacing: 3px;
-                                alignment: start;
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 5px;
+                                padding-bottom: 5px;
+                                spacing: 4px;
+                                alignment: center;
+
                                 ViewportSvgButton { glyph: @image-url("icons/view-wire.svg"); label: root.label-view-wireframe; description: root.label-view-wireframe-hint; active: root.shading-mode == "wireframe"; clicked => { root.shading-mode-set("wireframe"); } }
                                 ViewportSvgButton { glyph: @image-url("icons/view-solid.svg"); label: root.label-view-solid; description: root.label-view-solid-hint; active: root.shading-mode == "solid"; clicked => { root.shading-mode-set("solid"); } }
                                 ViewportSvgButton { glyph: @image-url("icons/view-material.svg"); label: root.label-view-material; description: root.label-view-material-hint; active: root.shading-mode == "material"; clicked => { root.shading-mode-set("material"); } }
                                 ViewportSvgButton { glyph: @image-url("icons/view-lit.svg"); label: root.label-view-lit; description: root.label-view-lit-hint; active: root.shading-mode == "rendered"; clicked => { root.shading-mode-set("rendered"); } }
-                            }
 
-                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+                                Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
 
-                            ViewportBarButton {
-                                icon: IconSet.Eye;
-                                label: "X-Ray";
-                                active: root.show-xray;
-                                clicked => { root.toggle-xray-requested(); }
+                                ViewportBarButton {
+                                    icon: IconSet.Eye;
+                                    label: "X-Ray";
+                                    active: root.show-xray;
+                                    clicked => { root.toggle-xray-requested(); }
+                                }
+                                ViewportBarButton {
+                                    icon: IconSet.Settings2;
+                                    label: "Shading options";
+                                    active: root.shading-popover-open;
+                                    clicked => { root.shading-popover-toggled(!root.shading-popover-open); }
+                                }
                             }
-                            ViewportBarButton {
-                                icon: IconSet.Settings2;
-                                label: "Shading options";
-                                active: root.shading-popover-open;
-                                clicked => { root.shading-popover-toggled(!root.shading-popover-open); }
-                            }
-                            if root.viewport-region-width >= 600: ViewportBarButton {
-                                icon: IconSet.Crosshair;
-                                label: "\{root.label-model-pivot}: \{root.pivot-label}";
-                                description: root.hint-model-pivot;
-                                active: root.pivot-menu-open;
-                                clicked => { root.pivot-menu-toggled(!root.pivot-menu-open); }
-                            }
-                            if root.viewport-region-width >= 680: ViewportBarButton {
-                                icon: IconSet.Magnet;
-                                label: root.snap-enabled ? "Snap (\{root.snap-target})" : "Snap";
-                                active: root.snap-enabled;
-                                clicked => { root.toggle-snap-enabled(); }
-                            }
-                            if root.viewport-region-width >= 750: ViewportBarButton {
-                                icon: IconSet.CircleDot;
-                                label: root.proportional-editing ? "Prop (\{round(root.proportional-radius * 10) / 10})" : "Prop";
-                                active: root.proportional-editing;
-                                clicked => { root.toggle-proportional-editing(); }
+                        }
+
+                        // Pílula 3: Auxiliares de Modelagem (Pivot, Snap, Prop)
+                        if active-workspace == "MODEL" && root.viewport-region-width >= 600: Rectangle {
+                            height: 38px;
+                            border-radius: 8px;
+                            background: DesignTokens.surface-raised;
+                            border-width: 1px;
+                            border-color: DesignTokens.border;
+                            drop-shadow-blur: 10px;
+                            drop-shadow-color: #00000055;
+                            drop-shadow-offset-y: 2px;
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 5px;
+                                padding-bottom: 5px;
+                                spacing: 4px;
+                                alignment: center;
+
+                                ViewportBarButton {
+                                    icon: IconSet.Crosshair;
+                                    label: "\{root.label-model-pivot}: \{root.pivot-label}";
+                                    description: root.hint-model-pivot;
+                                    active: root.pivot-menu-open;
+                                    clicked => { root.pivot-menu-toggled(!root.pivot-menu-open); }
+                                }
+                                if root.viewport-region-width >= 680: ViewportBarButton {
+                                    icon: IconSet.Magnet;
+                                    label: root.snap-enabled ? "Snap (\{root.snap-target})" : "Snap";
+                                    active: root.snap-enabled;
+                                    clicked => { root.toggle-snap-enabled(); }
+                                }
+                                if root.viewport-region-width >= 750: ViewportBarButton {
+                                    icon: IconSet.CircleDot;
+                                    label: root.proportional-editing ? "Prop (\{round(root.proportional-radius * 10) / 10})" : "Prop";
+                                    active: root.proportional-editing;
+                                    clicked => { root.toggle-proportional-editing(); }
+                                }
                             }
                         }
                     }
@@ -4556,17 +4555,6 @@ export component PetuniaSlintShell inherits Window {
                                 description: root.hint-model-slice;
                                 active: active-tool == "slice";
                                 clicked => { root.active-tool-changed("slice"); }
-                            }
-
-                            if active-workspace == "MODEL": Rectangle {
-                                width: 1px;
-                                height: 20px;
-                                background: DesignTokens.border;
-                            }
-                            if active-workspace == "MODEL": ToolButton {
-                                icon: IconSet.Trash2;
-                                semantic-label: "Delete";
-                                clicked => { root.delete-requested(); }
                             }
 
                             if active-workspace == "PAINT": ToolButton {
@@ -6293,11 +6281,35 @@ export component PetuniaSlintShell inherits Window {
                     }
 
                     Text { text: root.status-message; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; overflow: elide; max-width: 340px; }
-                    Text { text: root.label-status-hint; color: DesignTokens.text-muted; font-size: 11px; vertical-alignment: center; overflow: elide; max-width: 240px; }
+                    Text { text: root.context-hint != "" ? root.context-hint : root.label-status-hint; color: DesignTokens.text-muted; font-size: 11px; vertical-alignment: center; overflow: elide; max-width: 320px; }
 
                     Rectangle { horizontal-stretch: 1; }
 
+                    if (root.hover-label != "" || root.selection-summary != ""): Text {
+                        text: root.hover-label != "" ? root.hover-label : root.selection-summary;
+                        color: root.hover-label != "" ? DesignTokens.hover : DesignTokens.text-primary;
+                        font-size: 11px;
+                        font-weight: 500;
+                        vertical-alignment: center;
+                    }
+
+                    if (root.hover-label != "" || root.selection-summary != ""): Rectangle {
+                        width: 1px;
+                        height: 14px;
+                        background: DesignTokens.border;
+                    }
+
                     Text { text: root.scene-stats; color: DesignTokens.text-secondary; font-size: 11px; font-weight: 500; vertical-alignment: center; }
+
+                    Rectangle { width: 1px; height: 14px; background: DesignTokens.border; }
+
+                    Text {
+                        text: saved ? "Saved" : "Unsaved";
+                        color: saved ? DesignTokens.success : DesignTokens.warning;
+                        font-size: 11px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }
@@ -6578,6 +6590,7 @@ export component PetuniaSlintShell inherits Window {
             pin-asset-label: root.label-section-pin-asset;
             unpin-asset-label: root.label-section-unpin-asset;
             moved(id, x, y) => { root.section-moved(id, x, y); }
+            move-committed(id) => { root.section-move-committed(id); }
             dock-requested(id) => { root.section-dock-toggled(id); }
             pin-open-toggled(id) => { root.section-pin-open-toggled(id); }
             asset-pin-changed(id, asset) => { root.section-asset-pin-changed(id, asset); }
