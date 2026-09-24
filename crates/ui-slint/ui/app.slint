@@ -4624,45 +4624,50 @@ export component PetuniaSlintShell inherits Window {
                                 semantic-label: root.label-tab-parts;
                                 active: root.model-parts-open;
                                 clicked => {
-                                    root.inspector-collapsed = false;
-                                    root.model-parts-open = true;
-                                }
+    if (!root.parts-docked) { root.section-dock-toggled("parts"); }
+    root.inspector-collapsed = false;
+    root.model-parts-open = true;
+}
                             }
                             InspectorPill {
                                 icon: IconSet.Move3d;
                                 semantic-label: root.label-tab-transform;
                                 active: root.model-transform-open;
                                 clicked => {
-                                    root.inspector-collapsed = false;
-                                    root.model-transform-open = true;
-                                }
+    if (!root.transform-docked) { root.section-dock-toggled("transform"); }
+    root.inspector-collapsed = false;
+    root.model-transform-open = true;
+}
                             }
                             InspectorPill {
                                 icon: IconSet.Paintbrush;
                                 semantic-label: root.label-tab-material;
                                 active: root.model-material-open;
                                 clicked => {
-                                    root.inspector-collapsed = false;
-                                    root.model-material-open = true;
-                                }
+    if (!root.material-docked) { root.section-dock-toggled("material"); }
+    root.inspector-collapsed = false;
+    root.model-material-open = true;
+}
                             }
                             InspectorPill {
                                 icon: IconSet.Box;
                                 semantic-label: root.label-tab-object;
                                 active: root.model-object-open;
                                 clicked => {
-                                    root.inspector-collapsed = false;
-                                    root.model-object-open = true;
-                                }
+    if (!root.object-docked) { root.section-dock-toggled("object"); }
+    root.inspector-collapsed = false;
+    root.model-object-open = true;
+}
                             }
                             InspectorPill {
                                 icon: IconSet.Settings;
                                 semantic-label: root.label-tab-modifiers;
                                 active: root.model-modifiers-open;
                                 clicked => {
-                                    root.inspector-collapsed = false;
-                                    root.model-modifiers-open = true;
-                                }
+    if (!root.modifiers-docked) { root.section-dock-toggled("modifiers"); }
+    root.inspector-collapsed = false;
+    root.model-modifiers-open = true;
+}
                             }
                         }
                     }
@@ -6266,7 +6271,7 @@ export component PetuniaSlintShell inherits Window {
             x: float-state.x * 1px;
             y: float-state.y * 1px;
             section-id: float-state.id;
-            title: float-state.id == "parts" ? root.label-parts : (float-state.id == "transform" ? root.label-tab-transform : (float-state.id == "object" ? root.label-tab-object : (float-state.id == "modifiers" ? root.label-tab-modifiers : (float-state.id == "quick_actions" ? root.label-quick-actions : float-state.id)))));
+            title: float-state.id == "parts" ? root.label-parts : (float-state.id == "transform" ? root.label-tab-transform : (float-state.id == "object" ? root.label-tab-object : (float-state.id == "modifiers" ? root.label-tab-modifiers : (float-state.id == "quick_actions" ? root.label-quick-actions : float-state.id))));
             card-x: float-state.x;
             card-y: float-state.y;
             card-width: root.inspector-width;
