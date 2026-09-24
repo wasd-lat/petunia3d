@@ -304,6 +304,102 @@ mod tests {
     }
 
     #[test]
+    fn section_layout_round_trip_covers_all_six_modules() {
+        let path =
+            std::env::temp_dir().join(format!("petunia-sections-all-{}.toml", std::process::id()));
+        let mut preferences = UserPreferences::default();
+        for (index, id) in InspectorSectionId::all().iter().enumerate() {
+            preferences.set_section_layout(
+                *id,
+                SectionLayout {
+                    docked: index % 2 == 0,
+                    x: 10.0 * index as f32,
+                    y: 20.0 * index as f32,
+                    pin_open: index % 2 == 1,
+                    pinned_asset: None,
+                },
+            );
+        }
+        preferences.save_to_path(&path).unwrap();
+        let loaded = UserPreferences::load_from_path(&path).unwrap();
+        assert_eq!(loaded.section_layouts.len(), 6);
+        assert_eq!(loaded, preferences);
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn section_layout_sanitized_holds_for_every_f32_bit_class() {
+        // Deterministic sweep, no RNG and no new dependencies: every exponent
+        // class (zeros, subnormals, normals, infinities, NaN payloads) crossed
+        // with representative mantissas, both signs.
+        // Varredura determinística, sem RNG e sem dependências novas: toda classe
+        // de expoente (zeros, subnormais, normais, infinitos, payloads NaN) cruzada
+        // com mantissas representativas, ambos os sinais.
+        let mantissas = [
+            0x0u32, 0x1, 0x2, 0x100, 0x200000, 0x400000, 0x555555, 0x7FFFFF, 0xAAAAAA,
+        ];
+        let mut cases = 0u32;
+        for exponent in 0x00u32..=0xFF {
+            for mantissa in mantissas {
+                for sign in [0x0u32, 0x80000000] {
+                    let raw = sign | (exponent << 23) | mantissa;
+                    // Skip signaling NaN payloads: they trap on some targets when
+                    // materialized, and quiet NaNs already cover the class.
+                    // Pula payloads NaN sinalizadores: eles armadilham em alguns alvos
+                    // ao materializar, e os NaNs quietos já cobrem a classe.
+                    if exponent == 0xFF && mantissa != 0 && mantissa & 0x400000 == 0 {
+                        continue;
+                    }
+                    let value = f32::from_bits(raw);
+                    let layout = SectionLayout {
+                        x: value,
+                        y: -value,
+                        ..SectionLayout::default()
+                    }
+                    .sanitized();
+                    assert!(
+                        layout.x.is_finite() && (0.0..=8192.0).contains(&layout.x),
+                        "x escaped sanitize for bits {raw:#010x}"
+                    );
+                    assert!(
+                        layout.y.is_finite() && (0.0..=8192.0).contains(&layout.y),
+                        "y escaped sanitize for bits {raw:#010x}"
+                    );
+                    cases += 1;
+                }
+            }
+        }
+        assert!(cases > 4000, "sweep must cover thousands of patterns");
+        // Byte length decides: multibyte content counts against the 64-byte cap.
+        // Tamanho em bytes decide: conteúdo multibyte conta no limite de 64 bytes.
+        for bytes in [0usize, 1, 36, 64, 65, 100] {
+            let layout = SectionLayout {
+                pinned_asset: Some("x".repeat(bytes)),
+                ..SectionLayout::default()
+            }
+            .sanitized();
+            let kept = layout.pinned_asset.as_ref().map(String::len);
+            if bytes == 0 || bytes > 64 {
+                assert_eq!(kept, None, "byte-len {bytes} must be dropped");
+            } else {
+                assert_eq!(kept, Some(bytes), "byte-len {bytes} must be kept");
+            }
+        }
+        let kept = SectionLayout {
+            pinned_asset: Some("é".repeat(32)),
+            ..SectionLayout::default()
+        }
+        .sanitized();
+        assert_eq!(kept.pinned_asset.as_ref().map(String::len), Some(64));
+        let dropped = SectionLayout {
+            pinned_asset: Some("é".repeat(33)),
+            ..SectionLayout::default()
+        }
+        .sanitized();
+        assert_eq!(dropped.pinned_asset, None);
+    }
+
+    #[test]
     fn section_layout_load_sanitizes_coordinates_and_keys() {
         let path = std::env::temp_dir().join(format!(
             "petunia-sections-sanitize-{}.toml",

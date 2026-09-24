@@ -78,14 +78,17 @@ pub fn set_pinned_asset(
 }
 
 /// Effective open state: pinned-open sections ignore collapse-all.
+/// The open query is a closure over [`InspectorSectionId`] (not a positional
+/// array) so a caller can never silently pass flags in the wrong order.
 /// Estado aberto efetivo: seções com pin aberto ignoram recolher-tudo.
+/// A consulta de aberto é um closure sobre [`InspectorSectionId`] (não um array
+/// posicional) para que o chamador nunca passe flags na ordem errada em silêncio.
 pub fn is_effectively_open(
     layouts: &SectionLayouts,
-    open: &[bool; 6],
+    is_open: impl Fn(InspectorSectionId) -> bool,
     id: InspectorSectionId,
 ) -> bool {
-    let index = section_index(id);
-    open[index] || layouts[index].pin_open
+    is_open(id) || layouts[section_index(id)].pin_open
 }
 
 #[cfg(test)]
@@ -163,21 +166,27 @@ mod tests {
     #[test]
     fn pin_open_survives_collapse_all() {
         let mut layouts = indexed();
-        let collapsed = [false; 6];
+        let collapsed = |_: InspectorSectionId| false;
         assert!(!is_effectively_open(
             &layouts,
-            &collapsed,
+            collapsed,
             InspectorSectionId::Parts
         ));
         set_pin_open(&mut layouts, InspectorSectionId::Parts, true);
         assert!(is_effectively_open(
             &layouts,
-            &collapsed,
+            collapsed,
             InspectorSectionId::Parts
         ));
         assert!(!is_effectively_open(
             &layouts,
-            &collapsed,
+            collapsed,
+            InspectorSectionId::Transform
+        ));
+        let all_open = |_: InspectorSectionId| true;
+        assert!(is_effectively_open(
+            &layouts,
+            all_open,
             InspectorSectionId::Transform
         ));
     }
@@ -234,6 +243,33 @@ mod tests {
         assert_eq!(
             reloaded.section_layout(InspectorSectionId::Material),
             *material
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn section_persist_cost_stays_flat_per_mutation() {
+        // Evidence for keeping auto-persist on every intent (including drag
+        // moves): 200 atomic saves must stay far below any interactive budget.
+        // The bound is deliberately generous to avoid flaky timing asserts.
+        // Evidência para manter auto-persist em todo intent (incluindo arrastos):
+        // 200 gravações atômicas devem ficar longe de qualquer orçamento interativo.
+        // O limite é propositalmente folgado para não criar assert flaky de tempo.
+        let (mut bridge, path) = hermetic_bridge("cost");
+        let start = std::time::Instant::now();
+        for index in 0..200 {
+            bridge.apply(UiIntent::MoveSectionFloat {
+                section: InspectorSectionId::Material,
+                x: index as f32,
+                y: index as f32,
+            });
+        }
+        let elapsed = start.elapsed();
+        let per_save_us = elapsed.as_micros() / 200;
+        eprintln!("section persist: 200 saves in {elapsed:?} ({per_save_us}µs/save)");
+        assert!(
+            elapsed.as_secs() < 10,
+            "persist regressed: 200 saves took {elapsed:?}"
         );
         let _ = std::fs::remove_file(&path);
     }
