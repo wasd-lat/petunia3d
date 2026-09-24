@@ -10,4 +10,5 @@ Preserva o contexto histórico, as opções avaliadas, as consequências aceitas
 - [`001-architecture-baseline.md`](001-architecture-baseline.md): Decisão que estabelece a linha de base de Clean Architecture e separação de domínio.
 - [`002-rust-opengl-stack.md`](002-rust-opengl-stack.md): Escolha técnica da stack Rust, OpenGL 3.3 Core Profile (`glow`), fallback `wgpu` e interface `egui`.
 - [`003-model-parts-in-inspector.md`](003-model-parts-in-inspector.md): revisão aprovada do shell MODEL, com Parts no Inspector direito e acesso compacto.
+- [`004-inspector-translucido-alca-modifiers.md`](004-inspector-translucido-alca-modifiers.md): refinamento do Inspector (translucidez, alça por proximidade, pílulas, Material/Object, modifiers, card único de ferramenta).
 - [`../bible/foundations/32-adr-odin-para-rust.md`](../bible/foundations/32-adr-odin-para-rust.md): ADR histórica da transição de prototipagem em Odin para Rust (autoridade vigente de stack).

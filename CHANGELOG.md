@@ -5,6 +5,14 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Revisão do Inspector MODEL (24/09/2026, ADR 004)
+- Painel e rail colapsado com fundo translúcido (viewport visível através); seções mantêm fundo opaco para legibilidade.
+- Alça de recolhimento revelada por proximidade na borda do painel; header com "Inspetor"/seta/"MODEL" removido; respiro maior na borda direita.
+- Rail colapsado em 5 pílulas de ícone espaçadas com hover e Tooltip; títulos de seção via `TextId`.
+- Material no fluxo do legado (slot + Assign/New/Duplicate/Remove antes de editar); Object sem microlinha; Quick Actions em seção própria.
+- Modifiers no padrão Blender (Add no topo, toggle Monitor, ChevronUp/Down + X, top-aplica-primeiro).
+- Tool Options + Operation HUD unificados num card único dentro da viewport (topo-esquerda), oculto em repouso.
+
 ### Fechamento V1 MODEL/PAINT — Sprint 4 (24/09/2026)
 - Proportional Editing fim a fim: toggle `O`, raio pela roda, falloff selecionável e kernel aplicado no commit modal.
 - Snap magnético nos gestos modais (Grid, Increment, Vertex, Edge, Face), toggle `Shift+Tab` e seletor de alvo na viewport.

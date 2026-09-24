@@ -879,6 +879,42 @@ component InspectorSection inherits Rectangle {
     }
 }
 
+/// Pílula de ícone do rail colapsado do Inspector: 36px, separada das
+/// vizinhas, com hover visível e Tooltip com o nome da seção.
+component InspectorPill inherits Rectangle {
+    in property <Icon> icon;
+    in property <string> semantic-label;
+    in property <bool> active: false;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.semantic-label;
+    accessible-checked: root.active;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: root.active ? DesignTokens.accent : (pill-touch.has-hover ? DesignTokens.surface-hover : transparent);
+    border-width: pill-touch.has-hover || root.active ? 1px : 0px;
+    border-color: DesignTokens.focus-ring;
+
+    IconDisplay {
+        icon: root.icon;
+        size: 17px;
+        stroke: root.active ? DesignTokens.canvas : DesignTokens.text-primary;
+    }
+    Tooltip {
+        VerticalLayout {
+            padding: 8px;
+            spacing: 2px;
+            Text { text: root.semantic-label; color: DesignTokens.text-primary; font-size: 11px; font-weight: 700; }
+        }
+    }
+
+    pill-touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
 export component PetuniaSlintShell inherits Window {
     out property <float> viewport-region-width: viewport-region.width / 1px;
     out property <float> viewport-region-height: viewport-region.height / 1px;
@@ -991,6 +1027,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <float> xray-opacity: 0.42;
     in-out property <bool> shading-popover-open: false;
     property <bool> tool-properties-collapsed: false;
+    property <bool> quick-actions-section-open: true;
     in-out property <string> operation-preview-commands: "";
     // Cordão pontilhado pivô→mouse da ferramenta de manipulação ativa.
     // Só existe durante a sessão (arrasto/modal); fora dela é "" e some.
@@ -1209,6 +1246,11 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-profile-close: "";
     in-out property <string> label-profile-generate: "";
     in-out property <string> label-profile-revolve: "";
+    in-out property <string> label-profile-cuts: "";
+    in-out property <string> label-profile-presets: "";
+    in-out property <string> label-profile-add-rect: "";
+    in-out property <string> label-profile-add-circle: "";
+    in-out property <string> label-profile-canvas-hint: "";
     in-out property <string> hint-model-loop-cut: "";
     in-out property <string> hint-model-slice: "";
     in-out property <string> hint-model-push-pull: "";
@@ -2390,6 +2432,299 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
 
+                    // Card único de ferramenta: params ao vivo durante o modal, valores do HUD caso contrário.
+                    // Posição topo-esquerda dentro da viewport (legado: viewport.left_top()+12). Oculto em repouso.
+                    if tool-modal-active || loop-cut-active || loop-cut-armed || profile-active || operation-hud-active: Rectangle {
+                        x: 12px;
+                        y: 56px;
+                        width: 280px;
+                        height: root.tool-properties-collapsed ? 40px : tool-properties-layout.preferred-height + 34px;
+                        border-radius: 8px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        drop-shadow-blur: 12px;
+                        drop-shadow-color: #00000080;
+                        drop-shadow-offset-y: 4px;
+
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                height: 20px;
+                                Text {
+                                    text: (operation-hud-active && !tool-modal-active && !loop-cut-active && !loop-cut-armed && !profile-active) ? root.operation-hud-title : (root.tool-options-title != "" ? root.tool-options-title : (tool-modal-active ? root.tool-modal-title : (profile-active ? root.label-model-profile : root.label-model-loop-cut)));
+                                    color: DesignTokens.text-primary;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    width: 20px;
+                                    height: 20px;
+                                    accessible-role: button;
+                                    accessible-label: root.tool-properties-collapsed ? root.label-tool-options-expand : root.label-tool-options-collapse;
+                                    IconDisplay {
+                                        icon: root.tool-properties-collapsed ? IconSet.ChevronDown : IconSet.ChevronUp;
+                                        size: 13px;
+                                        stroke: DesignTokens.text-secondary;
+                                    }
+                                    TouchArea { clicked => { root.tool-properties-collapsed = !root.tool-properties-collapsed; } }
+                                }
+                            }
+
+                            Text {
+                                visible: tool-modal-active || loop-cut-active || loop-cut-armed || profile-active;
+                                text: root.tool-options-hint;
+                                color: DesignTokens.text-secondary;
+                                font-size: 10px;
+                                wrap: word-wrap;
+                            }
+
+                            if operation-hud-active: VerticalLayout {
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: center;
+                                    Text {
+                                        text: root.operation-hud-title;
+                                        color: DesignTokens.accent;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.operation-hud-subject;
+                                        color: DesignTokens.text-muted;
+                                        font-size: 10px;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+                                for line in root.operation-hud-lines: Text {
+                                    text: line;
+                                    color: DesignTokens.text-primary;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    font-family: "monospace";
+                                }
+                                Text {
+                                    text: root.operation-hud-hint;
+                                    color: DesignTokens.text-muted;
+                                    font-size: 9px;
+                                }
+                            }
+
+                            tool-properties-layout := VerticalLayout {
+                                visible: !root.tool-properties-collapsed && (tool-modal-active || loop-cut-active || loop-cut-armed || profile-active);
+                                spacing: 6px;
+
+                            if tool-modal-active: HorizontalLayout {
+                                spacing: 6px;
+                                height: 28px;
+
+                                Text {
+                                    text: root.tool-modal-label;
+                                    color: DesignTokens.text-secondary;
+                                    font-size: 11px;
+                                    width: 72px;
+                                    vertical-alignment: center;
+                                }
+                                NumericField {
+                                    label: "";
+                                    value: root.tool-modal-value;
+                                    horizontal-stretch: 1;
+                                    step: root.tool-modal-step;
+                                    scrubbed(delta, fine) => { root.tool-modal-text-committed("\{root.tool-modal-value + delta * root.tool-modal-step * (fine ? 0.1 : 1)}"); }
+                                    scrub-cancelled(value) => { root.tool-modal-text-committed("\{value}"); }
+                                    text-committed(text) => { root.tool-modal-text-committed(text) }
+                                }
+                            }
+
+                            if tool-modal-active: HorizontalLayout {
+                                spacing: 6px;
+                                height: 28px;
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.tool-modal-cancel(); } }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.accent;
+                                    Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.tool-modal-apply(); } }
+                                }
+                            }
+
+                            if loop-cut-active: HorizontalLayout {
+                                spacing: 6px;
+                                height: 28px;
+
+                                Text {
+                                    text: "Slide";
+                                    color: DesignTokens.text-secondary;
+                                    font-size: 11px;
+                                    width: 72px;
+                                    vertical-alignment: center;
+                                }
+                                NumericField {
+                                    label: "";
+                                    value: root.loop-cut-slide;
+                                    horizontal-stretch: 1;
+                                    step: 0.01;
+                                    scrubbed(delta, fine) => { root.loop-cut-slide-committed("\{root.loop-cut-slide + delta * (fine ? 0.001 : 0.01)}"); }
+                                    scrub-cancelled(value) => { root.loop-cut-slide-committed("\{value}"); }
+                                    text-committed(text) => { root.loop-cut-slide-committed(text) }
+                                }
+                            }
+
+                            if loop-cut-armed: HorizontalLayout {
+                                spacing: 6px;
+                                height: 28px;
+                                Text { text: root.label-profile-cuts; color: DesignTokens.text-secondary; font-size: 11px; width: 72px; vertical-alignment: center; }
+                                Text { text: "\{root.loop-cut-cuts}"; color: DesignTokens.text-primary; font-size: 12px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                                Text { text: root.hint-model-loop-cut; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
+                            }
+
+                            if loop-cut-active: HorizontalLayout {
+                                spacing: 6px;
+                                height: 28px;
+
+                                Text {
+                                    text: root.label-profile-cuts;
+                                    color: DesignTokens.text-secondary;
+                                    font-size: 11px;
+                                    width: 72px;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-raised;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text {
+                                        text: "\{root.loop-cut-cuts}";
+                                        color: DesignTokens.text-primary;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Rectangle {
+                                    width: 28px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-raised;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: "-"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts - 1}"); } }
+                                }
+                                Rectangle {
+                                    width: 28px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-raised;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts + 1}"); } }
+                                }
+                            }
+
+                            if profile-active: VerticalLayout {
+                                spacing: 6px;
+                                Text { text: "\{root.label-profile-points}: \{root.profile-point-count}"; color: DesignTokens.text-secondary; font-size: 10px; }
+                                if !root.profile-closed: Rectangle {
+                                    height: 26px; border-radius: 4px; background: DesignTokens.surface;
+                                    Text { text: root.label-profile-close; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.profile-close(); } }
+                                }
+                                if root.profile-closed: HorizontalLayout {
+                                    spacing: 5px; height: 28px;
+                                    Text { text: root.label-profile-depth; color: DesignTokens.text-secondary; font-size: 10px; width: 72px; vertical-alignment: center; }
+                                    NumericField {
+                                        label: ""; value: root.profile-depth; horizontal-stretch: 1; step: 0.1;
+                                        text-committed(text) => { root.profile-depth-set(text); }
+                                        scrubbed(delta, fine) => { root.profile-depth-set("\{root.profile-depth + delta * (fine ? 0.01 : 0.1)}"); }
+                                    }
+                                }
+                                if root.profile-closed: HorizontalLayout {
+                                    spacing: 5px; height: 28px;
+                                    Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface; Text { text: root.label-profile-revolve; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-revolve(); } } }
+                                    Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.accent; Text { text: root.label-profile-generate; color: DesignTokens.canvas; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-generate(); } } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 5px; height: 26px;
+                                    Rectangle {
+                                        horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                                        Text { text: root.label-profile-add-rect; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { clicked => { root.add-profile-rectangle(2.0, 1.0); } }
+                                    }
+                                    Rectangle {
+                                        horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                                        Text { text: root.label-profile-add-circle; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { clicked => { root.add-profile-circle(1.0, 16); } }
+                                    }
+                                }
+                                Text { text: root.hint-model-profile; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
+                            }
+
+                            if !profile-active && root.active-tool == "draw_profile": VerticalLayout {
+                                spacing: 6px;
+                                Text { text: root.label-profile-presets; color: DesignTokens.text-secondary; font-size: 10px; }
+                                HorizontalLayout {
+                                    spacing: 5px; height: 26px;
+                                    Rectangle {
+                                        horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                                        Text { text: root.label-profile-add-rect; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { clicked => { root.add-profile-rectangle(2.0, 1.0); } }
+                                    }
+                                    Rectangle {
+                                        horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                                        Text { text: root.label-profile-add-circle; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                        TouchArea { clicked => { root.add-profile-circle(1.0, 16); } }
+                                    }
+                                }
+                                Text { text: root.label-profile-canvas-hint; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
+                            }
+
+                            if loop-cut-active: HorizontalLayout {
+                                spacing: 6px;
+                                height: 28px;
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface-raised;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.loop-cut-cancel(); } }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.accent;
+                                    Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.loop-cut-apply(); } }
+                                }
+                            }
+                            }
+                        }
+                    }
+
+
                     // Gizmo de transformação: hastes curtas de tamanho fixo em
                     // tela, com setas, só com Move/Rotate/Scale. Nunca linhas
                     // infinitas: o padrão é controle de tamanho aparente constante.
@@ -2894,137 +3229,87 @@ export component PetuniaSlintShell inherits Window {
                 }
 
                 if inspector-visible && !compact-shell: Rectangle {
-                    width: inspector-collapsed ? 48px : inspector-width;
+                    width: inspector-collapsed ? 56px : inspector-width;
                     y: 0;
                     height: 100%;
                     background: transparent;
 
                     if inspector-collapsed: Rectangle {
                         x: 0;
-                        width: 48px;
+                        width: 56px;
                         height: 100%;
-                        background: DesignTokens.surface;
+                        background: DesignTokens.surface-raised.with-alpha(0.9);
                         border-width: 1px;
                         border-color: DesignTokens.border;
+                        border-radius: 8px;
 
                         VerticalLayout {
-                            padding: 12px;
-                            spacing: 16px;
+                            padding: 10px;
+                            spacing: 10px;
                             alignment: start;
 
-                            Rectangle {
-                                width: 24px;
-                                height: 24px;
-                                accessible-role: button;
-                                accessible-label: root.label-expand-inspector;
-                                IconDisplay {
-                                    icon: IconSet.ChevronLeft;
-                                    size: 16px;
-                                    stroke: DesignTokens.text-secondary;
-                                }
-                                TouchArea {
-                                    clicked => { root.inspector-collapsed = false; }
+                            InspectorPill {
+                                icon: IconSet.Layers3;
+                                semantic-label: root.label-tab-parts;
+                                active: root.model-parts-open;
+                                clicked => {
+                                    root.inspector-collapsed = false;
+                                    root.model-parts-open = true;
                                 }
                             }
-
-                            Text {
-                                text: root.label-tab-parts;
-                                color: DesignTokens.text-muted;
-                                font-size: 10px;
-                                font-weight: 600;
-                                transform-rotation: -90deg;
-                                TouchArea {
-                                    clicked => {
-                                        root.inspector-collapsed = false;
-                                        root.model-parts-open = true;
-                                    }
+                            InspectorPill {
+                                icon: IconSet.Move3d;
+                                semantic-label: root.label-tab-transform;
+                                active: root.model-transform-open;
+                                clicked => {
+                                    root.inspector-collapsed = false;
+                                    root.model-transform-open = true;
                                 }
                             }
-                            Text {
-                                text: root.label-tab-transform;
-                                color: DesignTokens.text-muted;
-                                font-size: 10px;
-                                font-weight: 600;
-                                transform-rotation: -90deg;
-                                TouchArea {
-                                    clicked => {
-                                        root.inspector-collapsed = false;
-                                        root.model-transform-open = true;
-                                    }
+                            InspectorPill {
+                                icon: IconSet.Paintbrush;
+                                semantic-label: root.label-tab-material;
+                                active: root.model-material-open;
+                                clicked => {
+                                    root.inspector-collapsed = false;
+                                    root.model-material-open = true;
                                 }
                             }
-                            Text {
-                                text: root.label-tab-material;
-                                color: DesignTokens.text-muted;
-                                font-size: 10px;
-                                font-weight: 600;
-                                transform-rotation: -90deg;
-                                TouchArea {
-                                    clicked => {
-                                        root.inspector-collapsed = false;
-                                        root.model-material-open = true;
-                                    }
+                            InspectorPill {
+                                icon: IconSet.Box;
+                                semantic-label: root.label-tab-object;
+                                active: root.model-object-open;
+                                clicked => {
+                                    root.inspector-collapsed = false;
+                                    root.model-object-open = true;
                                 }
                             }
-                             Text {
-                                 text: root.label-tab-object;
-                                 color: DesignTokens.text-muted;
-                                 font-size: 10px;
-                                 font-weight: 600;
-                                 transform-rotation: -90deg;
-                                 TouchArea {
-                                     clicked => {
-                                         root.inspector-collapsed = false;
-                                         root.model-object-open = true;
-                                     }
-                                 }
-                             }
-                             Text {
-                                 text: root.label-tab-modifiers;
-                                 color: DesignTokens.text-muted;
-                                 font-size: 10px;
-                                 font-weight: 600;
-                                 transform-rotation: -90deg;
-                                 TouchArea {
-                                     clicked => {
-                                         root.inspector-collapsed = false;
-                                         root.model-modifiers-open = true;
-                                     }
-                                 }
-                             }
-                         }
-                    }
-
-                    if !inspector-collapsed: VerticalLayout {
-                        padding-left: 8px;
-                        padding-right: 12px;
-                        padding-top: 12px;
-                        padding-bottom: 12px;
-                        spacing: 10px;
-                        HorizontalLayout {
-                            height: 28px;
-                            Text {
-                                text: root.label-inspector;
-                                color: DesignTokens.text-primary;
-                                font-size: 13px;
-                                font-weight: 700;
-                                vertical-alignment: center;
-                            }
-                            TopAction {
-                                icon: IconSet.ChevronRight;
-                                semantic-label: root.label-collapse-inspector;
-                                active: false;
-                                clicked => { root.inspector-collapsed = true; }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text {
-                                text: active-workspace;
-                                color: DesignTokens.accent;
-                                font-size: 11px;
-                                vertical-alignment: center;
+                            InspectorPill {
+                                icon: IconSet.Settings;
+                                semantic-label: root.label-tab-modifiers;
+                                active: root.model-modifiers-open;
+                                clicked => {
+                                    root.inspector-collapsed = false;
+                                    root.model-modifiers-open = true;
+                                }
                             }
                         }
+                    }
 
+                    if !inspector-collapsed: Rectangle {
+                        width: 100%;
+                        height: 100%;
+                        background: DesignTokens.surface-raised.with-alpha(0.9);
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        border-radius: 8px;
+
+                        VerticalLayout {
+                            padding-left: 8px;
+                            padding-right: 20px;
+                            padding-top: 12px;
+                            padding-bottom: 12px;
+                            spacing: 10px;
                         ScrollView {
                             vertical-stretch: 1;
                             horizontal-scrollbar-policy: always-off;
@@ -3151,7 +3436,7 @@ export component PetuniaSlintShell inherits Window {
                             }
 
                             if selection-domain == "OBJECT": InspectorSection {
-                                title: "Transform";
+                                title: root.label-tab-transform;
                                 open: root.model-transform-open;
                                 toggled => { root.model-transform-open = !root.model-transform-open; }
                                 toggle-all => {
@@ -3204,7 +3489,7 @@ export component PetuniaSlintShell inherits Window {
                                 }
                             }
                             InspectorSection {
-                                title: "Material";
+                                title: root.label-tab-material;
                                 open: root.model-material-open;
                                 toggled => { root.model-material-open = !root.model-material-open; }
                                 toggle-all => {
@@ -3219,14 +3504,16 @@ export component PetuniaSlintShell inherits Window {
                                     padding-top: 4px;
 
                                     HorizontalLayout {
-                                        spacing: 8px;
+                                        spacing: 6px;
                                         alignment: center;
 
                                         Rectangle {
-                                            width: 14px;
-                                            height: 14px;
-                                            border-radius: 3px;
-                                            background: DesignTokens.accent;
+                                            width: 16px;
+                                            height: 16px;
+                                            border-radius: 4px;
+                                            background: root.material-base-color;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border-strong;
                                         }
 
                                         Text {
@@ -3238,6 +3525,64 @@ export component PetuniaSlintShell inherits Window {
                                             font-weight: 600;
                                             vertical-alignment: center;
                                             horizontal-stretch: 1;
+                                            overflow: elide;
+                                        }
+
+                                        Rectangle {
+                                            width: 26px;
+                                            height: 26px;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: button;
+                                            accessible-label: root.label-material-new;
+                                            IconDisplay { icon: IconSet.Plus; size: 13px; stroke: DesignTokens.text-primary; }
+                                            Tooltip {
+                                                VerticalLayout {
+                                                    padding: 8px; spacing: 2px;
+                                                    Text { text: root.label-material-new; color: DesignTokens.text-primary; font-size: 11px; font-weight: 700; }
+                                                }
+                                            }
+                                            TouchArea { clicked => { root.create-material(); } }
+                                        }
+
+                                        Rectangle {
+                                            width: 26px;
+                                            height: 26px;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: button;
+                                            accessible-label: root.label-material-duplicate;
+                                            IconDisplay { icon: IconSet.Copy; size: 13px; stroke: DesignTokens.text-primary; }
+                                            Tooltip {
+                                                VerticalLayout {
+                                                    padding: 8px; spacing: 2px;
+                                                    Text { text: root.label-material-duplicate; color: DesignTokens.text-primary; font-size: 11px; font-weight: 700; }
+                                                }
+                                            }
+                                            TouchArea { clicked => { root.duplicate-material(root.active-material-slot); } }
+                                        }
+
+                                        Rectangle {
+                                            width: 26px;
+                                            height: 26px;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            accessible-role: button;
+                                            accessible-label: root.label-material-remove;
+                                            IconDisplay { icon: IconSet.Trash2; size: 13px; stroke: DesignTokens.danger; }
+                                            Tooltip {
+                                                VerticalLayout {
+                                                    padding: 8px; spacing: 2px;
+                                                    Text { text: root.label-material-remove; color: DesignTokens.text-primary; font-size: 11px; font-weight: 700; }
+                                                }
+                                            }
+                                            TouchArea { clicked => { root.remove-material(root.active-material-slot); } }
                                         }
                                     }
 
@@ -3275,6 +3620,32 @@ export component PetuniaSlintShell inherits Window {
                                                      root.material-slot-selected(index);
                                                  }
                                              }
+                                        }
+                                    }
+
+                                    // Assign primeiro: fluxo slot → atribuir → editar.
+                                    Rectangle {
+                                        height: 28px;
+                                        border-radius: 5px;
+                                        background: DesignTokens.accent;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 4px;
+                                            IconDisplay {
+                                                icon: IconSet.Check;
+                                                size: 12px;
+                                                stroke: DesignTokens.canvas;
+                                            }
+                                            Text {
+                                                text: root.label-material-assign;
+                                                color: DesignTokens.canvas;
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        TouchArea {
+                                            clicked => { root.assign-material-slot(root.active-material-slot); }
                                         }
                                     }
 
@@ -3392,6 +3763,21 @@ export component PetuniaSlintShell inherits Window {
                                          }
                                      }
 
+
+                                     // Avançado: Normal, Alfa e Cutoff.
+                                     Rectangle {
+                                         height: 24px;
+                                         border-radius: 4px;
+                                         background: DesignTokens.surface;
+                                         Text {
+                                             text: root.label-material-advanced;
+                                             color: DesignTokens.text-secondary;
+                                             font-size: 10px;
+                                             horizontal-alignment: center;
+                                             vertical-alignment: center;
+                                         }
+                                         TouchArea { clicked => { root.material-advanced-open = !root.material-advanced-open; } }
+                                     }
                                      if root.material-advanced-open: VerticalLayout {
                                          spacing: 6px;
                                          HorizontalLayout {
@@ -3509,136 +3895,11 @@ export component PetuniaSlintShell inherits Window {
                                          }
                                      }
 
-                                     Rectangle {
-                                         height: 24px;
-                                         border-radius: 4px;
-                                         background: DesignTokens.surface;
-                                         Text {
-                                             text: root.label-material-advanced;
-                                             color: DesignTokens.text-secondary;
-                                             font-size: 10px;
-                                             horizontal-alignment: center;
-                                             vertical-alignment: center;
-                                         }
-                                         TouchArea { clicked => { root.material-advanced-open = !root.material-advanced-open; } }
-                                     }
 
-                                     // Ações: atribuir material às faces e gerenciar a lista do projeto.
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        height: 28px;
-
-                                        Rectangle {
-                                            horizontal-stretch: 2;
-                                            border-radius: 5px;
-                                            background: DesignTokens.accent;
-                                            HorizontalLayout {
-                                                alignment: center;
-                                                spacing: 4px;
-                                                IconDisplay {
-                                                    icon: IconSet.Check;
-                                                    size: 12px;
-                                                    stroke: DesignTokens.canvas;
-                                                }
-                                                Text {
-                                                    text: root.label-material-assign;
-                                                    color: DesignTokens.canvas;
-                                                    font-size: 11px;
-                                                    font-weight: 700;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                            TouchArea {
-                                                clicked => { root.assign-material-slot(root.active-material-slot); }
-                                            }
-                                        }
-
-                                        Rectangle {
-                                            horizontal-stretch: 1;
-                                            border-radius: 5px;
-                                            background: DesignTokens.surface-raised;
-                                            border-width: 1px;
-                                            border-color: DesignTokens.border;
-                                            HorizontalLayout {
-                                                alignment: center;
-                                                spacing: 4px;
-                                                IconDisplay {
-                                                    icon: IconSet.Plus;
-                                                    size: 12px;
-                                                    stroke: DesignTokens.text-primary;
-                                                }
-                                                Text {
-                                                    text: root.label-material-new;
-                                                    color: DesignTokens.text-primary;
-                                                    font-size: 10px;
-                                                    font-weight: 600;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                            TouchArea {
-                                                clicked => { root.create-material(); }
-                                            }
-                                        }
-
-                                         Rectangle {
-                                             horizontal-stretch: 1;
-                                             border-radius: 5px;
-                                             background: DesignTokens.surface-raised;
-                                             border-width: 1px;
-                                             border-color: DesignTokens.border;
-                                             HorizontalLayout {
-                                                 alignment: center;
-                                                 spacing: 4px;
-                                                 IconDisplay {
-                                                     icon: IconSet.Copy;
-                                                     size: 12px;
-                                                     stroke: DesignTokens.text-primary;
-                                                 }
-                                                 Text {
-                                                     text: root.label-material-duplicate;
-                                                     color: DesignTokens.text-primary;
-                                                     font-size: 10px;
-                                                     font-weight: 600;
-                                                     vertical-alignment: center;
-                                                 }
-                                             }
-                                             TouchArea {
-                                                 clicked => { root.duplicate-material(root.active-material-slot); }
-                                             }
-                                         }
-
-                                         Rectangle {
-                                             horizontal-stretch: 1;
-                                             border-radius: 5px;
-                                             background: DesignTokens.surface-raised;
-                                             border-width: 1px;
-                                             border-color: DesignTokens.border;
-                                             HorizontalLayout {
-                                                 alignment: center;
-                                                 spacing: 4px;
-                                                 IconDisplay {
-                                                     icon: IconSet.Trash2;
-                                                     size: 12px;
-                                                     stroke: DesignTokens.danger;
-                                                 }
-                                                 Text {
-                                                     text: root.label-material-remove;
-                                                     color: DesignTokens.danger;
-                                                     font-size: 10px;
-                                                     font-weight: 600;
-                                                     vertical-alignment: center;
-                                                     overflow: elide;
-                                                 }
-                                             }
-                                             TouchArea {
-                                                 clicked => { root.remove-material(root.active-material-slot); }
-                                             }
-                                         }
-                                     }
                                 }
                             }
                             InspectorSection {
-                                title: "Object";
+                                title: root.label-tab-object;
                                 open: root.model-object-open;
                                 toggled => { root.model-object-open = !root.model-object-open; }
                                 toggle-all => {
@@ -3709,109 +3970,8 @@ export component PetuniaSlintShell inherits Window {
                                                  wrap: word-wrap;
                                              }
                                          }
-                                         Text {
-                                             text: "\{root.label-object-name}: \{root.object-name}   ·   \{root.object-material}";
-                                             color: DesignTokens.text-muted;
-                                             font-size: 9px;
-                                             wrap: word-wrap;
-                                         }
                                      }
 
-                                     HorizontalLayout {
-                                         spacing: 6px;
-                                         height: 28px;
-                                         Text {
-                                             text: root.label-quick-actions;
-                                             color: DesignTokens.text-secondary;
-                                             font-size: 10px;
-                                             font-weight: 700;
-                                             horizontal-stretch: 1;
-                                             vertical-alignment: center;
-                                         }
-                                         Rectangle {
-                                             width: 28px;
-                                             height: 24px;
-                                             border-radius: 4px;
-                                             background: root.quick-actions-open ? DesignTokens.accent : DesignTokens.surface-raised;
-                                             IconDisplay {
-                                                 icon: IconSet.Settings2;
-                                                 size: 12px;
-                                                 stroke: root.quick-actions-open ? DesignTokens.canvas : DesignTokens.text-primary;
-                                             }
-                                             TouchArea { clicked => { root.quick-actions-open = !root.quick-actions-open; } }
-                                         }
-                                     }
-                                     for action in root.quick-actions: Rectangle {
-                                         width: 100%;
-                                         height: 28px;
-                                         border-radius: 4px;
-                                         background: action.enabled ? DesignTokens.surface-raised : DesignTokens.surface;
-                                         border-width: 1px;
-                                         border-color: DesignTokens.border;
-                                         Text {
-                                             text: action.label;
-                                             color: action.enabled ? DesignTokens.text-primary : DesignTokens.text-muted;
-                                             font-size: 10px;
-                                             horizontal-stretch: 1;
-                                             vertical-alignment: center;
-                                             overflow: elide;
-                                         }
-                                         TouchArea { clicked => { root.quick-action-executed(action.id); } }
-                                     }
-                                     if root.quick-actions-open: Rectangle {
-                                         background: DesignTokens.surface;
-                                         border-radius: 5px;
-                                         border-width: 1px;
-                                         border-color: DesignTokens.border;
-                                         VerticalLayout {
-                                             spacing: 4px;
-                                             padding: 6px;
-                                             Text {
-                                                 text: root.label-quick-action-customize;
-                                                 color: DesignTokens.text-secondary;
-                                                 font-size: 10px;
-                                                 font-weight: 700;
-                                             }
-                                             for candidate in root.quick-action-candidates: Rectangle {
-                                                 height: 26px;
-                                                 border-radius: 4px;
-                                                 background: candidate.pinned ? DesignTokens.surface-hover : transparent;
-                                                 Text {
-                                                     text: candidate.label;
-                                                     color: DesignTokens.text-primary;
-                                                     font-size: 10px;
-                                                     horizontal-stretch: 1;
-                                                     vertical-alignment: center;
-                                                 }
-                                                 Text {
-                                                     text: candidate.pinned ? root.label-quick-action-remove : root.label-quick-action-add;
-                                                     color: DesignTokens.accent;
-                                                     font-size: 9px;
-                                                     vertical-alignment: center;
-                                                 }
-                                                 TouchArea { clicked => { root.quick-action-toggled(candidate.id); } }
-                                             }
-                                             HorizontalLayout {
-                                                 spacing: 4px;
-                                                 Rectangle {
-                                                     horizontal-stretch: 1;
-                                                     height: 24px;
-                                                     border-radius: 4px;
-                                                     background: DesignTokens.surface-raised;
-                                                     Text { text: root.label-quick-action-reset; color: DesignTokens.text-secondary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
-                                                     TouchArea { clicked => { root.quick-actions-reset(); } }
-                                                 }
-                                                 Rectangle {
-                                                     horizontal-stretch: 1;
-                                                     height: 24px;
-                                                     border-radius: 4px;
-                                                     background: DesignTokens.accent;
-                                                     Text { text: root.label-quick-action-done; color: DesignTokens.canvas; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
-                                                     TouchArea { clicked => { root.quick-actions-open = false; } }
-                                                 }
-                                             }
-                                         }
-                                     }
 
                                      HorizontalLayout {
                                          spacing: 6px;
@@ -3885,6 +4045,26 @@ export component PetuniaSlintShell inherits Window {
                                      root.model-object-open = root.model-modifiers-open;
                                  }
                                  VerticalLayout {
+                                     HorizontalLayout {
+                                         spacing: 4px;
+                                         Rectangle {
+                                             horizontal-stretch: 1;
+                                             height: 26px;
+                                             border-radius: 4px;
+                                             background: DesignTokens.surface-raised;
+                                             Text { text: root.label-modifier-add-mirror; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                             TouchArea { clicked => { root.modifier-add("mirror"); } }
+                                         }
+                                         Rectangle {
+                                             horizontal-stretch: 1;
+                                             height: 26px;
+                                             border-radius: 4px;
+                                             background: DesignTokens.surface-raised;
+                                             Text { text: root.label-modifier-add-symmetry; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                             TouchArea { clicked => { root.modifier-add("symmetry"); } }
+                                         }
+                                     }
+
                                      spacing: 6px;
                                      if root.modifier-rows.length == 0: Text {
                                          text: root.label-modifiers-empty;
@@ -3910,7 +4090,7 @@ export component PetuniaSlintShell inherits Window {
                                                      border-radius: 4px;
                                                      background: modifier.enabled ? DesignTokens.accent : DesignTokens.surface-raised;
                                                      IconDisplay {
-                                                         icon: modifier.enabled ? IconSet.Eye : IconSet.EyeOff;
+                                                         icon: IconSet.Monitor;
                                                          size: 12px;
                                                          stroke: modifier.enabled ? DesignTokens.canvas : DesignTokens.text-muted;
                                                      }
@@ -3924,31 +4104,34 @@ export component PetuniaSlintShell inherits Window {
                                                      horizontal-stretch: 1;
                                                      vertical-alignment: center;
                                                  }
-                                                 Text {
-                                                     text: "↑";
-                                                     color: modifier.can-move-up ? DesignTokens.text-secondary : DesignTokens.disabled;
-                                                     font-size: 12px;
+                                                 Rectangle {
                                                      width: 20px;
-                                                     horizontal-alignment: center;
-                                                     vertical-alignment: center;
+                                                     height: 20px;
+                                                     IconDisplay {
+                                                         icon: IconSet.ChevronUp;
+                                                         size: 13px;
+                                                         stroke: modifier.can-move-up ? DesignTokens.text-secondary : DesignTokens.disabled;
+                                                     }
                                                      TouchArea { clicked => { if modifier.can-move-up { root.modifier-move(modifier.id, -1); } } }
                                                  }
-                                                 Text {
-                                                     text: "↓";
-                                                     color: modifier.can-move-down ? DesignTokens.text-secondary : DesignTokens.disabled;
-                                                     font-size: 12px;
+                                                 Rectangle {
                                                      width: 20px;
-                                                     horizontal-alignment: center;
-                                                     vertical-alignment: center;
+                                                     height: 20px;
+                                                     IconDisplay {
+                                                         icon: IconSet.ChevronDown;
+                                                         size: 13px;
+                                                         stroke: modifier.can-move-down ? DesignTokens.text-secondary : DesignTokens.disabled;
+                                                     }
                                                      TouchArea { clicked => { if modifier.can-move-down { root.modifier-move(modifier.id, 1); } } }
                                                  }
-                                                 Text {
-                                                     text: "×";
-                                                     color: DesignTokens.danger;
-                                                     font-size: 13px;
+                                                 Rectangle {
                                                      width: 20px;
-                                                     horizontal-alignment: center;
-                                                     vertical-alignment: center;
+                                                     height: 20px;
+                                                     IconDisplay {
+                                                         icon: IconSet.X;
+                                                         size: 13px;
+                                                         stroke: DesignTokens.danger;
+                                                     }
                                                      TouchArea { clicked => { root.modifier-remove(modifier.id); } }
                                                  }
                                              }
@@ -4014,27 +4197,117 @@ export component PetuniaSlintShell inherits Window {
                                              }
                                          }
                                      }
-                                     HorizontalLayout {
-                                         spacing: 4px;
-                                         Rectangle {
-                                             horizontal-stretch: 1;
-                                             height: 26px;
-                                             border-radius: 4px;
-                                             background: DesignTokens.surface-raised;
-                                             Text { text: root.label-modifier-add-mirror; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
-                                             TouchArea { clicked => { root.modifier-add("mirror"); } }
-                                         }
-                                         Rectangle {
-                                             horizontal-stretch: 1;
-                                             height: 26px;
-                                             border-radius: 4px;
-                                             background: DesignTokens.surface-raised;
-                                             Text { text: root.label-modifier-add-symmetry; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
-                                             TouchArea { clicked => { root.modifier-add("symmetry"); } }
-                                         }
-                                     }
                                  }
                              }
+                             InspectorSection {
+                                 title: root.label-quick-actions;
+                                 open: root.quick-actions-section-open;
+                                 toggled => { root.quick-actions-section-open = !root.quick-actions-section-open; }
+                                 toggle-all => {
+                                     root.quick-actions-section-open = !root.quick-actions-section-open;
+                                 }
+
+                                 VerticalLayout {
+                                     spacing: 6px;
+                                     vertical-stretch: 0;
+                                                                      HorizontalLayout {
+                                                                          spacing: 6px;
+                                                                          height: 28px;
+                                                                          Text {
+                                                                              text: root.label-quick-actions;
+                                                                              color: DesignTokens.text-secondary;
+                                                                              font-size: 10px;
+                                                                              font-weight: 700;
+                                                                              horizontal-stretch: 1;
+                                                                              vertical-alignment: center;
+                                                                          }
+                                                                          Rectangle {
+                                                                              width: 28px;
+                                                                              height: 24px;
+                                                                              border-radius: 4px;
+                                                                              background: root.quick-actions-open ? DesignTokens.accent : DesignTokens.surface-raised;
+                                                                              IconDisplay {
+                                                                                  icon: IconSet.Settings2;
+                                                                                  size: 12px;
+                                                                                  stroke: root.quick-actions-open ? DesignTokens.canvas : DesignTokens.text-primary;
+                                                                              }
+                                                                              TouchArea { clicked => { root.quick-actions-open = !root.quick-actions-open; } }
+                                                                          }
+                                                                      }
+                                                                      for action in root.quick-actions: Rectangle {
+                                                                          width: 100%;
+                                                                          height: 28px;
+                                                                          border-radius: 4px;
+                                                                          background: action.enabled ? DesignTokens.surface-raised : DesignTokens.surface;
+                                                                          border-width: 1px;
+                                                                          border-color: DesignTokens.border;
+                                                                          Text {
+                                                                              text: action.label;
+                                                                              color: action.enabled ? DesignTokens.text-primary : DesignTokens.text-muted;
+                                                                              font-size: 10px;
+                                                                              horizontal-stretch: 1;
+                                                                              vertical-alignment: center;
+                                                                              overflow: elide;
+                                                                          }
+                                                                          TouchArea { clicked => { root.quick-action-executed(action.id); } }
+                                                                      }
+                                                                      if root.quick-actions-open: Rectangle {
+                                                                          background: DesignTokens.surface;
+                                                                          border-radius: 5px;
+                                                                          border-width: 1px;
+                                                                          border-color: DesignTokens.border;
+                                                                          VerticalLayout {
+                                                                              spacing: 4px;
+                                                                              padding: 6px;
+                                                                              Text {
+                                                                                  text: root.label-quick-action-customize;
+                                                                                  color: DesignTokens.text-secondary;
+                                                                                  font-size: 10px;
+                                                                                  font-weight: 700;
+                                                                              }
+                                                                              for candidate in root.quick-action-candidates: Rectangle {
+                                                                                  height: 26px;
+                                                                                  border-radius: 4px;
+                                                                                  background: candidate.pinned ? DesignTokens.surface-hover : transparent;
+                                                                                  Text {
+                                                                                      text: candidate.label;
+                                                                                      color: DesignTokens.text-primary;
+                                                                                      font-size: 10px;
+                                                                                      horizontal-stretch: 1;
+                                                                                      vertical-alignment: center;
+                                                                                  }
+                                                                                  Text {
+                                                                                      text: candidate.pinned ? root.label-quick-action-remove : root.label-quick-action-add;
+                                                                                      color: DesignTokens.accent;
+                                                                                      font-size: 9px;
+                                                                                      vertical-alignment: center;
+                                                                                  }
+                                                                                  TouchArea { clicked => { root.quick-action-toggled(candidate.id); } }
+                                                                              }
+                                                                              HorizontalLayout {
+                                                                                  spacing: 4px;
+                                                                                  Rectangle {
+                                                                                      horizontal-stretch: 1;
+                                                                                      height: 24px;
+                                                                                      border-radius: 4px;
+                                                                                      background: DesignTokens.surface-raised;
+                                                                                      Text { text: root.label-quick-action-reset; color: DesignTokens.text-secondary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                                                                      TouchArea { clicked => { root.quick-actions-reset(); } }
+                                                                                  }
+                                                                                  Rectangle {
+                                                                                      horizontal-stretch: 1;
+                                                                                      height: 24px;
+                                                                                      border-radius: 4px;
+                                                                                      background: DesignTokens.accent;
+                                                                                      Text { text: root.label-quick-action-done; color: DesignTokens.canvas; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                                                                      TouchArea { clicked => { root.quick-actions-open = false; } }
+                                                                                  }
+                                                                              }
+                                                                          }
+                                                                      }
+                                 }
+                             }
+
                              if boolean-operand-name != "": InspectorSection {
                                 title: "Boolean";
                                 toggled => { self.open = !self.open; }
@@ -5073,6 +5346,32 @@ export component PetuniaSlintShell inherits Window {
                         }
 
                         }
+                    }
+                }
+
+                        // Alça de recolhimento: faixa de proximidade na borda
+                        // esquerda revela a alça; clique recolhe o painel.
+                        Rectangle {
+                            x: 0px;
+                            y: 0px;
+                            width: 14px;
+                            height: 100%;
+                            background: transparent;
+
+                            inspector-handle-touch := TouchArea {
+                                clicked => { root.inspector-collapsed = true; }
+                            }
+
+                            Rectangle {
+                                x: 4px;
+                                y: (parent.height - self.height) / 2;
+                                width: 6px;
+                                height: 44px;
+                                border-radius: 3px;
+                                background: inspector-handle-touch.has-hover ? DesignTokens.accent : DesignTokens.border;
+                                opacity: inspector-handle-touch.has-hover ? 1 : 0;
+                                animate opacity { duration: 120ms; }
+                            }
                         }
                     }
                 }
@@ -5348,261 +5647,6 @@ export component PetuniaSlintShell inherits Window {
             }
         }
 
-        // Tool Options fica no canto inferior esquerdo, longe do cursor e da barra central.
-        if tool-options-active: Rectangle {
-            x: 14px;
-            y: parent.height - self.height - 14px;
-            width: 280px;
-            height: root.tool-properties-collapsed ? 40px : tool-properties-layout.preferred-height + 34px;
-            border-radius: 8px;
-            background: DesignTokens.surface-raised;
-            border-width: 1px;
-            border-color: DesignTokens.border;
-            drop-shadow-blur: 12px;
-            drop-shadow-color: #00000080;
-            drop-shadow-offset-y: 4px;
-
-            VerticalLayout {
-                padding: 10px;
-                spacing: 8px;
-
-                HorizontalLayout {
-                    height: 20px;
-                    Text {
-                        text: root.tool-options-title != "" ? root.tool-options-title : (tool-modal-active ? root.tool-modal-title : (profile-active ? root.label-model-profile : root.label-model-loop-cut));
-                        color: DesignTokens.text-primary;
-                        font-size: 12px;
-                        font-weight: 700;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
-                    Rectangle {
-                        width: 20px;
-                        height: 20px;
-                        accessible-role: button;
-                        accessible-label: root.tool-properties-collapsed ? root.label-tool-options-expand : root.label-tool-options-collapse;
-                        IconDisplay {
-                            icon: root.tool-properties-collapsed ? IconSet.ChevronDown : IconSet.ChevronUp;
-                            size: 13px;
-                            stroke: DesignTokens.text-secondary;
-                        }
-                        TouchArea { clicked => { root.tool-properties-collapsed = !root.tool-properties-collapsed; } }
-                    }
-                }
-
-                Text {
-                    text: root.tool-options-hint;
-                    color: DesignTokens.text-secondary;
-                    font-size: 10px;
-                    wrap: word-wrap;
-                }
-
-                tool-properties-layout := VerticalLayout {
-                    visible: !root.tool-properties-collapsed;
-                    spacing: 6px;
-
-                if tool-modal-active: HorizontalLayout {
-                    spacing: 6px;
-                    height: 28px;
-
-                    Text {
-                        text: root.tool-modal-label;
-                        color: DesignTokens.text-secondary;
-                        font-size: 11px;
-                        width: 72px;
-                        vertical-alignment: center;
-                    }
-                    NumericField {
-                        label: "";
-                        value: root.tool-modal-value;
-                        horizontal-stretch: 1;
-                        step: root.tool-modal-step;
-                        scrubbed(delta, fine) => { root.tool-modal-text-committed("\{root.tool-modal-value + delta * root.tool-modal-step * (fine ? 0.1 : 1)}"); }
-                        scrub-cancelled(value) => { root.tool-modal-text-committed("\{value}"); }
-                        text-committed(text) => { root.tool-modal-text-committed(text) }
-                    }
-                }
-
-                if tool-modal-active: HorizontalLayout {
-                    spacing: 6px;
-                    height: 28px;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 4px;
-                        background: DesignTokens.surface;
-                        border-width: 1px;
-                        border-color: DesignTokens.border;
-                        Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.tool-modal-cancel(); } }
-                    }
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 4px;
-                        background: DesignTokens.accent;
-                        Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.tool-modal-apply(); } }
-                    }
-                }
-
-                if loop-cut-active: HorizontalLayout {
-                    spacing: 6px;
-                    height: 28px;
-
-                    Text {
-                        text: "Slide";
-                        color: DesignTokens.text-secondary;
-                        font-size: 11px;
-                        width: 72px;
-                        vertical-alignment: center;
-                    }
-                    NumericField {
-                        label: "";
-                        value: root.loop-cut-slide;
-                        horizontal-stretch: 1;
-                        step: 0.01;
-                        scrubbed(delta, fine) => { root.loop-cut-slide-committed("\{root.loop-cut-slide + delta * (fine ? 0.001 : 0.01)}"); }
-                        scrub-cancelled(value) => { root.loop-cut-slide-committed("\{value}"); }
-                        text-committed(text) => { root.loop-cut-slide-committed(text) }
-                    }
-                }
-
-                if loop-cut-armed: HorizontalLayout {
-                    spacing: 6px;
-                    height: 28px;
-                    Text { text: "Cuts"; color: DesignTokens.text-secondary; font-size: 11px; width: 72px; vertical-alignment: center; }
-                    Text { text: "\{root.loop-cut-cuts}"; color: DesignTokens.text-primary; font-size: 12px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
-                    Text { text: root.hint-model-loop-cut; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
-                }
-
-                if loop-cut-active: HorizontalLayout {
-                    spacing: 6px;
-                    height: 28px;
-
-                    Text {
-                        text: "Cuts";
-                        color: DesignTokens.text-secondary;
-                        font-size: 11px;
-                        width: 72px;
-                        vertical-alignment: center;
-                    }
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 4px;
-                        background: DesignTokens.surface-raised;
-                        border-width: 1px;
-                        border-color: DesignTokens.border;
-                        Text {
-                            text: "\{root.loop-cut-cuts}";
-                            color: DesignTokens.text-primary;
-                            font-size: 11px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                    Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 4px;
-                        background: DesignTokens.surface-raised;
-                        border-width: 1px;
-                        border-color: DesignTokens.border;
-                        Text { text: "-"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts - 1}"); } }
-                    }
-                    Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 4px;
-                        background: DesignTokens.surface-raised;
-                        border-width: 1px;
-                        border-color: DesignTokens.border;
-                        Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts + 1}"); } }
-                    }
-                }
-
-                if profile-active: VerticalLayout {
-                    spacing: 6px;
-                    Text { text: "\{root.label-profile-points}: \{root.profile-point-count}"; color: DesignTokens.text-secondary; font-size: 10px; }
-                    if !root.profile-closed: Rectangle {
-                        height: 26px; border-radius: 4px; background: DesignTokens.surface;
-                        Text { text: root.label-profile-close; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.profile-close(); } }
-                    }
-                    if root.profile-closed: HorizontalLayout {
-                        spacing: 5px; height: 28px;
-                        Text { text: root.label-profile-depth; color: DesignTokens.text-secondary; font-size: 10px; width: 72px; vertical-alignment: center; }
-                        NumericField {
-                            label: ""; value: root.profile-depth; horizontal-stretch: 1; step: 0.1;
-                            text-committed(text) => { root.profile-depth-set(text); }
-                            scrubbed(delta, fine) => { root.profile-depth-set("\{root.profile-depth + delta * (fine ? 0.01 : 0.1)}"); }
-                        }
-                    }
-                    if root.profile-closed: HorizontalLayout {
-                        spacing: 5px; height: 28px;
-                        Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface; Text { text: root.label-profile-revolve; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-revolve(); } } }
-                        Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.accent; Text { text: root.label-profile-generate; color: DesignTokens.canvas; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-generate(); } } }
-                    }
-                    HorizontalLayout {
-                        spacing: 5px; height: 26px;
-                        Rectangle {
-                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
-                            Text { text: "Add Rect"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { root.add-profile-rectangle(2.0, 1.0); } }
-                        }
-                        Rectangle {
-                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
-                            Text { text: "Add Circle"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { root.add-profile-circle(1.0, 16); } }
-                        }
-                    }
-                    Text { text: root.hint-model-profile; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
-                }
-
-                if !profile-active && root.active-tool == "draw_profile": VerticalLayout {
-                    spacing: 6px;
-                    Text { text: "2D Profile Presets:"; color: DesignTokens.text-secondary; font-size: 10px; }
-                    HorizontalLayout {
-                        spacing: 5px; height: 26px;
-                        Rectangle {
-                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
-                            Text { text: "Rectangle"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { root.add-profile-rectangle(2.0, 1.0); } }
-                        }
-                        Rectangle {
-                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
-                            Text { text: "Circle"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { root.add-profile-circle(1.0, 16); } }
-                        }
-                    }
-                    Text { text: "Click on canvas to plot vertices or insert a 2D primitive."; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
-                }
-
-                if loop-cut-active: HorizontalLayout {
-                    spacing: 6px;
-                    height: 28px;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 4px;
-                        background: DesignTokens.surface-raised;
-                        border-width: 1px;
-                        border-color: DesignTokens.border;
-                        Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.loop-cut-cancel(); } }
-                    }
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 4px;
-                        background: DesignTokens.accent;
-                        Text { text: root.label-apply; color: DesignTokens.canvas; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { clicked => { root.loop-cut-apply(); } }
-                    }
-                }
-                }
-            }
-        }
 
         // Overlay: recuperação de autosave (P3D-002 §Recuperação segura).
         if recovery-open: Rectangle {
@@ -5702,59 +5746,6 @@ export component PetuniaSlintShell inherits Window {
             }
         }
 
-        // Mini HUD da operação: o que está acontecendo, com que valor, e como
-        // confirmar. Fica acima da status bar e nunca no centro da geometria.
-        if operation-hud-active: Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: parent.height - self.height - 48px;
-            width: max(operation-hud-content.preferred-width + 24px, 220px);
-            height: operation-hud-content.preferred-height + 20px;
-            border-radius: 8px;
-            background: DesignTokens.surface-raised;
-            border-width: 1px;
-            border-color: DesignTokens.accent;
-            drop-shadow-blur: 12px;
-            drop-shadow-color: #00000080;
-            drop-shadow-offset-y: 3px;
-
-            operation-hud-content := VerticalLayout {
-                padding: 10px;
-                spacing: 4px;
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: center;
-                    Text {
-                        text: root.operation-hud-title;
-                        color: DesignTokens.accent;
-                        font-size: 11px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.operation-hud-subject;
-                        color: DesignTokens.text-muted;
-                        font-size: 10px;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                }
-
-                for line in root.operation-hud-lines: Text {
-                    text: line;
-                    color: DesignTokens.text-primary;
-                    font-size: 12px;
-                    font-weight: 600;
-                    font-family: "monospace";
-                }
-
-                Text {
-                    text: root.operation-hud-hint;
-                    color: DesignTokens.text-muted;
-                    font-size: 9px;
-                }
-            }
-        }
 
         // Popover de shading: só opções com backend real.
         if shading-popover-open: Rectangle {

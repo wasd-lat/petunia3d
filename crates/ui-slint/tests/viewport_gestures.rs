@@ -377,3 +377,64 @@ fn loop_cut_armed_tool_routes_hover_scroll_and_click_without_navigating() {
         "scroll não deve navegar durante a ferramenta"
     );
 }
+
+#[test]
+fn inspector_collapsed_rail_uses_spaced_icon_pills_and_single_tool_card() {
+    i_slint_backend_testing::init_no_event_loop();
+    let shell = PetuniaSlintShell::new().expect("Slint shell");
+    shell.window().set_size(LogicalSize::new(1280.0, 800.0));
+    shell.show().expect("headless window");
+    shell.set_active_workspace("MODEL".into());
+    shell.set_label_tab_parts("Parts".into());
+    shell.set_label_tab_transform("Transform".into());
+    shell.set_label_tab_material("Material".into());
+    shell.set_label_tab_object("Object".into());
+    shell.set_label_tab_modifiers("Modifiers".into());
+    shell.set_label_tool_options_collapse("Collapse tool options".into());
+    shell.set_label_tool_options_expand("Expand tool options".into());
+
+    // Rail colapsado: 5 pílulas de ícone separadas, sem textos rotacionados.
+    shell.set_inspector_collapsed(true);
+    let mut tops = Vec::new();
+    for label in ["Parts", "Transform", "Material", "Object", "Modifiers"] {
+        let pill = ElementHandle::find_by_accessible_label(&shell, label)
+            .find(|element| {
+                element.accessible_role() == Some(AccessibleRole::Button)
+                    && (element.size().width - 36.0).abs() < 0.5
+                    && (element.size().height - 36.0).abs() < 0.5
+            })
+            .unwrap_or_else(|| panic!("pílula 36x36 {label} ausente no rail colapsado"));
+        tops.push(pill.absolute_position().y + pill.size().height);
+    }
+    for (i, pair) in tops.windows(2).enumerate() {
+        assert!(
+            pair[1] - pair[0] >= 8.0,
+            "pílulas {i} e {} precisam de respiro",
+            i + 1
+        );
+    }
+
+    // Card único de ferramenta: oculto em repouso.
+    shell.set_inspector_collapsed(false);
+    shell.set_tool_modal_active(false);
+    shell.set_loop_cut_active(false);
+    shell.set_loop_cut_armed(false);
+    shell.set_profile_active(false);
+    shell.set_operation_hud_active(false);
+    assert!(
+        ElementHandle::find_by_accessible_label(&shell, "Collapse tool options")
+            .next()
+            .is_none(),
+        "sem modal/HUD não há card de ferramenta"
+    );
+
+    // Durante o modal, exatamente um card com controle de colapso.
+    shell.set_tool_modal_active(true);
+    shell.set_tool_options_title("Bevel".into());
+    assert!(
+        ElementHandle::find_by_accessible_label(&shell, "Collapse tool options")
+            .next()
+            .is_some(),
+        "card único deve aparecer durante o modal"
+    );
+}

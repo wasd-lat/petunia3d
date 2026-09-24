@@ -554,6 +554,11 @@ pub struct ShellViewModel {
     pub label_profile_close: String,
     pub label_profile_generate: String,
     pub label_profile_revolve: String,
+    pub label_profile_cuts: String,
+    pub label_profile_presets: String,
+    pub label_profile_add_rect: String,
+    pub label_profile_add_circle: String,
+    pub label_profile_canvas_hint: String,
     pub hint_model_select: String,
     pub hint_model_position: String,
     pub hint_model_rotate: String,
@@ -968,6 +973,11 @@ impl ShellViewModel {
             label_profile_close: String::new(),
             label_profile_generate: String::new(),
             label_profile_revolve: String::new(),
+            label_profile_cuts: String::new(),
+            label_profile_presets: String::new(),
+            label_profile_add_rect: String::new(),
+            label_profile_add_circle: String::new(),
+            label_profile_canvas_hint: String::new(),
             hint_model_select: String::new(),
             hint_model_position: String::new(),
             hint_model_rotate: String::new(),
@@ -6717,6 +6727,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_profile_close = translated(petunia_config::text_id::UI_PROFILE_CLOSE);
         vm.label_profile_generate = translated(petunia_config::text_id::UI_PROFILE_GENERATE);
         vm.label_profile_revolve = translated(petunia_config::text_id::UI_PROFILE_REVOLVE);
+        vm.label_profile_cuts = translated(petunia_config::text_id::UI_PROFILE_CUTS);
+        vm.label_profile_presets = translated(petunia_config::text_id::UI_PROFILE_PRESETS);
+        vm.label_profile_add_rect = translated(petunia_config::text_id::UI_PROFILE_ADD_RECT);
+        vm.label_profile_add_circle = translated(petunia_config::text_id::UI_PROFILE_ADD_CIRCLE);
+        vm.label_profile_canvas_hint = translated(petunia_config::text_id::UI_PROFILE_CANVAS_HINT);
         vm.label_hide_part = translated(petunia_config::text_id::UI_HIDE_PART);
         vm.label_show_part = translated(petunia_config::text_id::UI_SHOW_PART);
         vm.label_lock_part = translated(petunia_config::text_id::UI_LOCK_PART);
@@ -8351,6 +8366,11 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_label_profile_close(vm.label_profile_close.as_str().into());
     window.set_label_profile_generate(vm.label_profile_generate.as_str().into());
     window.set_label_profile_revolve(vm.label_profile_revolve.as_str().into());
+    window.set_label_profile_cuts(vm.label_profile_cuts.as_str().into());
+    window.set_label_profile_presets(vm.label_profile_presets.as_str().into());
+    window.set_label_profile_add_rect(vm.label_profile_add_rect.as_str().into());
+    window.set_label_profile_add_circle(vm.label_profile_add_circle.as_str().into());
+    window.set_label_profile_canvas_hint(vm.label_profile_canvas_hint.as_str().into());
     window.set_hint_model_select(vm.hint_model_select.as_str().into());
     window.set_hint_model_position(vm.hint_model_position.as_str().into());
     window.set_hint_model_rotate(vm.hint_model_rotate.as_str().into());

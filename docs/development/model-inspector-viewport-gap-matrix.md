@@ -71,3 +71,44 @@ sendo uma ferramenta shape-first do Petunia, não uma cópia de uma tool Blender
 | 11 | PARTIALLY_COMPLIANT | Marca/menus foram alinhados no chrome; click-away sincroniza o estado de menu. Testes de estado passaram; falta QA de monitor pequeno e navegação por teclado. |
 
 `COMPLIANT` acima significa somente o delta específico verificado, não paridade global com Blender/Cinema 4D/Plasticity/Blockbench. O checkpoint continua incremental e as pendências não foram reclassificadas como prontas.
+
+## Rodada 3 — Revisão do Inspector exigida pelo produto (24/09/2026)
+
+Pedido explícito do responsável do produto após uso: sidebar translúcida, alça de
+recolhimento por proximidade, rail colapsado em pílulas de ícone, limpeza das
+seções Material/Object, stack de modifiers no padrão Blender e painel único de
+ferramenta. Referências conferidas no manual Blender 5.2 (Sidebar N-panel,
+Properties por ícones, Modifier Stack, Material Slots, Adjust Last Operation) e
+no fluxo do legado egui (`crates/ui/src/properties_panel.rs`,
+`tool_properties_popover.rs`). Achados que contrariam o pedido foram registrados
+em vez de aplicados em silêncio: o Blender **não** usa sidebar translúcida sobre
+a viewport (Sidebar é região opaca) nem **um** único painel inferior (Status Bar
+persistente + Adjust Last Operation transitório coexistem); a decisão final é do
+produto e vale para o shell Slint. Detalhes em
+[`ADR 004`](../../architecture/adr/004-inspector-translucido-alca-modifiers.md).
+
+| # | Requisito | Estado inicial | Delta aplicado |
+| --- | --- | --- | --- |
+| R1 | Painel com fundo translúcido (viewport visível através) | BROKEN — `surface`/`surface-raised` opacos | `surface-raised.with-alpha(0.9)` no painel e no rail; seções mantêm fundo opaco para legibilidade |
+| R2 | Alça só visível por proximidade; clique recolhe; sem textos "Inspetor"/seta/"MODEL"; módulos afastados da borda | PARTIALLY — chevron permanente + header com 3 textos; padding-right 12px | Faixa de proximidade de 14px revela a alça (chevron em pílula); header removido; padding-right 20px |
+| R3 | Rail colapsado legível: pílulas separadas com hover | BROKEN — textos rotacionados colados | 5 pílulas de ícone (Parts/Transform/Material/Object/Modifiers) com hover e Tooltip; clique expande e abre a seção |
+| R4 | Títulos de seção via `TextId` | BROKEN — "Transform"/"Material"/"Object" hardcoded | `label-tab-transform/material/object` nos títulos |
+| R5 | Material no fluxo do legado (slot + gerenciar primeiro, editar depois) | FUNCTIONAL_BUT_DIFFERENT — ações no rodapé, losango accent inútil | Ações Assign/New/Duplicate/Remove sob a lista de slots; swatch mostra a cor base real; Assign em destaque |
+| R6 | Object sem ruído; Quick Actions em seção própria | PARTIALLY — microlinha redundante + customize dentro de Object | Microlinha removida; Quick Actions viram seção própria após Modifiers |
+| R7 | Modifiers como stack Blender | FUNCTIONAL_BUT_DIFFERENT — reorder/apply funcionam; visual diverge | Botão Add no topo; toggle com ícone Monitor (viewport); setas viram ChevronUp/Down + X; ordem top-aplica-primeiro preservada |
+| R8 | Painel único de ferramenta (params + HUD), fora do canto inferior | BROKEN — Tool Options + HUD simultâneos embaixo | Card único dentro da viewport (topo-esquerda, como o popover legado): params ao vivo durante modal, valores do HUD caso contrário; oculto em repouso |
+| R9 | Strings do painel via `TextId` | MISSING — "Cuts", presets e dicas hardcoded | `ui.profile_cuts/presets/add_rect/add_circle/canvas_hint` em en/pt-BR |
+
+## Reconciliação da rodada 3 (24/09/2026)
+
+| # | Estado após a implementação | Evidência e limite ainda aberto |
+| --- | --- | --- |
+| R1 | PARTIALLY_COMPLIANT | `surface-raised.with-alpha(0.9)` no painel e no rail; seções opacas preservam contraste do texto. Sem captura nativa de aceite ainda. |
+| R2 | PARTIALLY_COMPLIANT | Faixa de 14px revela a alça com fade de 120ms; clique recolhe; header removido; padding-right 20px. Falta QA de sensibilidade da faixa em DPI alto. |
+| R3 | PARTIALLY_COMPLIANT | 5 `InspectorPill` 36x36 com hover, Tooltip e teste headless de espaçamento (≥8px) e labels. Ícones são do set Lucide (Monitor/Settings), não réplicas Blender. |
+| R4 | COMPLIANT | Títulos usam `label-tab-transform/material/object`; nenhum título de seção hardcoded restante. |
+| R5 | PARTIALLY_COMPLIANT | Ordem slot → Assign → Surface → Emission → Advanced → Albedo; swatch real; New/Dup/Del como icon-buttons com Tooltip. Falta aceite de fluxo com usuário. |
+| R6 | PARTIALLY_COMPLIANT | Microlinha removida; Quick Actions em seção própria colapsável (nada perdido). Ordem Parts→Transform→Material→Object preservada. |
+| R7 | PARTIALLY_COMPLIANT | Add no topo, Monitor, Chevrons + X; reorder/apply inalterados e cobertos por testes. Sem drag-grip `::::` (fora do set de ícones). |
+| R8 | PARTIALLY_COMPLIANT | Card único em `viewport-region` (12,56); params xor HUD; oculto em repouso; teste headless de presença/ausência. Painel antigo e HUD de baixo removidos. |
+| R9 | COMPLIANT | 5 novos `TextId` com en/pt-BR, plumbing no bridge e `docs-generate --check` verde. |

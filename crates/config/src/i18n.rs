@@ -302,6 +302,11 @@ pub mod text_id {
     pub const UI_PROFILE_CLOSE: TextId = TextId::new("ui.profile_close");
     pub const UI_PROFILE_GENERATE: TextId = TextId::new("ui.profile_generate");
     pub const UI_PROFILE_REVOLVE: TextId = TextId::new("ui.profile_revolve");
+    pub const UI_PROFILE_CUTS: TextId = TextId::new("ui.profile_cuts");
+    pub const UI_PROFILE_PRESETS: TextId = TextId::new("ui.profile_presets");
+    pub const UI_PROFILE_ADD_RECT: TextId = TextId::new("ui.profile_add_rect");
+    pub const UI_PROFILE_ADD_CIRCLE: TextId = TextId::new("ui.profile_add_circle");
+    pub const UI_PROFILE_CANVAS_HINT: TextId = TextId::new("ui.profile_canvas_hint");
     pub const UI_MODEL_SELECT_HINT: TextId = TextId::new("ui.model_select_hint");
     pub const UI_MODEL_POSITION_HINT: TextId = TextId::new("ui.model_position_hint");
     pub const UI_MODEL_ROTATE_HINT: TextId = TextId::new("ui.model_rotate_hint");
@@ -596,6 +601,11 @@ pub mod text_id {
         UI_PROFILE_CLOSE,
         UI_PROFILE_GENERATE,
         UI_PROFILE_REVOLVE,
+        UI_PROFILE_CUTS,
+        UI_PROFILE_PRESETS,
+        UI_PROFILE_ADD_RECT,
+        UI_PROFILE_ADD_CIRCLE,
+        UI_PROFILE_CANVAS_HINT,
         UI_MODEL_SELECT_HINT,
         UI_MODEL_POSITION_HINT,
         UI_MODEL_ROTATE_HINT,

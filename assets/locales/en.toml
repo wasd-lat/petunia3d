@@ -179,6 +179,11 @@ profile_points = "Points"
 profile_close = "Close Profile"
 profile_generate = "Generate Volume"
 profile_revolve = "Revolve"
+profile_cuts = "Cuts"
+profile_presets = "2D Profile Presets"
+profile_add_rect = "Add Rect"
+profile_add_circle = "Add Circle"
+profile_canvas_hint = "Click on canvas to plot vertices or insert a 2D primitive."
 
 [pivot]
 median = "Median Point"
