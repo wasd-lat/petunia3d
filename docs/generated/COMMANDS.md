@@ -14,7 +14,7 @@ description: Catálogo canônico de comandos gerados a partir do CommandDispatch
 > **Single Source of Truth (P3D-100, P3D-119)**
 > Todos os comandos do Petunia3D são registrados centralmente no `CommandDispatcher`, permitindo despacho transacional com histórico (Undo/Redo), Command Palette e telemetria.
 
-Total de comandos registrados no motor: **85**.
+Total de comandos registrados no motor: **91**.
 
 ## Tabela Geral de Comandos
 
@@ -81,7 +81,11 @@ Total de comandos registrados no motor: **85**.
 | `select.invert` | **Invert Selection** | `Select` | Não | — | Invert geometry selection in active mesh |
 | `select.linked` | **Select Linked** | `Select` | Não | — | Select connected geometry elements |
 | `select.none` | **Deselect All** | `Select` | Não | — | Clear current geometry selection |
+| `paint.bake_reference` | **Bake Reference to Texture** | `Tools` | Sim | TexturePainting | Project UVs and bake visible reference image into the active texture |
+| `tools.toggle_proportional` | **Toggle Proportional Editing** | `Tools` | Não | Modeling | Toggle proportional editing with falloff radius |
+| `tools.toggle_snap` | **Toggle Magnet Snap** | `Tools` | Não | Modeling | Toggle snapping to grid, vertices, edges or faces |
 | `uv.pack_islands` | **Pack UV Islands** | `Tools` | Sim | UvUnwrapping | Pack UV islands into 0..1 without overlaps |
+| `uv.project_reference` | **Project From Reference** | `Tools` | Sim | UvUnwrapping | Project UVs from the active reference image or fallback to camera view |
 | `uv.project_view` | **Project From View** | `Tools` | Sim | UvUnwrapping | Project UVs from the current camera view |
 | `uv.unwrap_auto` | **Auto UV** | `Tools` | Sim | UvUnwrapping | Unwrap the active mesh with the generic UV provider |
 | `view.back` | **View Back** | `View` | Não | Navigation | Align camera to Back orthographic view |
@@ -96,8 +100,10 @@ Total de comandos registrados no motor: **85**.
 | `view.left` | **View Left** | `View` | Não | Navigation | Align camera to Left orthographic view |
 | `view.reset_camera` | **Reset Camera** | `View` | Não | Navigation | Reset 3D camera to default isometric view |
 | `view.right` | **View Right** | `View` | Não | Navigation | Align camera to Right orthographic view |
+| `view.toggle_face_orientation` | **Toggle Face Orientation** | `View` | Não | Navigation | Display front faces in blue and back faces in red |
 | `view.toggle_nav_hud` | **Toggle Navigation HUD** | `View` | Não | Navigation | Toggle display of viewport orientation angle badge |
 | `view.toggle_projection` | **Toggle Projection** | `View` | Não | Navigation | Toggle perspective or orthographic view |
+| `view.toggle_uv_checker` | **Toggle UV Checker** | `View` | Não | UvUnwrapping | Display procedural checkerboard pattern for UV inspection |
 | `view.toggle_wire_overlay` | **Toggle Wire Overlay** | `View` | Não | Navigation | Display mesh edges over the active shading mode |
 | `view.toggle_wireframe` | **Toggle Wireframe** | `View` | Não | Navigation | Toggle wireframe display on active mesh |
 | `view.toggle_xray` | **Toggle X-Ray** | `View` | Não | Navigation | Toggle semi-transparent see-through mesh display |

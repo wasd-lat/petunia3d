@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **705**.
+Total de chaves de localização cadastradas: **745**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -597,14 +597,35 @@ Total de chaves de localização cadastradas: **705**.
 | `ui.lock_part` | Lock part | Bloquear peça |
 | `ui.loop_cut_hint` | Hover a quad edge ring; scroll to change cuts, click to place, Enter confirms. Esc cancels. | Passe sobre uma aresta de quads; role para mudar cortes, clique para posicionar e Enter confirma. Esc cancela. |
 | `ui.material_advanced` | Advanced material settings | Configurações avançadas do material |
+| `ui.material_alpha_blend` | Blend | Mistura |
+| `ui.material_alpha_cutoff` | Alpha cutoff | Corte alfa |
+| `ui.material_alpha_mask` | Mask | Máscara |
 | `ui.material_alpha_mode` | Alpha mode | Modo alfa |
+| `ui.material_alpha_opaque` | Opaque | Opaco |
+| `ui.material_assign` | Assign material | Atribuir material |
+| `ui.material_base_color` | Base color | Cor base |
+| `ui.material_clear_texture` | Clear texture | Limpar textura |
+| `ui.material_create_texture` | Create texture | Criar textura |
+| `ui.material_duplicate` | Duplicate material | Duplicar material |
 | `ui.material_editor` | Material editor | Editor de material |
 | `ui.material_emission` | Emission | Emissão |
+| `ui.material_emission_strength` | Emission strength | Intensidade da emissão |
 | `ui.material_metallic` | Metallic | Metálico |
 | `ui.material_name` | Name | Nome |
+| `ui.material_new` | New material | Novo material |
+| `ui.material_no_material` | No material assigned to this object. | Nenhum material atribuído a este objeto. |
+| `ui.material_no_selection` | Select an object to edit its material. | Selecione um objeto para editar seu material. |
+| `ui.material_no_texture` | No texture | Sem textura |
 | `ui.material_normal_scale` | Normal scale | Escala do normal |
 | `ui.material_profile` | Profile | Perfil |
+| `ui.material_profile_emissive` | Emissive | Emissivo |
+| `ui.material_profile_glass` | Glass / Transparent | Vidro / Transparente |
+| `ui.material_profile_pbr` | PBR Standard | PBR Padrão |
+| `ui.material_profile_toon` | Toon / Cel-Shading | Toon / Cel-Shading |
+| `ui.material_profile_unlit` | Unlit / Flat | Sem iluminação |
+| `ui.material_remove` | Remove material | Remover material |
 | `ui.material_roughness` | Roughness | Rugosidade |
+| `ui.material_texture_albedo` | Albedo texture | Textura de albedo |
 | `ui.mesh` | Mesh | Malha |
 | `ui.model_lasso_hint` | Draw a freeform region to select parts or mesh elements. | Desenhe uma região livre para selecionar peças ou elementos da malha. |
 | `ui.model_position_hint` | Move the selection using the axes or mouse. | Mova a seleção pelos eixos ou com o mouse. |
@@ -614,10 +635,16 @@ Total de chaves de localização cadastradas: **705**.
 | `ui.model_transform_hint` | Move with arrows, scale with squares, rotate with rings. | Mova pelas setas, escale pelos quadrados e gire pelos anéis. |
 | `ui.modifier_add_mirror` | Add Mirror | Adicionar Mirror |
 | `ui.modifier_add_symmetry` | Add Symmetry | Adicionar Symmetry |
+| `ui.modifier_apply` | Apply modifier | Aplicar modificador |
 | `ui.modifier_axis` | Axis | Eixo |
+| `ui.modifier_direction` | Direction | Direção |
+| `ui.modifier_mirror` | Mirror | Espelho |
 | `ui.modifier_move_down` | Move modifier down | Mover modificador para baixo |
 | `ui.modifier_move_up` | Move modifier up | Mover modificador para cima |
+| `ui.modifier_negative_to_positive` | Negative to positive | Negativo para positivo |
+| `ui.modifier_positive_to_negative` | Positive to negative | Positivo para negativo |
 | `ui.modifier_remove` | Remove modifier | Remover modificador |
+| `ui.modifier_symmetry` | Symmetry | Simetria |
 | `ui.modifiers_empty` | No modifiers in the stack. | Sem modificadores na pilha. |
 | `ui.more` | More… | Mais… |
 | `ui.more_actions` | More actions | Mais ações |
@@ -625,6 +652,10 @@ Total de chaves de localização cadastradas: **705**.
 | `ui.no_tool` | Tool disabled in tools.toml | Ferramenta desligada no tools.toml |
 | `ui.no_tool_parameters` | Select Extrude, Inset, Bevel, Loop Cut or Profile to edit parameters here. | Selecione Extrude, Inset, Bevel, Loop Cut ou Profile para editar os parâmetros aqui. |
 | `ui.numeric_field_hint` | Click to enter an exact value, or drag to adjust. Hold Shift for precision. | Clique para digitar um valor exato ou arraste para ajustar. Segure Shift para precisão. |
+| `ui.object_lock` | Lock | Bloqueio |
+| `ui.object_name` | Name | Nome |
+| `ui.object_no_selection` | Select an object to inspect its data. | Selecione um objeto para inspecionar seus dados. |
+| `ui.object_visibility` | Visibility | Visibilidade |
 | `ui.outliner` | Outliner | Outliner |
 | `ui.pack_islands` | Pack Islands | Empacotar ilhas |
 | `ui.parts` | Parts | Peças |
@@ -647,7 +678,11 @@ Total de chaves de localização cadastradas: **705**.
 | `ui.project_asset_library` | Project Asset Library | Biblioteca de Assets do Projeto |
 | `ui.properties` | Properties | Propriedades |
 | `ui.push_pull_hint` | Drag vertically or enter a distance to move selected faces without creating side walls. | Arraste verticalmente ou informe a distância para mover as faces selecionadas sem criar paredes. |
+| `ui.quick_action_add` | Pin action | Fixar ação |
 | `ui.quick_action_customize` | Pin or unpin quick actions | Fixar ou soltar ações rápidas |
+| `ui.quick_action_done` | Done | Concluir |
+| `ui.quick_action_remove` | Unpin action | Soltar ação |
+| `ui.quick_action_reset` | Reset quick actions | Restaurar ações rápidas |
 | `ui.quick_actions` | Quick actions | Ações rápidas |
 | `ui.recovery_body` | Petunia3D found an autosave snapshot that is newer than the saved project. The previous session did not close cleanly. | O Petunia3D encontrou um snapshot de autosave mais recente que o projeto salvo. A sessão anterior não foi encerrada corretamente. |
 | `ui.recovery_discard` | Discard snapshots | Descartar snapshots |
@@ -657,6 +692,7 @@ Total de chaves de localização cadastradas: **705**.
 | `ui.redock` | Re-dock the Properties panel into the sidebar | Reancorar o Painel de Propriedades na barra lateral |
 | `ui.refs` | Reference images | Imagens de referência |
 | `ui.rename` | Rename | Renomear |
+| `ui.resize_panel_width` | Resize panel width | Redimensionar largura do painel |
 | `ui.save_active_as_asset` | Save Active as Asset | Salvar ativo como asset |
 | `ui.search` | Search | Buscar |
 | `ui.search_assets` | Search assets | Buscar assets |
@@ -669,6 +705,7 @@ Total de chaves de localização cadastradas: **705**.
 | `ui.slice_hint` | Drag in the viewport to define the plane; both sides are kept. Enter confirms, Esc cancels. | Arraste na viewport para definir o plano; os dois lados são mantidos. Enter confirma, Esc cancela. |
 | `ui.sort_assets` | Sort assets by name | Ordenar assets por nome |
 | `ui.sort_parts` | Sort parts by name | Ordenar peças por nome |
+| `ui.stats_faces` | Faces | Faces |
 | `ui.stats_selection` | Selection | Seleção |
 | `ui.stats_tris` | Tris | Tris |
 | `ui.stats_verts` | Verts | Vértices |
@@ -681,6 +718,9 @@ Total de chaves de localização cadastradas: **705**.
 | `ui.theme` | Theme | Tema |
 | `ui.thumbnail_size` | Thumbnail size | Tamanho das miniaturas |
 | `ui.tool_card` | Tool | Ferramenta |
+| `ui.tool_options` | Tool Options | Opções da ferramenta |
+| `ui.tool_options_collapse` | Collapse tool options | Recolher opções da ferramenta |
+| `ui.tool_options_expand` | Expand tool options | Expandir opções da ferramenta |
 | `ui.tools` | Tools | Ferramentas |
 | `ui.tools_menu` | Tools… | Ferramentas… |
 | `ui.unlock_part` | Unlock part | Desbloquear peça |

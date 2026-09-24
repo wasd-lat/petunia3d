@@ -5,6 +5,13 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Fechamento V1 MODEL/PAINT — Sprint 4 (24/09/2026)
+- Proportional Editing fim a fim: toggle `O`, raio pela roda, falloff selecionável e kernel aplicado no commit modal.
+- Snap magnético nos gestos modais (Grid, Increment, Vertex, Edge, Face), toggle `Shift+Tab` e seletor de alvo na viewport.
+- Profile com presets Retângulo/Círculo; UV com botões dedicados de 90° CW/CCW; Paint com botão Add Decal (posicionador 3D segue Era 1).
+- Overlays Face Orientation (frente azul/verso vermelho) e UV Checkerboard no WGPU e no fallback software; backend GL legado não renderiza os overlays.
+- Lasso com filtro de oclusão verificado e pivot Individual Origins verificado em objeto e componente; matriz V1 atualizada (MODEL 43/45, PAINT 27/30).
+
 ### Interação de modelagem MODEL (23/09/2026)
 - Loop Cut na UI Slint agora arma sem seleção prévia, encontra edge rings válidos por hover, desenha preview no viewport e ajusta Cuts pela roda sem acionar zoom; click inicia a sessão transacional e Enter/Esc confirma/cancela.
 - Orbit, pan e zoom da viewport ficam suspensos durante Loop Cut, Slice, Profile e ferramentas modais com captura do mouse.
