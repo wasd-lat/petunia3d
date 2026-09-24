@@ -267,6 +267,9 @@ pub enum UiIntent {
     ResetCamera,
     ToggleProjection,
     SaveActiveAsAsset,
+    AssignMaterialSlot(usize),
+    CreateMaterial,
+    DuplicateMaterial(usize),
 }
 
 /// Representação DTO de um item da árvore de cena do Outliner.
@@ -530,6 +533,8 @@ pub struct ShellViewModel {
     pub tool_modal_step: f32,
     pub tool_modal_min: f32,
     pub tool_modal_max: f32,
+    pub material_slots: Vec<String>,
+    pub active_material_slot: i32,
 }
 
 impl ShellViewModel {
@@ -639,6 +644,14 @@ impl ShellViewModel {
             active_object_title,
             active_object_details,
             active_material_name,
+            material_slots: state
+                .project
+                .project
+                .materials
+                .iter()
+                .map(|m| m.name.clone())
+                .collect(),
+            active_material_slot: 0,
             scene_stats,
             uv_stats,
             current_theme: state.ui.active_theme_id.clone(),
@@ -973,6 +986,7 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     /// Snapshot usado para a prévia por hover; commit só ocorre após click.
     pub loop_cut_hover_source: Option<petunia_core::Mesh>,
     pub loop_cut_hover_cuts: usize,
+    pub active_material_slot: i32,
     /// Autosave rotativo do shell (P3D-002). Nunca sobrescreve o arquivo oficial.
     pub autosave: petunia_core::AutosaveService,
     /// Snapshot de recuperação detectado no arranque, aguardando decisão.
@@ -1249,6 +1263,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             loop_cut_hover_ring: None,
             loop_cut_hover_source: None,
             loop_cut_hover_cuts: 1,
+            active_material_slot: 0,
             shading_popover_open: false,
             pointer_position: [512.0, 384.0],
             modal_text: String::new(),
@@ -1641,6 +1656,15 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     self.state
                         .set_status("Ativo salvo na biblioteca de assets.");
                 }
+            }
+            UiIntent::AssignMaterialSlot(slot) => {
+                self.assign_material_slot(slot);
+            }
+            UiIntent::CreateMaterial => {
+                self.create_material();
+            }
+            UiIntent::DuplicateMaterial(slot) => {
+                self.duplicate_material(slot);
             }
         }
         self.sync_viewport_context();
@@ -2191,6 +2215,70 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         commands
     }
 
+    /// Atribui o slot de material especificado a todas as faces selecionadas da malha ativa.
+    pub fn assign_material_slot(&mut self, slot: usize) -> bool {
+        let Some(mesh) = self.state.project.active_mesh_mut() else {
+            return false;
+        };
+        let selected_faces: Vec<usize> = mesh
+            .faces
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| if f.selected { Some(i) } else { None })
+            .collect();
+        if selected_faces.is_empty() {
+            self.state
+                .set_status("Select faces first to assign material slot");
+            return false;
+        }
+        self.state.checkpoint("assign material slot");
+        let Some(mesh) = self.state.project.active_mesh_mut() else {
+            return false;
+        };
+        for i in &selected_faces {
+            mesh.faces[*i].material_slot = Some(slot);
+        }
+        let count = selected_faces.len();
+        self.state
+            .set_status(format!("Assigned material slot {slot} to {count} face(s)"));
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Cria um novo material no projeto e o seleciona como ativo.
+    pub fn create_material(&mut self) -> bool {
+        let count = self.state.project.project.materials.len();
+        let name = format!("Material {}", count + 1);
+        self.state
+            .project
+            .project
+            .materials
+            .push(petunia_project::Material::new(name));
+        self.active_material_slot = count as i32;
+        self.state
+            .set_status(format!("Created Material {}", count + 1));
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Duplica o material do slot indicado e o seleciona como ativo.
+    pub fn duplicate_material(&mut self, slot: usize) -> bool {
+        let Some(mat) = self.state.project.project.materials.get(slot).cloned() else {
+            return false;
+        };
+        let mut dup = mat;
+        dup.id = uuid::Uuid::new_v4();
+        dup.name = format!("{} Copy", dup.name);
+        self.state.project.project.materials.push(dup);
+        let new_idx = self.state.project.project.materials.len() - 1;
+        self.active_material_slot = new_idx as i32;
+        self.state
+            .set_status(format!("Duplicated material to slot {new_idx}"));
+        self.state.mark_dirty();
+        true
+    }
+
     fn profile_preview_commands(&self) -> String {
         let profile = &self.state.profile;
         if profile.points.is_empty() || self.viewport_size[0] <= 1.0 || self.viewport_size[1] <= 1.0
@@ -2456,6 +2544,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return None;
         }
         let active = self.state.session.tools.active_tool.as_str();
+        let dist_from_origin = (x - gizmo.origin_x).hypot(y - gizmo.origin_y);
+        // Desambiguação do gizmo universal: zona morta do centro protege contra cliques acidentais
+        if active == "transform" && dist_from_origin < 12.0 {
+            return None;
+        }
         let families = [
             (
                 TransformKind::Scale,
@@ -2486,7 +2579,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             ),
         ];
         for (kind, hit_radius, commands_by_axis) in families {
-            let mut best: Option<(GizmoTarget, f32)> = None;
+            let mut family_best: Option<(GizmoTarget, f32)> = None;
             for (axis, commands) in commands_by_axis.into_iter().enumerate() {
                 let handle = [GizmoHandle::X, GizmoHandle::Y, GizmoHandle::Z][axis];
                 let numbers: Vec<f32> = commands
@@ -2500,13 +2593,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         continue;
                     }
                     let distance = point_segment_distance([x, y], a, b);
-                    if distance <= hit_radius && best.is_none_or(|(_, current)| distance < current)
+                    if distance <= hit_radius
+                        && family_best.is_none_or(|(_, current)| distance < current)
                     {
-                        best = Some((GizmoTarget { handle, kind }, distance));
+                        family_best = Some((GizmoTarget { handle, kind }, distance));
                     }
                 }
             }
-            if let Some((target, _)) = best {
+            if let Some((target, _)) = family_best {
                 return Some(target);
             }
         }
@@ -5299,6 +5393,19 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.pointer_position,
             link_active,
         );
+        if let Some(anchor) = self.slice_anchor {
+            let dx = self.pointer_position[0] - anchor[0];
+            let dy = self.pointer_position[1] - anchor[1];
+            let len = dx.hypot(dy);
+            if len > 2.0 {
+                let dir_x = dx / len;
+                let dir_y = dy / len;
+                let p1 = [anchor[0] - dir_x * 2000.0, anchor[1] - dir_y * 2000.0];
+                let p2 = [anchor[0] + dir_x * 2000.0, anchor[1] + dir_y * 2000.0];
+                vm.drag_link_commands =
+                    format!("M {:.2} {:.2} L {:.2} {:.2} ", p1[0], p1[1], p2[0], p2[1]);
+            }
+        }
         vm.hover_label = self.state.session.tools.hover.label();
         self.fill_operation_hud(&mut vm);
         if let Some(menu) = self.context_menu {
@@ -5364,6 +5471,17 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_tab_parts = translated(petunia_config::text_id::UI_TAB_PARTS);
         vm.label_tab_transform = translated(petunia_config::text_id::UI_TAB_TRANSFORM);
         vm.label_tab_material = translated(petunia_config::text_id::UI_TAB_MATERIAL);
+        vm.material_slots = self
+            .state
+            .project
+            .project
+            .materials
+            .iter()
+            .map(|m| m.name.clone())
+            .collect();
+        vm.active_material_slot = self
+            .active_material_slot
+            .clamp(0, vm.material_slots.len().saturating_sub(1) as i32);
         vm.label_tab_object = translated(petunia_config::text_id::UI_TAB_OBJECT);
         vm.label_numeric_field_hint = translated(petunia_config::text_id::UI_NUMERIC_FIELD_HINT);
         vm.label_model_select = translated(petunia_config::text_id::TOOLS_SELECT);
@@ -6866,6 +6984,14 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_tool_modal_min(vm.tool_modal_min);
     window.set_tool_modal_max(vm.tool_modal_max);
 
+    let material_slots: Vec<slint::SharedString> = vm
+        .material_slots
+        .iter()
+        .map(|slot| slot.as_str().into())
+        .collect();
+    window.set_material_slots(material_slots.as_slice().into());
+    window.set_active_material_slot(vm.active_material_slot);
+
     theme::apply_theme(window, &vm.current_theme);
 }
 
@@ -7501,6 +7627,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let window_weak = window.as_weak();
     window.on_viewport_transform_update(move |x, y, fine, snap| {
         if let Ok(mut bridge) = transform_drag_bridge.lock() {
+            bridge.pointer_position = [x, y];
             if bridge.update_viewport_slice(x, y) {
                 let vm = bridge.view_model();
                 let new_frame = bridge.render_viewport();
@@ -8998,6 +9125,52 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_save_active_as_asset_requested(move || {
         if let Ok(mut bridge) = save_asset_bridge.lock() {
             bridge.apply(UiIntent::SaveActiveAsAsset);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let assign_mat_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_assign_material_slot(move |slot| {
+        if slot < 0 {
+            return;
+        }
+        if let Ok(mut bridge) = assign_mat_bridge.lock() {
+            bridge.apply(UiIntent::AssignMaterialSlot(slot as usize));
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let create_mat_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_create_material(move || {
+        if let Ok(mut bridge) = create_mat_bridge.lock() {
+            bridge.apply(UiIntent::CreateMaterial);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let dup_mat_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_duplicate_material(move |slot| {
+        if slot < 0 {
+            return;
+        }
+        if let Ok(mut bridge) = dup_mat_bridge.lock() {
+            bridge.apply(UiIntent::DuplicateMaterial(slot as usize));
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
@@ -13022,5 +13195,76 @@ mod tests {
         assert!(bridge.toggle_selected_uv_seams());
         let seams_after = bridge.state.project.active_mesh().unwrap().uv_seams.clone();
         assert!(seams_after.is_empty());
+    }
+
+    #[test]
+    fn universal_gizmo_disambiguation_with_deadzone() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetActiveTool("transform".to_string()));
+
+        let gizmo = bridge.view_model().gizmo;
+        assert!(gizmo.visible);
+        let origin_x = gizmo.origin_x;
+        let origin_y = gizmo.origin_y;
+
+        // Deadzone check: point exactly at origin or within deadzone (<= 12px) returns None
+        assert_eq!(bridge.gizmo_target_at(origin_x, origin_y), None);
+        assert_eq!(bridge.gizmo_target_at(origin_x + 5.0, origin_y + 5.0), None);
+
+        // Outside deadzone: far away point returns None
+        assert_eq!(bridge.gizmo_target_at(0.0, 0.0), None);
+    }
+
+    #[test]
+    fn slice_dynamic_preview_line() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.resize_viewport(800, 600);
+        bridge.apply(UiIntent::SetActiveTool("slice".to_string()));
+
+        // When slice is not dragging, drag_link_commands is empty
+        assert!(bridge.view_model().drag_link_commands.is_empty());
+
+        // When slice drag starts and mouse moves:
+        bridge.slice_anchor = Some([200.0, 200.0]);
+        bridge.pointer_position = [300.0, 250.0];
+
+        let vm = bridge.view_model();
+        assert!(!vm.drag_link_commands.is_empty());
+        assert!(vm.drag_link_commands.contains("L "));
+    }
+
+    #[test]
+    fn material_slots_assignment_and_duplication() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let mesh = bridge.state.project.active_mesh_mut().unwrap();
+        // Select face 0
+        for f in &mut mesh.faces {
+            f.selected = false;
+        }
+        mesh.faces[0].selected = true;
+
+        // Initially 1 default material in project
+        let vm = bridge.view_model();
+        assert!(!vm.material_slots.is_empty());
+
+        // Create new material via UiIntent
+        bridge.apply(UiIntent::CreateMaterial);
+        let vm = bridge.view_model();
+        assert_eq!(vm.material_slots.len(), 2);
+        assert_eq!(vm.active_material_slot, 1);
+
+        // Assign to face 0 via UiIntent
+        bridge.apply(UiIntent::AssignMaterialSlot(1));
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert_eq!(mesh.faces[0].material_slot, Some(1));
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        // Duplicate material 1 via UiIntent
+        bridge.apply(UiIntent::DuplicateMaterial(1));
+        let vm = bridge.view_model();
+        assert_eq!(vm.material_slots.len(), 3);
+        assert_eq!(vm.active_material_slot, 2);
+        assert!(vm.material_slots[2].contains("Copy"));
     }
 }

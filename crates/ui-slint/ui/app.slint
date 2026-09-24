@@ -897,6 +897,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <float> scale-x: 1.0;
     in-out property <float> scale-y: 1.0;
     in-out property <float> scale-z: 1.0;
+    in-out property <[string]> material-slots: [];
+    in-out property <int> active-material-slot: 0;
 
     in-out property <[SceneItem]> scene-items: [];
     in-out property <[SceneItem]> parts-items: [];
@@ -1158,6 +1160,9 @@ export component PetuniaSlintShell inherits Window {
     callback command-query-changed(string);
     callback command-executed(string);
     callback command-file-action(string);
+    callback assign-material-slot(int);
+    callback create-material;
+    callback duplicate-material(int);
     callback escape-requested;
     callback click-away-requested;
     callback transform-scrubbed(string, int, float, bool);
@@ -3025,22 +3030,150 @@ export component PetuniaSlintShell inherits Window {
                                     root.model-object-open = root.model-material-open;
                                 }
 
-                                HorizontalLayout {
+                                VerticalLayout {
                                     spacing: 8px;
-                                    alignment: center;
+                                    padding-top: 4px;
 
-                                    Rectangle {
-                                        width: 12px;
-                                        height: 12px;
-                                        border-radius: 3px;
-                                        background: DesignTokens.accent;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: center;
+
+                                        Rectangle {
+                                            width: 14px;
+                                            height: 14px;
+                                            border-radius: 3px;
+                                            background: DesignTokens.accent;
+                                        }
+
+                                        Text {
+                                            text: root.material-slots.length > 0 && root.active-material-slot < root.material-slots.length
+                                                ? root.material-slots[root.active-material-slot]
+                                                : root.active-material-name;
+                                            color: DesignTokens.text-primary;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                        }
                                     }
 
-                                    Text {
-                                        text: root.active-material-name;
-                                        color: DesignTokens.text-secondary;
-                                        font-size: 11px;
-                                        vertical-alignment: center;
+                                    // Material slot selector list
+                                    if root.material-slots.length > 1: VerticalLayout {
+                                        spacing: 4px;
+                                        for slot[index] in root.material-slots: Rectangle {
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: index == root.active-material-slot ? DesignTokens.surface-hover : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: index == root.active-material-slot ? DesignTokens.accent : DesignTokens.border;
+                                            HorizontalLayout {
+                                                padding-left: 8px;
+                                                padding-right: 8px;
+                                                alignment: center;
+                                                spacing: 6px;
+                                                Rectangle {
+                                                    width: 8px;
+                                                    height: 8px;
+                                                    border-radius: 2px;
+                                                    background: index == root.active-material-slot ? DesignTokens.accent : DesignTokens.text-muted;
+                                                }
+                                                Text {
+                                                    text: slot;
+                                                    color: index == root.active-material-slot ? DesignTokens.text-primary : DesignTokens.text-secondary;
+                                                    font-size: 10px;
+                                                    horizontal-stretch: 1;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            TouchArea {
+                                                clicked => { root.active-material-slot = index; }
+                                            }
+                                        }
+                                    }
+
+                                    // Actions: Assign to Faces, + New, Duplicate
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 2;
+                                            border-radius: 5px;
+                                            background: DesignTokens.accent;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 4px;
+                                                IconDisplay {
+                                                    icon: IconSet.Check;
+                                                    size: 12px;
+                                                    stroke: DesignTokens.canvas;
+                                                }
+                                                Text {
+                                                    text: "Assign";
+                                                    color: DesignTokens.canvas;
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            TouchArea {
+                                                clicked => { root.assign-material-slot(root.active-material-slot); }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 5px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 4px;
+                                                IconDisplay {
+                                                    icon: IconSet.Plus;
+                                                    size: 12px;
+                                                    stroke: DesignTokens.text-primary;
+                                                }
+                                                Text {
+                                                    text: "New";
+                                                    color: DesignTokens.text-primary;
+                                                    font-size: 10px;
+                                                    font-weight: 600;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            TouchArea {
+                                                clicked => { root.create-material(); }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 5px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 4px;
+                                                IconDisplay {
+                                                    icon: IconSet.Copy;
+                                                    size: 12px;
+                                                    stroke: DesignTokens.text-primary;
+                                                }
+                                                Text {
+                                                    text: "Duplicate";
+                                                    color: DesignTokens.text-primary;
+                                                    font-size: 10px;
+                                                    font-weight: 600;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            TouchArea {
+                                                clicked => { root.duplicate-material(root.active-material-slot); }
+                                            }
+                                        }
                                     }
                                 }
                             }
