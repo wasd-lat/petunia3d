@@ -27,7 +27,7 @@ use overlay::{OverlayEntry, OverlayId, OverlayKind, OverlayStack};
 use petunia_config::keybinds::Mods2;
 use petunia_core::PivotPoint;
 use petunia_core::{AppState, Camera, SelectionDomain, Workspace};
-use petunia_project::Project;
+use petunia_project::{AlphaMode, Project, ShaderProfile};
 use slint::ComponentHandle;
 
 slint::include_modules!();
@@ -270,6 +270,15 @@ pub enum UiIntent {
     AssignMaterialSlot(usize),
     CreateMaterial,
     DuplicateMaterial(usize),
+    Paint2dStroke {
+        norm_x: f32,
+        norm_y: f32,
+        phase: i32,
+    },
+    TogglePaintPixelGrid,
+    SetPaintCanvasZoom(i32),
+    ProjectFromReference,
+    BakeReference,
 }
 
 /// Representação DTO de um item da árvore de cena do Outliner.
@@ -426,10 +435,76 @@ pub struct ShellViewModel {
     pub label_inspector: String,
     pub label_expand_inspector: String,
     pub label_collapse_inspector: String,
+    pub label_resize_panel_width: String,
+    pub label_object_name: String,
+    pub label_object_visibility: String,
+    pub label_object_lock: String,
+    pub label_object_no_selection: String,
+    pub label_stats_faces: String,
+    pub label_stats_verts: String,
+    pub label_stats_tris: String,
+    pub label_stats_selection: String,
+    pub label_tool_options: String,
+    pub label_tool_options_expand: String,
+    pub label_tool_options_collapse: String,
+    pub label_quick_actions: String,
+    pub label_quick_action_customize: String,
+    pub label_quick_action_add: String,
+    pub label_quick_action_remove: String,
+    pub label_quick_action_reset: String,
+    pub label_quick_action_done: String,
+    pub label_action_subdivide: String,
+    pub label_action_fuse: String,
+    pub label_action_cut: String,
+    pub label_action_intersect: String,
+    pub label_action_join: String,
+    pub label_action_merge: String,
+    pub label_action_slice: String,
+    pub label_action_loop_cut: String,
+    pub label_material_base_color: String,
+    pub label_material_profile: String,
+    pub label_material_roughness: String,
+    pub label_material_metallic: String,
+    pub label_material_normal_scale: String,
+    pub label_material_advanced: String,
+    pub label_material_assign: String,
+    pub label_material_new: String,
+    pub label_material_duplicate: String,
+    pub label_material_remove: String,
+    pub label_material_no_material: String,
+    pub label_material_no_selection: String,
+    pub label_material_emission_strength: String,
+    pub label_material_alpha_cutoff: String,
+    pub label_material_texture_albedo: String,
+    pub label_material_no_texture: String,
+    pub label_material_create_texture: String,
+    pub label_material_clear_texture: String,
+    pub label_material_profile_pbr: String,
+    pub label_material_profile_unlit: String,
+    pub label_material_profile_toon: String,
+    pub label_material_profile_glass: String,
+    pub label_material_profile_emissive: String,
+    pub label_material_alpha_opaque: String,
+    pub label_material_alpha_mask: String,
+    pub label_material_alpha_blend: String,
+    pub label_modifier_mirror: String,
+    pub label_modifier_symmetry: String,
+    pub label_modifiers_empty: String,
+    pub label_modifier_apply: String,
+    pub label_modifier_axis: String,
+    pub label_modifier_add_mirror: String,
+    pub label_modifier_add_symmetry: String,
+    pub label_modifier_remove: String,
+    pub label_modifier_move_up: String,
+    pub label_modifier_move_down: String,
+    pub label_modifier_direction: String,
+    pub label_modifier_positive_to_negative: String,
+    pub label_modifier_negative_to_positive: String,
     pub label_tab_parts: String,
     pub label_tab_transform: String,
     pub label_tab_material: String,
     pub label_tab_object: String,
+    pub label_tab_modifiers: String,
     pub label_numeric_field_hint: String,
     pub label_model_select: String,
     pub label_model_position: String,
@@ -503,6 +578,8 @@ pub struct ShellViewModel {
     pub paint_effect_params: Vec<PaintEffectParam>,
     pub paint_canvas_size: String,
     pub paint_canvas_revision: i32,
+    pub paint_pixel_grid: bool,
+    pub paint_canvas_zoom: i32,
     pub paint_fill_scope: String,
     pub paint_projection: String,
     pub paint_lock: String,
@@ -527,12 +604,52 @@ pub struct ShellViewModel {
     pub keyboard_tool_modal_active: bool,
     pub invert_vertical_drag: bool,
     pub tool_modal_active: bool,
+    pub tool_modal_id: String,
     pub tool_modal_title: String,
     pub tool_modal_label: String,
     pub tool_modal_value: f32,
     pub tool_modal_step: f32,
     pub tool_modal_min: f32,
     pub tool_modal_max: f32,
+    pub tool_options_active: bool,
+    pub tool_options_title: String,
+    pub tool_options_hint: String,
+    pub tool_options_accessible_label: String,
+    pub object_has_selection: bool,
+    pub object_id: String,
+    pub object_name: String,
+    pub object_visible: bool,
+    pub object_locked: bool,
+    pub object_verts: i32,
+    pub object_faces: i32,
+    pub object_tris: i32,
+    pub object_selection: String,
+    pub object_material: String,
+    pub object_modifier_count: i32,
+    pub material_has_selection: bool,
+    pub material_id: String,
+    pub material_name: String,
+    pub material_profile: String,
+    pub material_profile_label: String,
+    pub material_profile_ids: Vec<String>,
+    pub material_profile_labels: Vec<String>,
+    pub material_base_color: [f32; 3],
+    pub material_palette: Vec<[f32; 3]>,
+    pub material_roughness: f32,
+    pub material_metallic: f32,
+    pub material_normal_scale: f32,
+    pub material_emission: [f32; 3],
+    pub material_emission_strength: f32,
+    pub material_alpha_mode: String,
+    pub material_alpha_label: String,
+    pub material_alpha_ids: Vec<String>,
+    pub material_alpha_labels: Vec<String>,
+    pub material_alpha_cutoff: f32,
+    pub material_has_albedo: bool,
+    pub material_albedo_label: String,
+    pub quick_actions: Vec<QuickActionModel>,
+    pub quick_action_candidates: Vec<QuickActionModel>,
+    pub modifier_rows: Vec<ModifierRowModel>,
     pub material_slots: Vec<String>,
     pub active_material_slot: i32,
 }
@@ -724,10 +841,76 @@ impl ShellViewModel {
             label_inspector: String::new(),
             label_expand_inspector: String::new(),
             label_collapse_inspector: String::new(),
+            label_resize_panel_width: String::new(),
+            label_object_name: String::new(),
+            label_object_visibility: String::new(),
+            label_object_lock: String::new(),
+            label_object_no_selection: String::new(),
+            label_stats_faces: String::new(),
+            label_stats_verts: String::new(),
+            label_stats_tris: String::new(),
+            label_stats_selection: String::new(),
+            label_tool_options: String::new(),
+            label_tool_options_expand: String::new(),
+            label_tool_options_collapse: String::new(),
+            label_quick_actions: String::new(),
+            label_quick_action_customize: String::new(),
+            label_quick_action_add: String::new(),
+            label_quick_action_remove: String::new(),
+            label_quick_action_reset: String::new(),
+            label_quick_action_done: String::new(),
+            label_action_subdivide: String::new(),
+            label_action_fuse: String::new(),
+            label_action_cut: String::new(),
+            label_action_intersect: String::new(),
+            label_action_join: String::new(),
+            label_action_merge: String::new(),
+            label_action_slice: String::new(),
+            label_action_loop_cut: String::new(),
+            label_material_base_color: String::new(),
+            label_material_profile: String::new(),
+            label_material_roughness: String::new(),
+            label_material_metallic: String::new(),
+            label_material_normal_scale: String::new(),
+            label_material_advanced: String::new(),
+            label_material_assign: String::new(),
+            label_material_new: String::new(),
+            label_material_duplicate: String::new(),
+            label_material_remove: String::new(),
+            label_material_no_material: String::new(),
+            label_material_no_selection: String::new(),
+            label_material_emission_strength: String::new(),
+            label_material_alpha_cutoff: String::new(),
+            label_material_texture_albedo: String::new(),
+            label_material_no_texture: String::new(),
+            label_material_create_texture: String::new(),
+            label_material_clear_texture: String::new(),
+            label_material_profile_pbr: String::new(),
+            label_material_profile_unlit: String::new(),
+            label_material_profile_toon: String::new(),
+            label_material_profile_glass: String::new(),
+            label_material_profile_emissive: String::new(),
+            label_material_alpha_opaque: String::new(),
+            label_material_alpha_mask: String::new(),
+            label_material_alpha_blend: String::new(),
+            label_modifier_mirror: String::new(),
+            label_modifier_symmetry: String::new(),
+            label_modifiers_empty: String::new(),
+            label_modifier_apply: String::new(),
+            label_modifier_axis: String::new(),
+            label_modifier_add_mirror: String::new(),
+            label_modifier_add_symmetry: String::new(),
+            label_modifier_remove: String::new(),
+            label_modifier_move_up: String::new(),
+            label_modifier_move_down: String::new(),
+            label_modifier_direction: String::new(),
+            label_modifier_positive_to_negative: String::new(),
+            label_modifier_negative_to_positive: String::new(),
             label_tab_parts: String::new(),
             label_tab_transform: String::new(),
             label_tab_material: String::new(),
             label_tab_object: String::new(),
+            label_tab_modifiers: String::new(),
             label_numeric_field_hint: String::new(),
             label_model_select: String::new(),
             label_model_position: String::new(),
@@ -801,6 +984,8 @@ impl ShellViewModel {
             paint_effect_params: Vec::new(),
             paint_canvas_size: String::new(),
             paint_canvas_revision: 0,
+            paint_pixel_grid: true,
+            paint_canvas_zoom: 1,
             paint_fill_scope: "ConnectedPixels".to_string(),
             paint_projection: "Surface".to_string(),
             paint_lock: "None".to_string(),
@@ -830,12 +1015,52 @@ impl ShellViewModel {
             keyboard_tool_modal_active: false,
             invert_vertical_drag: state.ui.invert_vertical_drag,
             tool_modal_active: false,
+            tool_modal_id: String::new(),
             tool_modal_title: String::new(),
             tool_modal_label: String::new(),
             tool_modal_value: 0.0,
             tool_modal_step: 0.1,
             tool_modal_min: 0.0,
             tool_modal_max: 0.0,
+            tool_options_active: false,
+            tool_options_title: String::new(),
+            tool_options_hint: String::new(),
+            tool_options_accessible_label: String::new(),
+            object_has_selection: false,
+            object_id: String::new(),
+            object_name: String::new(),
+            object_visible: true,
+            object_locked: false,
+            object_verts: 0,
+            object_faces: 0,
+            object_tris: 0,
+            object_selection: String::new(),
+            object_material: String::new(),
+            object_modifier_count: 0,
+            material_has_selection: false,
+            material_id: String::new(),
+            material_name: String::new(),
+            material_profile: String::new(),
+            material_profile_label: String::new(),
+            material_profile_ids: Vec::new(),
+            material_profile_labels: Vec::new(),
+            material_base_color: [0.75, 0.75, 0.78],
+            material_palette: Vec::new(),
+            material_roughness: 0.5,
+            material_metallic: 0.0,
+            material_normal_scale: 1.0,
+            material_emission: [0.0, 0.0, 0.0],
+            material_emission_strength: 0.0,
+            material_alpha_mode: String::new(),
+            material_alpha_label: String::new(),
+            material_alpha_ids: Vec::new(),
+            material_alpha_labels: Vec::new(),
+            material_alpha_cutoff: 0.5,
+            material_has_albedo: false,
+            material_albedo_label: String::new(),
+            quick_actions: Vec::new(),
+            quick_action_candidates: Vec::new(),
+            modifier_rows: Vec::new(),
         }
     }
 
@@ -991,6 +1216,9 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub autosave: petunia_core::AutosaveService,
     /// Snapshot de recuperação detectado no arranque, aguardando decisão.
     pub pending_recovery: Option<petunia_core::RecoveryInfo>,
+    pub paint_pixel_grid: bool,
+    pub paint_canvas_zoom: i32,
+    pub paint_2d_last: Option<(u32, u32)>,
 }
 
 /// Menu de contexto do Outliner aberto sobre uma linha do painel Parts,
@@ -1272,6 +1500,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             gizmo_drag: None,
             autosave: petunia_core::AutosaveService::default(),
             pending_recovery: None,
+            paint_pixel_grid: true,
+            paint_canvas_zoom: 1,
+            paint_2d_last: None,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -1557,11 +1788,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         self.state
                             .set_status("Shape: press on the surface to anchor, release to commit");
                     }
-                    "brush" | "eraser" | "picker" => {
+                    "brush" | "eraser" | "picker" | "airbrush" | "pixel" => {
                         self.state.session.tools.paint_brush_kind =
                             petunia_core::kind_from_brush_type(match tool.as_str() {
                                 "eraser" => petunia_core::BrushType::Eraser,
                                 "picker" => petunia_core::BrushType::Eyedropper,
+                                "airbrush" => petunia_core::BrushType::Airbrush,
+                                "pixel" => petunia_core::BrushType::Pixel,
                                 _ => petunia_core::BrushType::Soft,
                             });
                     }
@@ -1665,6 +1898,25 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             UiIntent::DuplicateMaterial(slot) => {
                 self.duplicate_material(slot);
+            }
+            UiIntent::Paint2dStroke {
+                norm_x,
+                norm_y,
+                phase,
+            } => {
+                self.paint_2d_stroke(norm_x, norm_y, phase);
+            }
+            UiIntent::TogglePaintPixelGrid => {
+                self.paint_pixel_grid = !self.paint_pixel_grid;
+            }
+            UiIntent::SetPaintCanvasZoom(zoom) => {
+                self.paint_canvas_zoom = zoom.clamp(1, 16);
+            }
+            UiIntent::ProjectFromReference => {
+                self.project_from_reference();
+            }
+            UiIntent::BakeReference => {
+                self.bake_reference();
             }
         }
         self.sync_viewport_context();
@@ -1811,11 +2063,39 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             .as_ref()
             .and_then(|stack| stack.active())
             .and_then(|layer| layer.canvas())?;
-        let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(canvas.w, canvas.h);
+        let zoom = self.paint_canvas_zoom.clamp(1, 16) as u32;
+        let out_w = canvas.w * zoom;
+        let out_h = canvas.h * zoom;
+        let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(out_w, out_h);
         let pixels = buffer.make_mut_bytes();
         let source = &canvas.pixels;
-        let length = pixels.len().min(source.len());
-        pixels[..length].copy_from_slice(&source[..length]);
+
+        if zoom == 1 {
+            let length = pixels.len().min(source.len());
+            pixels[..length].copy_from_slice(&source[..length]);
+        } else {
+            for y in 0..out_h {
+                let src_y = (y / zoom).min(canvas.h - 1);
+                let is_grid_y = self.paint_pixel_grid && zoom >= 4 && (y % zoom == 0);
+                for x in 0..out_w {
+                    let src_x = (x / zoom).min(canvas.w - 1);
+                    let is_grid_x = self.paint_pixel_grid && zoom >= 4 && (x % zoom == 0);
+                    let dst_idx = ((y * out_w + x) * 4) as usize;
+                    let src_idx = ((src_y * canvas.w + src_x) * 4) as usize;
+                    if src_idx + 3 < source.len() && dst_idx + 3 < pixels.len() {
+                        if is_grid_x || is_grid_y {
+                            pixels[dst_idx] = (source[src_idx] as f32 * 0.75).round() as u8;
+                            pixels[dst_idx + 1] = (source[src_idx + 1] as f32 * 0.75).round() as u8;
+                            pixels[dst_idx + 2] = (source[src_idx + 2] as f32 * 0.75).round() as u8;
+                            pixels[dst_idx + 3] = source[src_idx + 3];
+                        } else {
+                            pixels[dst_idx..dst_idx + 4]
+                                .copy_from_slice(&source[src_idx..src_idx + 4]);
+                        }
+                    }
+                }
+            }
+        }
         Some(slint::Image::from_rgba8(buffer))
     }
 
@@ -2215,34 +2495,48 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         commands
     }
 
-    /// Atribui o slot de material especificado a todas as faces selecionadas da malha ativa.
+    /// Atribui o material selecionado ao objeto e às faces selecionadas quando existirem.
     pub fn assign_material_slot(&mut self, slot: usize) -> bool {
-        let Some(mesh) = self.state.project.active_mesh_mut() else {
-            return false;
-        };
-        let selected_faces: Vec<usize> = mesh
-            .faces
-            .iter()
-            .enumerate()
-            .filter_map(|(i, f)| if f.selected { Some(i) } else { None })
-            .collect();
-        if selected_faces.is_empty() {
-            self.state
-                .set_status("Select faces first to assign material slot");
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
             return false;
         }
-        self.state.checkpoint("assign material slot");
-        let Some(mesh) = self.state.project.active_mesh_mut() else {
+        let Some(material_id) = self.state.project.project.materials.get(slot).map(|m| m.id) else {
             return false;
         };
-        for i in &selected_faces {
-            mesh.faces[*i].material_slot = Some(slot);
+        let selected_faces: Vec<usize> = self
+            .state
+            .project
+            .active_mesh()
+            .map(|mesh| {
+                mesh.faces
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, face)| face.selected.then_some(index))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.state.checkpoint("assign material");
+        if let Some(asset) = self.state.project.assets.get_mut(asset_index) {
+            asset.material_id = Some(material_id);
         }
-        let count = selected_faces.len();
-        self.state
-            .set_status(format!("Assigned material slot {slot} to {count} face(s)"));
+        if !selected_faces.is_empty()
+            && let Some(mesh) = self.state.project.active_mesh_mut()
+        {
+            for index in selected_faces {
+                mesh.faces[index].material_slot = Some(slot);
+            }
+        }
+        let message = if selected_faces.is_empty() {
+            format!("Assigned material slot {slot} to object")
+        } else {
+            format!(
+                "Assigned material slot {slot} to object and {} face(s)",
+                selected_faces.len()
+            )
+        };
+        self.state.set_status(message);
         self.state.emit_mesh_changed();
-        self.state.mark_dirty();
         true
     }
 
@@ -2250,6 +2544,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     pub fn create_material(&mut self) -> bool {
         let count = self.state.project.project.materials.len();
         let name = format!("Material {}", count + 1);
+        self.state.checkpoint("create material");
         self.state
             .project
             .project
@@ -2270,12 +2565,407 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let mut dup = mat;
         dup.id = uuid::Uuid::new_v4();
         dup.name = format!("{} Copy", dup.name);
+        self.state.checkpoint("duplicate material");
         self.state.project.project.materials.push(dup);
         let new_idx = self.state.project.project.materials.len() - 1;
         self.active_material_slot = new_idx as i32;
         self.state
             .set_status(format!("Duplicated material to slot {new_idx}"));
         self.state.mark_dirty();
+        true
+    }
+
+    pub fn select_material_slot(&mut self, slot: i32) -> bool {
+        let Ok(slot) = usize::try_from(slot) else {
+            return false;
+        };
+        if slot >= self.state.project.project.materials.len() {
+            return false;
+        }
+        self.active_material_slot = slot as i32;
+        true
+    }
+
+    pub fn remove_material(&mut self, slot: i32) -> bool {
+        let Ok(slot) = usize::try_from(slot) else {
+            return false;
+        };
+        if self.state.project.project.materials.len() <= 1
+            || !self.state.project.project.materials.get(slot).is_some()
+        {
+            return false;
+        }
+        let material_id = self.state.project.project.materials[slot].id;
+        self.state.checkpoint("remove material");
+        self.state.project.project.remove_material(material_id);
+        self.state.project.project.bump_materials();
+        self.active_material_slot = (slot as i32 - 1).max(0);
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn set_active_material_base_color(&mut self, red: f32, green: f32, blue: f32) -> bool {
+        if [red, green, blue].iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let slot = self.active_material_slot.max(0) as usize;
+        if !self.state.project.project.materials.get(slot).is_some() {
+            return false;
+        }
+        self.state.checkpoint("change material color");
+        let Some(material) = self.state.project.project.materials.get_mut(slot) else {
+            return false;
+        };
+        material.base_color[0] = red.clamp(0.0, 1.0);
+        material.base_color[1] = green.clamp(0.0, 1.0);
+        material.base_color[2] = blue.clamp(0.0, 1.0);
+        material.base_color[3] = 1.0;
+        self.state.project.project.bump_materials();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn set_active_material_scalar(&mut self, field: &str, value: f32) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        let slot = self.active_material_slot.max(0) as usize;
+        if !matches!(
+            field,
+            "roughness" | "metallic" | "normal-scale" | "emission-strength" | "alpha-cutoff"
+        ) || !self.state.project.project.materials.get(slot).is_some()
+        {
+            return false;
+        }
+        self.state.checkpoint("change material");
+        let Some(material) = self.state.project.project.materials.get_mut(slot) else {
+            return false;
+        };
+        match field {
+            "roughness" => material.roughness = value.clamp(0.0, 1.0),
+            "metallic" => material.metallic = value.clamp(0.0, 1.0),
+            "normal-scale" => material.normal_scale = value.clamp(0.0, 10.0),
+            "emission-strength" => material.emission_strength = value.clamp(0.0, 10.0),
+            "alpha-cutoff" => material.alpha_cutoff = value.clamp(0.0, 1.0),
+            _ => return false,
+        }
+        material.validate();
+        self.state.project.project.bump_materials();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn set_active_material_profile(&mut self, profile: i32) -> bool {
+        let profile = match profile {
+            0 => ShaderProfile::Pbr,
+            1 => ShaderProfile::Unlit,
+            2 => ShaderProfile::Toon,
+            3 => ShaderProfile::Glass,
+            4 => ShaderProfile::Emissive,
+            _ => return false,
+        };
+        let slot = self.active_material_slot.max(0) as usize;
+        if !self.state.project.project.materials.get(slot).is_some() {
+            return false;
+        }
+        self.state.checkpoint("change material profile");
+        let Some(material) = self.state.project.project.materials.get_mut(slot) else {
+            return false;
+        };
+        material.profile = profile;
+        self.state.project.project.bump_materials();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn set_active_material_alpha_mode(&mut self, mode: i32) -> bool {
+        let mode = match mode {
+            0 => AlphaMode::Opaque,
+            1 => AlphaMode::Mask,
+            2 => AlphaMode::Blend,
+            _ => return false,
+        };
+        let slot = self.active_material_slot.max(0) as usize;
+        if !self.state.project.project.materials.get(slot).is_some() {
+            return false;
+        }
+        self.state.checkpoint("change material alpha");
+        let Some(material) = self.state.project.project.materials.get_mut(slot) else {
+            return false;
+        };
+        material.alpha_mode = mode;
+        self.state.project.project.bump_materials();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn create_albedo_texture(&mut self) -> bool {
+        let slot = self.active_material_slot.max(0) as usize;
+        let Some(material) = self.state.project.project.materials.get(slot) else {
+            return false;
+        };
+        let color = material.base_color;
+        self.state.checkpoint("create albedo texture");
+        let Some(material) = self.state.project.project.materials.get_mut(slot) else {
+            return false;
+        };
+        material.albedo_texture = Some(petunia_project::Canvas::new(
+            256,
+            256,
+            [
+                (color[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (color[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (color[2].clamp(0.0, 1.0) * 255.0) as u8,
+                255,
+            ],
+        ));
+        self.state.project.project.bump_materials();
+        self.state.project.project.bump_textures();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn clear_albedo_texture(&mut self) -> bool {
+        let slot = self.active_material_slot.max(0) as usize;
+        if !self
+            .state
+            .project
+            .project
+            .materials
+            .get(slot)
+            .is_some_and(|material| material.albedo_texture.is_some())
+        {
+            return false;
+        }
+        self.state.checkpoint("clear albedo texture");
+        let Some(material) = self.state.project.project.materials.get_mut(slot) else {
+            return false;
+        };
+        material.albedo_texture = None;
+        self.state.project.project.bump_materials();
+        self.state.project.project.bump_textures();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn toggle_quick_action(&mut self, id: &str) -> bool {
+        let pinned = self
+            .state
+            .ui
+            .model_quick_action_ids()
+            .iter()
+            .any(|item| item == id);
+        self.state.ui.set_model_quick_action_pinned(id, !pinned)
+    }
+
+    pub fn reset_quick_actions(&mut self) -> bool {
+        self.state.ui.reset_model_quick_actions()
+    }
+
+    pub fn execute_quick_action(&mut self, id: &str) -> bool {
+        if !self
+            .state
+            .ui
+            .model_quick_action_ids()
+            .iter()
+            .any(|item| item == id)
+        {
+            return false;
+        }
+        match id {
+            "model.loop_cut" => {
+                self.apply(UiIntent::SetActiveTool("loop_cut".into()));
+                true
+            }
+            other => {
+                if let Err(error) = self.execute_core_command(other) {
+                    self.state.set_status(error.to_string());
+                    false
+                } else {
+                    true
+                }
+            }
+        }
+    }
+
+    pub fn add_modifier(&mut self, kind: &str) -> bool {
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
+            return false;
+        }
+        if self.state.project.assets.get(asset_index).is_none() {
+            return false;
+        }
+        let modifier = match kind {
+            "mirror" => petunia_project::ModifierInstance::mirror(0, 0.001),
+            "symmetry" => petunia_project::ModifierInstance::symmetry(0, true, 0.001),
+            _ => return false,
+        };
+        self.state.checkpoint("add modifier");
+        if let Some(asset) = self.state.project.assets.get_mut(asset_index) {
+            asset.modifiers.push(modifier);
+        }
+        self.state.emit_mesh_changed();
+        true
+    }
+
+    pub fn set_modifier_enabled(&mut self, id: &str, enabled: bool) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
+            return false;
+        }
+        let Some(asset) = self.state.project.assets.get_mut(asset_index) else {
+            return false;
+        };
+        let Some(modifier) = asset.modifiers.iter_mut().find(|item| item.id == id) else {
+            return false;
+        };
+        if modifier.enabled == enabled {
+            return false;
+        }
+        self.state.checkpoint("toggle modifier");
+        if let Some(modifier) = self.state.project.assets[asset_index]
+            .modifiers
+            .iter_mut()
+            .find(|item| item.id == id)
+        {
+            modifier.enabled = enabled;
+        }
+        self.state.emit_mesh_changed();
+        true
+    }
+
+    pub fn remove_modifier(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
+            return false;
+        }
+        if !self.state.project.assets[asset_index]
+            .modifiers
+            .iter()
+            .any(|item| item.id == id)
+        {
+            return false;
+        }
+        self.state.checkpoint("remove modifier");
+        self.state.project.assets[asset_index]
+            .modifiers
+            .retain(|item| item.id != id);
+        self.state.emit_mesh_changed();
+        true
+    }
+
+    pub fn move_modifier(&mut self, id: &str, direction: i32) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
+            return false;
+        }
+        let Some(current) = self.state.project.assets[asset_index]
+            .modifiers
+            .iter()
+            .position(|item| item.id == id)
+        else {
+            return false;
+        };
+        let target = if direction < 0 {
+            if current == 0 {
+                return false;
+            }
+            current - 1
+        } else {
+            current + 1
+        };
+        if target >= self.state.project.assets[asset_index].modifiers.len() {
+            return false;
+        }
+        self.state.checkpoint("reorder modifier");
+        self.state.project.assets[asset_index]
+            .modifiers
+            .swap(current, target);
+        self.state.emit_mesh_changed();
+        true
+    }
+
+    pub fn set_modifier_axis(&mut self, id: &str, axis: i32) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
+            return false;
+        }
+        let axis_value = (axis.clamp(0, 2)) as usize;
+        self.state.checkpoint("change modifier axis");
+        let Some(asset) = self.state.project.assets.get_mut(asset_index) else {
+            return false;
+        };
+        let Some(modifier) = asset.modifiers.iter_mut().find(|item| item.id == id) else {
+            return false;
+        };
+        match &mut modifier.kind {
+            petunia_project::ModifierKind::Mirror { axis, .. } => *axis = axis_value,
+            petunia_project::ModifierKind::Symmetry { axis, .. } => *axis = axis_value,
+        }
+        self.state.emit_mesh_changed();
+        true
+    }
+
+    pub fn set_modifier_direction(&mut self, id: &str, direction_value: bool) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
+            return false;
+        }
+        self.state.checkpoint("change modifier direction");
+        let Some(asset) = self.state.project.assets.get_mut(asset_index) else {
+            return false;
+        };
+        let Some(modifier) = asset.modifiers.iter_mut().find(|item| item.id == id) else {
+            return false;
+        };
+        match &mut modifier.kind {
+            petunia_project::ModifierKind::Symmetry {
+                positive_to_negative,
+                ..
+            } => *positive_to_negative = direction_value,
+            petunia_project::ModifierKind::Mirror { .. } => return false,
+        }
+        self.state.emit_mesh_changed();
+        true
+    }
+
+    pub fn apply_modifier(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        let asset_index = self.state.project.active;
+        if asset_index == usize::MAX {
+            return false;
+        }
+        let Some(asset) = self.state.project.assets.get(asset_index) else {
+            return false;
+        };
+        if !asset.modifiers.iter().any(|item| item.id == id) {
+            return false;
+        }
+        let evaluated = asset.evaluated_mesh();
+        self.state.checkpoint("apply modifier");
+        if let Some(asset) = self.state.project.assets.get_mut(asset_index) {
+            asset.mesh = evaluated;
+            asset.modifiers.retain(|item| item.id != id);
+        }
+        self.state.emit_mesh_changed();
         true
     }
 
@@ -3049,11 +3739,178 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if self.cancel_paint_shape() {
             return true;
         }
+        if self.paint_2d_last.take().is_some() {
+            self.state.finish_paint_stroke(true);
+            self.state.mark_dirty();
+            return true;
+        }
         if self.paint_last.take().is_none() {
             return false;
         }
         self.state.finish_paint_stroke(true);
         true
+    }
+
+    /// Tique periódico para acúmulo contínuo de tinta da ferramenta Airbrush (P3D-056).
+    pub fn airbrush_tick(&mut self) -> bool {
+        let is_airbrush = self.state.session.tools.active_tool == "airbrush"
+            || petunia_core::brush_type_from_kind(self.state.session.tools.paint_brush_kind)
+                == petunia_core::BrushType::Airbrush;
+        if !is_airbrush {
+            return false;
+        }
+        let mut changed = false;
+        if let Some([x, y]) = self.paint_last {
+            self.paint_dab_at(x, y);
+            changed = true;
+        }
+        if let Some((px, py)) = self.paint_2d_last {
+            let settings = self.state.brush_settings();
+            petunia_module_paint::PaintModule::canvas_brush_with_settings(
+                &mut self.state,
+                px,
+                py,
+                settings,
+            );
+            changed = true;
+        }
+        if changed {
+            self.state.mark_dirty();
+        }
+        changed
+    }
+
+    /// Processa interação interativa de desenho no canvas 2D de textura (P3D-057).
+    /// phase: 0 = Down, 1 = Move, 2 = Up, outros = Cancel
+    pub fn paint_2d_stroke(&mut self, norm_x: f32, norm_y: f32, phase: i32) -> bool {
+        if !norm_x.is_finite() || !norm_y.is_finite() {
+            return false;
+        }
+        petunia_module_paint::PaintModule::ensure_stack(&mut self.state);
+        let (width, height) = match self
+            .state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|a| a.texture.as_ref())
+        {
+            Some(t) => (t.w, t.h),
+            None => (256, 256),
+        };
+        let px = ((norm_x * width as f32).floor() as i32).clamp(0, width as i32 - 1) as u32;
+        let py = ((norm_y * height as f32).floor() as i32).clamp(0, height as i32 - 1) as u32;
+
+        match phase {
+            0 => {
+                let tool = self.state.session.tools.active_tool.clone();
+                if tool == "picker" {
+                    if let Some(color) = self
+                        .state
+                        .project
+                        .assets
+                        .get(self.state.project.active)
+                        .and_then(|a| a.texture.as_ref())
+                        .and_then(|t| t.get(px, py))
+                    {
+                        let c = [
+                            color[0] as f32 / 255.0,
+                            color[1] as f32 / 255.0,
+                            color[2] as f32 / 255.0,
+                        ];
+                        self.state.paint_color = c;
+                        self.state.session.tools.paint_color = c;
+                        self.state.mark_dirty();
+                        self.state.set_status("Color sampled from canvas");
+                    }
+                    return true;
+                }
+                if tool == "fill" {
+                    let scope = self.state.session.tools.fill_scope;
+                    petunia_module_paint::PaintModule::canvas_fill_scoped(
+                        &mut self.state,
+                        None,
+                        Some((px, py)),
+                        scope,
+                    );
+                    self.state.set_status(format!("Filled canvas ({scope:?})"));
+                    self.state.mark_dirty();
+                    return true;
+                }
+                self.state.begin_paint_stroke();
+                let settings = self.state.brush_settings();
+                petunia_module_paint::PaintModule::canvas_brush_with_settings(
+                    &mut self.state,
+                    px,
+                    py,
+                    settings,
+                );
+                self.paint_2d_last = Some((px, py));
+                self.state.mark_dirty();
+                true
+            }
+            1 => {
+                let Some((last_x, last_y)) = self.paint_2d_last else {
+                    return false;
+                };
+                let dx = px as f32 - last_x as f32;
+                let dy = py as f32 - last_y as f32;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let steps = (dist / 1.0).ceil().max(1.0) as usize;
+                let settings = self.state.brush_settings();
+                for step in 1..=steps {
+                    let t = step as f32 / steps as f32;
+                    let ix =
+                        ((last_x as f32 + dx * t).round() as i32).clamp(0, width as i32 - 1) as u32;
+                    let iy = ((last_y as f32 + dy * t).round() as i32).clamp(0, height as i32 - 1)
+                        as u32;
+                    petunia_module_paint::PaintModule::canvas_brush_with_settings(
+                        &mut self.state,
+                        ix,
+                        iy,
+                        settings,
+                    );
+                }
+                self.paint_2d_last = Some((px, py));
+                self.state.mark_dirty();
+                true
+            }
+            2 => {
+                if self.paint_2d_last.take().is_none() {
+                    return false;
+                }
+                self.state.finish_paint_stroke(false);
+                self.state.mark_dirty();
+                true
+            }
+            _ => {
+                if self.paint_2d_last.take().is_none() {
+                    return false;
+                }
+                self.state.finish_paint_stroke(true);
+                self.state.mark_dirty();
+                true
+            }
+        }
+    }
+
+    pub fn project_from_reference(&mut self) -> bool {
+        match self.execute_core_command("uv.project_reference") {
+            Ok(()) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    pub fn bake_reference(&mut self) -> bool {
+        match self.execute_core_command("paint.bake_reference") {
+            Ok(()) => true,
+            Err(error) => {
+                self.state.set_status(error.to_string());
+                false
+            }
+        }
     }
 
     /// Define o modo de sombreamento da viewport pelo id estável.
@@ -4435,6 +5292,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         match self.state.begin_modal(kind.modal_kind()) {
             Ok(()) => {
                 self.tool_modal = Some(kind);
+                self.state.session.tools.active_tool = match kind {
+                    ToolModalKind::ScaleSelection => "scale",
+                    ToolModalKind::Extrude | ToolModalKind::ExtrudeIndividual => "extrude",
+                    ToolModalKind::Inset => "inset",
+                    ToolModalKind::Bevel => "bevel",
+                    ToolModalKind::PushPull => "push_pull",
+                }
+                .to_string();
                 self.keyboard_tool_modal_active = false;
                 let initial = match kind {
                     ToolModalKind::Inset => 0.2,
@@ -4557,6 +5422,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         let brush = match tool.as_str() {
             "eraser" => petunia_core::BrushType::Eraser,
+            "airbrush" => petunia_core::BrushType::Airbrush,
+            "pixel" => petunia_core::BrushType::Pixel,
             _ => petunia_core::BrushType::Soft,
         };
         let radius = (self.state.session.tools.paint_radius * 8.0).max(1.0) as u32;
@@ -4626,6 +5493,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     "eraser" => petunia_core::BrushType::Eraser,
                     "fill" => petunia_core::BrushType::Fill,
                     "picker" => petunia_core::BrushType::Eyedropper,
+                    "airbrush" => petunia_core::BrushType::Airbrush,
+                    "pixel" => petunia_core::BrushType::Pixel,
                     _ => petunia_core::BrushType::Soft,
                 };
                 if brush == petunia_core::BrushType::Eyedropper {
@@ -5468,9 +6337,95 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_inspector = translated(petunia_config::text_id::UI_INSPECTOR);
         vm.label_expand_inspector = translated(petunia_config::text_id::UI_EXPAND_INSPECTOR);
         vm.label_collapse_inspector = translated(petunia_config::text_id::UI_COLLAPSE_INSPECTOR);
+        vm.label_resize_panel_width = translated(petunia_config::text_id::UI_RESIZE_PANEL_WIDTH);
+        vm.label_object_name = translated(petunia_config::text_id::UI_OBJECT_NAME);
+        vm.label_object_visibility = translated(petunia_config::text_id::UI_OBJECT_VISIBILITY);
+        vm.label_object_lock = translated(petunia_config::text_id::UI_OBJECT_LOCK);
+        vm.label_object_no_selection = translated(petunia_config::text_id::UI_OBJECT_NO_SELECTION);
+        vm.label_stats_faces = translated(petunia_config::text_id::UI_STATS_FACES);
+        vm.label_stats_verts = translated(petunia_config::text_id::UI_STATS_VERTS);
+        vm.label_stats_tris = translated(petunia_config::text_id::UI_STATS_TRIS);
+        vm.label_stats_selection = translated(petunia_config::text_id::UI_STATS_SELECTION);
+        vm.label_tool_options = translated(petunia_config::text_id::UI_TOOL_OPTIONS);
+        vm.label_tool_options_expand = translated(petunia_config::text_id::UI_TOOL_OPTIONS_EXPAND);
+        vm.label_tool_options_collapse =
+            translated(petunia_config::text_id::UI_TOOL_OPTIONS_COLLAPSE);
+        vm.label_quick_actions = translated(petunia_config::text_id::UI_QUICK_ACTIONS);
+        vm.label_quick_action_customize =
+            translated(petunia_config::text_id::UI_QUICK_ACTION_CUSTOMIZE);
+        vm.label_quick_action_add = translated(petunia_config::text_id::UI_QUICK_ACTION_ADD);
+        vm.label_quick_action_remove = translated(petunia_config::text_id::UI_QUICK_ACTION_REMOVE);
+        vm.label_quick_action_reset = translated(petunia_config::text_id::UI_QUICK_ACTION_RESET);
+        vm.label_quick_action_done = translated(petunia_config::text_id::UI_QUICK_ACTION_DONE);
+        vm.label_action_subdivide = translated(petunia_config::text_id::UI_ACTION_SUBDIVIDE);
+        vm.label_action_fuse = translated(petunia_config::text_id::UI_ACTION_FUSE);
+        vm.label_action_cut = translated(petunia_config::text_id::UI_ACTION_CUT);
+        vm.label_action_intersect = translated(petunia_config::text_id::UI_ACTION_INTERSECT);
+        vm.label_action_join = translated(petunia_config::text_id::UI_ACTION_JOIN);
+        vm.label_action_merge = translated(petunia_config::text_id::UI_ACTION_MERGE);
+        vm.label_action_slice = translated(petunia_config::text_id::UI_ACTION_SLICE);
+        vm.label_action_loop_cut = translated(petunia_config::text_id::UI_ACTION_LOOP_CUT);
+        vm.label_material_base_color = translated(petunia_config::text_id::UI_MATERIAL_BASE_COLOR);
+        vm.label_material_profile = translated(petunia_config::text_id::UI_MATERIAL_PROFILE);
+        vm.label_material_roughness = translated(petunia_config::text_id::UI_MATERIAL_ROUGHNESS);
+        vm.label_material_metallic = translated(petunia_config::text_id::UI_MATERIAL_METALLIC);
+        vm.label_material_normal_scale =
+            translated(petunia_config::text_id::UI_MATERIAL_NORMAL_SCALE);
+        vm.label_material_advanced = translated(petunia_config::text_id::UI_MATERIAL_ADVANCED);
+        vm.label_material_assign = translated(petunia_config::text_id::UI_MATERIAL_ASSIGN);
+        vm.label_material_new = translated(petunia_config::text_id::UI_MATERIAL_NEW);
+        vm.label_material_duplicate = translated(petunia_config::text_id::UI_MATERIAL_DUPLICATE);
+        vm.label_material_remove = translated(petunia_config::text_id::UI_MATERIAL_REMOVE);
+        vm.label_material_no_material =
+            translated(petunia_config::text_id::UI_MATERIAL_NO_MATERIAL);
+        vm.label_material_no_selection =
+            translated(petunia_config::text_id::UI_MATERIAL_NO_SELECTION);
+        vm.label_material_emission_strength =
+            translated(petunia_config::text_id::UI_MATERIAL_EMISSION_STRENGTH);
+        vm.label_material_alpha_cutoff =
+            translated(petunia_config::text_id::UI_MATERIAL_ALPHA_CUTOFF);
+        vm.label_material_texture_albedo =
+            translated(petunia_config::text_id::UI_MATERIAL_TEXTURE_ALBEDO);
+        vm.label_material_no_texture = translated(petunia_config::text_id::UI_MATERIAL_NO_TEXTURE);
+        vm.label_material_create_texture =
+            translated(petunia_config::text_id::UI_MATERIAL_CREATE_TEXTURE);
+        vm.label_material_clear_texture =
+            translated(petunia_config::text_id::UI_MATERIAL_CLEAR_TEXTURE);
+        vm.label_material_profile_pbr =
+            translated(petunia_config::text_id::UI_MATERIAL_PROFILE_PBR);
+        vm.label_material_profile_unlit =
+            translated(petunia_config::text_id::UI_MATERIAL_PROFILE_UNLIT);
+        vm.label_material_profile_toon =
+            translated(petunia_config::text_id::UI_MATERIAL_PROFILE_TOON);
+        vm.label_material_profile_glass =
+            translated(petunia_config::text_id::UI_MATERIAL_PROFILE_GLASS);
+        vm.label_material_profile_emissive =
+            translated(petunia_config::text_id::UI_MATERIAL_PROFILE_EMISSIVE);
+        vm.label_material_alpha_opaque =
+            translated(petunia_config::text_id::UI_MATERIAL_ALPHA_OPAQUE);
+        vm.label_material_alpha_mask = translated(petunia_config::text_id::UI_MATERIAL_ALPHA_MASK);
+        vm.label_material_alpha_blend =
+            translated(petunia_config::text_id::UI_MATERIAL_ALPHA_BLEND);
+        vm.label_modifier_mirror = translated(petunia_config::text_id::UI_MODIFIER_MIRROR);
+        vm.label_modifier_symmetry = translated(petunia_config::text_id::UI_MODIFIER_SYMMETRY);
+        vm.label_modifiers_empty = translated(petunia_config::text_id::UI_MODIFIERS_EMPTY);
+        vm.label_modifier_apply = translated(petunia_config::text_id::UI_MODIFIER_APPLY);
+        vm.label_modifier_axis = translated(petunia_config::text_id::UI_MODIFIER_AXIS);
+        vm.label_modifier_add_mirror = translated(petunia_config::text_id::UI_MODIFIER_ADD_MIRROR);
+        vm.label_modifier_add_symmetry =
+            translated(petunia_config::text_id::UI_MODIFIER_ADD_SYMMETRY);
+        vm.label_modifier_remove = translated(petunia_config::text_id::UI_MODIFIER_REMOVE);
+        vm.label_modifier_move_up = translated(petunia_config::text_id::UI_MODIFIER_MOVE_UP);
+        vm.label_modifier_move_down = translated(petunia_config::text_id::UI_MODIFIER_MOVE_DOWN);
+        vm.label_modifier_direction = translated(petunia_config::text_id::UI_MODIFIER_DIRECTION);
+        vm.label_modifier_positive_to_negative =
+            translated(petunia_config::text_id::UI_MODIFIER_POSITIVE_TO_NEGATIVE);
+        vm.label_modifier_negative_to_positive =
+            translated(petunia_config::text_id::UI_MODIFIER_NEGATIVE_TO_POSITIVE);
         vm.label_tab_parts = translated(petunia_config::text_id::UI_TAB_PARTS);
         vm.label_tab_transform = translated(petunia_config::text_id::UI_TAB_TRANSFORM);
         vm.label_tab_material = translated(petunia_config::text_id::UI_TAB_MATERIAL);
+        vm.label_tab_modifiers = translated(petunia_config::text_id::UI_TAB_MODIFIERS);
         vm.material_slots = self
             .state
             .project
@@ -5644,6 +6599,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.paint_fill_scope = format!("{:?}", self.state.session.tools.fill_scope);
         vm.paint_projection = format!("{:?}", self.state.session.tools.brush_projection);
         vm.paint_lock = format!("{:?}", self.state.session.tools.brush_lock);
+        vm.paint_pixel_grid = self.paint_pixel_grid;
+        vm.paint_canvas_zoom = self.paint_canvas_zoom;
         vm.uv_editor = self.build_uv_editor();
         if let Some(stack) = self
             .state
@@ -5729,12 +6686,189 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
+            vm.tool_modal_id = kind.id().to_string();
             vm.tool_modal_title = kind.title().to_string();
             vm.tool_modal_label = kind.label().to_string();
             vm.tool_modal_value = self.tool_modal_value;
             vm.tool_modal_step = kind.step();
             vm.tool_modal_min = minimum;
             vm.tool_modal_max = maximum;
+        }
+        vm.tool_options_active = self.tool_modal.is_some()
+            || self.loop_cut.is_some()
+            || self.state.session.tools.active_tool == "loop_cut"
+            || self.state.session.tools.active_tool == "draw_profile"
+            || (self.state.workspace == Workspace::Model
+                && !matches!(
+                    self.state.session.tools.active_tool.as_str(),
+                    "select" | "box_select" | "lasso_select"
+                ));
+        vm.tool_options_title = if let Some(kind) = self.tool_modal {
+            kind.title().to_string()
+        } else if self.loop_cut.is_some() || self.state.session.tools.active_tool == "loop_cut" {
+            self.state.t_id(petunia_config::text_id::TOOLS_LOOP_CUT)
+        } else if self.state.session.tools.active_tool == "draw_profile" {
+            self.state.t_id(petunia_config::text_id::TOOLS_DRAW_PROFILE)
+        } else {
+            match self.state.session.tools.active_tool.as_str() {
+                "scale" => self.state.t_id(petunia_config::text_id::TOOLS_SCALE),
+                "rotate" => self.state.t_id(petunia_config::text_id::TOOLS_ROTATE),
+                "move" => self.state.t_id(petunia_config::text_id::TOOLS_TRANSFORM),
+                "inset" => self
+                    .state
+                    .t_id(petunia_config::text_id::UI_ACTION_SUBDIVIDE),
+                "bevel" => self.state.t("tools.bevel"),
+                "push_pull" => self.state.t_id(petunia_config::text_id::TOOLS_PUSH_PULL),
+                _ => self
+                    .state
+                    .t_id(petunia_config::text_id::UI_NO_TOOL_PARAMETERS),
+            }
+        };
+        vm.tool_options_hint = if self.tool_modal.is_some() {
+            self.state
+                .t_id(petunia_config::text_id::UI_NUMERIC_FIELD_HINT)
+        } else {
+            self.state
+                .t_id(petunia_config::text_id::UI_NO_TOOL_PARAMETERS)
+        };
+        if let Some(asset) = self.state.project.active() {
+            vm.object_has_selection = true;
+            vm.object_id = asset.id.to_string();
+            vm.object_name = asset.name.clone();
+            vm.object_visible = asset.visible;
+            vm.object_locked = asset.locked;
+            vm.object_verts = asset.mesh.verts.len() as i32;
+            vm.object_faces = asset.mesh.faces.len() as i32;
+            vm.object_tris = asset.mesh.tri_count() as i32;
+            vm.object_selection = vm.selection_summary.clone();
+            vm.object_material = asset
+                .material(&self.state.project.project)
+                .map(|material| material.name.clone())
+                .unwrap_or_else(|| {
+                    self.state
+                        .t_id(petunia_config::text_id::UI_MATERIAL_NO_MATERIAL)
+                });
+            vm.object_modifier_count = asset.modifiers.len() as i32;
+        }
+        let material_slot = vm.active_material_slot.max(0) as usize;
+        if let Some(material) = self.state.project.project.materials.get(material_slot) {
+            vm.material_has_selection = true;
+            vm.material_id = material.id.to_string();
+            vm.material_name = material.name.clone();
+            vm.material_profile = match material.profile {
+                petunia_project::ShaderProfile::Pbr => "pbr",
+                petunia_project::ShaderProfile::Unlit => "unlit",
+                petunia_project::ShaderProfile::Toon => "toon",
+                petunia_project::ShaderProfile::Glass => "glass",
+                petunia_project::ShaderProfile::Emissive => "emissive",
+            }
+            .to_string();
+            vm.material_profile_label = material.profile.label().to_string();
+            vm.material_base_color = [
+                material.base_color[0],
+                material.base_color[1],
+                material.base_color[2],
+            ];
+            vm.material_roughness = material.roughness;
+            vm.material_metallic = material.metallic;
+            vm.material_normal_scale = material.normal_scale;
+            vm.material_emission = material.emission_color;
+            vm.material_emission_strength = material.emission_strength;
+            vm.material_alpha_mode = match material.alpha_mode {
+                petunia_project::AlphaMode::Opaque => "opaque",
+                petunia_project::AlphaMode::Mask => "mask",
+                petunia_project::AlphaMode::Blend => "blend",
+            }
+            .to_string();
+            vm.material_alpha_cutoff = material.alpha_cutoff;
+            vm.material_has_albedo = material.albedo_texture.is_some();
+            vm.material_albedo_label = material
+                .albedo_texture
+                .as_ref()
+                .map(|texture| format!("{} × {}", texture.w, texture.h))
+                .unwrap_or_else(|| {
+                    self.state
+                        .t_id(petunia_config::text_id::UI_MATERIAL_NO_TEXTURE)
+                });
+        }
+        vm.material_palette = self.state.project.palette.clone();
+        let pinned_ids = self.state.ui.model_quick_action_ids();
+        let quick_label = |id: &str| match id {
+            "model.subdivide" => self
+                .state
+                .t_id(petunia_config::text_id::UI_ACTION_SUBDIVIDE),
+            "model.fuse" => self.state.t_id(petunia_config::text_id::UI_ACTION_FUSE),
+            "model.cut" => self.state.t_id(petunia_config::text_id::UI_ACTION_CUT),
+            "model.intersect" => self
+                .state
+                .t_id(petunia_config::text_id::UI_ACTION_INTERSECT),
+            "model.join" => self.state.t_id(petunia_config::text_id::UI_ACTION_JOIN),
+            "model.merge" => self.state.t_id(petunia_config::text_id::UI_ACTION_MERGE),
+            "model.slice" => self.state.t_id(petunia_config::text_id::UI_ACTION_SLICE),
+            "model.loop_cut" => self.state.t_id(petunia_config::text_id::UI_ACTION_LOOP_CUT),
+            _ => id.to_string(),
+        };
+        vm.quick_actions = pinned_ids
+            .iter()
+            .map(|id| QuickActionModel {
+                id: id.clone(),
+                label: quick_label(id),
+                enabled: self.state.commands.can_execute(id, &self.state).is_ok()
+                    || id == "model.slice",
+                active: self.state.session.tools.active_tool == id.as_str(),
+                pinned: true,
+            })
+            .collect();
+        vm.quick_action_candidates = petunia_core::state::UiState::MODEL_QUICK_ACTION_CANDIDATES
+            .iter()
+            .map(|id| QuickActionModel {
+                id: (*id).to_string(),
+                label: quick_label(id),
+                enabled: self.state.commands.can_execute(id, &self.state).is_ok()
+                    || *id == "model.slice",
+                active: self.state.session.tools.active_tool == *id,
+                pinned: pinned_ids.iter().any(|pinned| pinned == id),
+            })
+            .collect();
+        if let Some(asset) = self.state.project.active() {
+            vm.modifier_rows = asset
+                .modifiers
+                .iter()
+                .enumerate()
+                .map(|(index, modifier)| {
+                    let (kind, axis, positive_to_negative) = match modifier.kind {
+                        petunia_project::ModifierKind::Mirror { axis, .. } => {
+                            ("mirror", axis, true)
+                        }
+                        petunia_project::ModifierKind::Symmetry {
+                            axis,
+                            positive_to_negative,
+                            ..
+                        } => ("symmetry", axis, positive_to_negative),
+                    };
+                    let title = if kind == "mirror" {
+                        self.state.t_id(petunia_config::text_id::UI_MODIFIER_MIRROR)
+                    } else {
+                        self.state
+                            .t_id(petunia_config::text_id::UI_MODIFIER_SYMMETRY)
+                    };
+                    ModifierRowModel {
+                        id: modifier.id.to_string(),
+                        subtitle: format!(
+                            "{} {}",
+                            self.state.t_id(petunia_config::text_id::UI_MODIFIER_AXIS),
+                            ["X", "Y", "Z"][axis.min(2)]
+                        ),
+                        title,
+                        enabled: modifier.enabled,
+                        kind: kind.to_string(),
+                        axis: axis as i32,
+                        positive_to_negative,
+                        can_move_up: index > 0,
+                        can_move_down: index + 1 < asset.modifiers.len(),
+                    }
+                })
+                .collect();
         }
         vm
     }
@@ -6556,9 +7690,33 @@ pub fn run() -> Result<(), slint::PlatformError> {
         },
     );
 
+    // Tique de acúmulo contínuo de tinta para Airbrush (P3D-056).
+    let airbrush_bridge = Arc::clone(&bridge);
+    let airbrush_window = window.as_weak();
+    let airbrush_timer = slint::Timer::default();
+    airbrush_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(50),
+        move || {
+            if let Ok(mut bridge) = airbrush_bridge.lock()
+                && bridge.airbrush_tick()
+                && let Some(window) = airbrush_window.upgrade()
+            {
+                sync_window_properties(&window, &bridge.view_model());
+                if let Some(canvas_img) = bridge.render_paint_canvas() {
+                    window.set_paint_canvas_image(canvas_img);
+                }
+                if let Some(frame) = bridge.render_viewport() {
+                    window.set_viewport_image(frame);
+                }
+            }
+        },
+    );
+
     println!("Petunia3D window ready");
     let result = window.run();
 
+    drop(airbrush_timer);
     drop(autosave_timer);
     let path = bridge
         .lock()
@@ -6749,6 +7907,17 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_active_object_title(vm.active_object_title.as_str().into());
     window.set_active_object_details(vm.active_object_details.as_str().into());
     window.set_active_material_name(vm.active_material_name.as_str().into());
+    window.set_object_has_selection(vm.object_has_selection);
+    window.set_object_id(vm.object_id.as_str().into());
+    window.set_object_name(vm.object_name.as_str().into());
+    window.set_object_visible(vm.object_visible);
+    window.set_object_locked(vm.object_locked);
+    window.set_object_verts(vm.object_verts);
+    window.set_object_faces(vm.object_faces);
+    window.set_object_tris(vm.object_tris);
+    window.set_object_selection(vm.object_selection.as_str().into());
+    window.set_object_material(vm.object_material.as_str().into());
+    window.set_object_modifier_count(vm.object_modifier_count);
     window.set_scene_stats(vm.scene_stats.as_str().into());
     window.set_uv_stats(vm.uv_stats.as_str().into());
     window.set_current_theme(vm.current_theme.as_str().into());
@@ -6827,12 +7996,83 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_label_search_assets(vm.label_search_assets.as_str().into());
     window.set_label_search_parts(vm.label_search_parts.as_str().into());
     window.set_label_inspector(vm.label_inspector.as_str().into());
+    window.set_label_resize_panel_width(vm.label_resize_panel_width.as_str().into());
     window.set_label_expand_inspector(vm.label_expand_inspector.as_str().into());
     window.set_label_collapse_inspector(vm.label_collapse_inspector.as_str().into());
     window.set_label_tab_parts(vm.label_tab_parts.as_str().into());
     window.set_label_tab_transform(vm.label_tab_transform.as_str().into());
     window.set_label_tab_material(vm.label_tab_material.as_str().into());
     window.set_label_tab_object(vm.label_tab_object.as_str().into());
+    window.set_label_tab_modifiers(vm.label_tab_modifiers.as_str().into());
+    window.set_label_object_name(vm.label_object_name.as_str().into());
+    window.set_label_object_visibility(vm.label_object_visibility.as_str().into());
+    window.set_label_object_lock(vm.label_object_lock.as_str().into());
+    window.set_label_object_no_selection(vm.label_object_no_selection.as_str().into());
+    window.set_label_stats_faces(vm.label_stats_faces.as_str().into());
+    window.set_label_stats_verts(vm.label_stats_verts.as_str().into());
+    window.set_label_stats_tris(vm.label_stats_tris.as_str().into());
+    window.set_label_stats_selection(vm.label_stats_selection.as_str().into());
+    window.set_label_tool_options(vm.label_tool_options.as_str().into());
+    window.set_label_tool_options_expand(vm.label_tool_options_expand.as_str().into());
+    window.set_label_tool_options_collapse(vm.label_tool_options_collapse.as_str().into());
+    window.set_label_quick_actions(vm.label_quick_actions.as_str().into());
+    window.set_label_quick_action_customize(vm.label_quick_action_customize.as_str().into());
+    window.set_label_quick_action_add(vm.label_quick_action_add.as_str().into());
+    window.set_label_quick_action_remove(vm.label_quick_action_remove.as_str().into());
+    window.set_label_quick_action_reset(vm.label_quick_action_reset.as_str().into());
+    window.set_label_quick_action_done(vm.label_quick_action_done.as_str().into());
+    window.set_label_action_subdivide(vm.label_action_subdivide.as_str().into());
+    window.set_label_action_fuse(vm.label_action_fuse.as_str().into());
+    window.set_label_action_cut(vm.label_action_cut.as_str().into());
+    window.set_label_action_intersect(vm.label_action_intersect.as_str().into());
+    window.set_label_action_join(vm.label_action_join.as_str().into());
+    window.set_label_action_merge(vm.label_action_merge.as_str().into());
+    window.set_label_action_slice(vm.label_action_slice.as_str().into());
+    window.set_label_action_loop_cut(vm.label_action_loop_cut.as_str().into());
+    window.set_label_material_base_color(vm.label_material_base_color.as_str().into());
+    window.set_label_material_profile(vm.label_material_profile.as_str().into());
+    window.set_label_material_roughness(vm.label_material_roughness.as_str().into());
+    window.set_label_material_metallic(vm.label_material_metallic.as_str().into());
+    window.set_label_material_normal_scale(vm.label_material_normal_scale.as_str().into());
+    window.set_label_material_advanced(vm.label_material_advanced.as_str().into());
+    window.set_label_material_assign(vm.label_material_assign.as_str().into());
+    window.set_label_material_new(vm.label_material_new.as_str().into());
+    window.set_label_material_duplicate(vm.label_material_duplicate.as_str().into());
+    window.set_label_material_remove(vm.label_material_remove.as_str().into());
+    window.set_label_material_no_material(vm.label_material_no_material.as_str().into());
+    window.set_label_material_no_selection(vm.label_material_no_selection.as_str().into());
+    window
+        .set_label_material_emission_strength(vm.label_material_emission_strength.as_str().into());
+    window.set_label_material_alpha_cutoff(vm.label_material_alpha_cutoff.as_str().into());
+    window.set_label_material_texture_albedo(vm.label_material_texture_albedo.as_str().into());
+    window.set_label_material_no_texture(vm.label_material_no_texture.as_str().into());
+    window.set_label_material_create_texture(vm.label_material_create_texture.as_str().into());
+    window.set_label_material_clear_texture(vm.label_material_clear_texture.as_str().into());
+    window.set_label_material_profile_pbr(vm.label_material_profile_pbr.as_str().into());
+    window.set_label_material_profile_unlit(vm.label_material_profile_unlit.as_str().into());
+    window.set_label_material_profile_toon(vm.label_material_profile_toon.as_str().into());
+    window.set_label_material_profile_glass(vm.label_material_profile_glass.as_str().into());
+    window.set_label_material_profile_emissive(vm.label_material_profile_emissive.as_str().into());
+    window.set_label_material_alpha_opaque(vm.label_material_alpha_opaque.as_str().into());
+    window.set_label_material_alpha_mask(vm.label_material_alpha_mask.as_str().into());
+    window.set_label_material_alpha_blend(vm.label_material_alpha_blend.as_str().into());
+    window.set_label_modifier_mirror(vm.label_modifier_mirror.as_str().into());
+    window.set_label_modifier_symmetry(vm.label_modifier_symmetry.as_str().into());
+    window.set_label_modifiers_empty(vm.label_modifiers_empty.as_str().into());
+    window.set_label_modifier_apply(vm.label_modifier_apply.as_str().into());
+    window.set_label_modifier_axis(vm.label_modifier_axis.as_str().into());
+    window.set_label_modifier_add_mirror(vm.label_modifier_add_mirror.as_str().into());
+    window.set_label_modifier_add_symmetry(vm.label_modifier_add_symmetry.as_str().into());
+    window.set_label_modifier_remove(vm.label_modifier_remove.as_str().into());
+    window.set_label_modifier_move_up(vm.label_modifier_move_up.as_str().into());
+    window.set_label_modifier_move_down(vm.label_modifier_move_down.as_str().into());
+    window.set_label_modifier_direction(vm.label_modifier_direction.as_str().into());
+    window.set_label_modifier_positive_to_negative(
+        vm.label_modifier_positive_to_negative.as_str().into(),
+    );
+    window.set_label_modifier_negative_to_positive(
+        vm.label_modifier_negative_to_positive.as_str().into(),
+    );
     window.set_label_numeric_field_hint(vm.label_numeric_field_hint.as_str().into());
     window.set_label_model_select(vm.label_model_select.as_str().into());
     window.set_label_model_position(vm.label_model_position.as_str().into());
@@ -6977,6 +8217,9 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_keyboard_tool_modal_active(vm.keyboard_tool_modal_active);
     window.set_invert_vertical_drag(vm.invert_vertical_drag);
     window.set_tool_modal_active(vm.tool_modal_active);
+    window.set_tool_options_active(vm.tool_options_active);
+    window.set_tool_options_title(vm.tool_options_title.as_str().into());
+    window.set_tool_options_hint(vm.tool_options_hint.as_str().into());
     window.set_tool_modal_title(vm.tool_modal_title.as_str().into());
     window.set_tool_modal_label(vm.tool_modal_label.as_str().into());
     window.set_tool_modal_value(vm.tool_modal_value);
@@ -6991,6 +8234,80 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
         .collect();
     window.set_material_slots(material_slots.as_slice().into());
     window.set_active_material_slot(vm.active_material_slot);
+    window.set_material_has_selection(vm.material_has_selection);
+    window.set_material_id(vm.material_id.as_str().into());
+    window.set_material_name(vm.material_name.as_str().into());
+    window.set_material_profile(vm.material_profile.as_str().into());
+    window.set_material_profile_label(vm.material_profile_label.as_str().into());
+    window.set_material_base_color(slint::Color::from_argb_f32(
+        1.0,
+        vm.material_base_color[0],
+        vm.material_base_color[1],
+        vm.material_base_color[2],
+    ));
+    let material_palette: Vec<slint::Color> = vm
+        .material_palette
+        .iter()
+        .map(|color| slint::Color::from_argb_f32(1.0, color[0], color[1], color[2]))
+        .collect();
+    window.set_material_palette(material_palette.as_slice().into());
+    window.set_material_roughness(vm.material_roughness);
+    window.set_material_metallic(vm.material_metallic);
+    window.set_material_normal_scale(vm.material_normal_scale);
+    window.set_material_emission(slint::Color::from_argb_f32(
+        1.0,
+        vm.material_emission[0],
+        vm.material_emission[1],
+        vm.material_emission[2],
+    ));
+    window.set_material_emission_strength(vm.material_emission_strength);
+    window.set_material_alpha_mode(vm.material_alpha_mode.as_str().into());
+    window.set_material_alpha_cutoff(vm.material_alpha_cutoff);
+    window.set_material_has_albedo(vm.material_has_albedo);
+    window.set_material_albedo_label(vm.material_albedo_label.as_str().into());
+
+    let quick_actions: Vec<QuickActionEntry> = vm
+        .quick_actions
+        .iter()
+        .map(|action| QuickActionEntry {
+            id: action.id.as_str().into(),
+            label: action.label.as_str().into(),
+            enabled: action.enabled,
+            pinned: action.pinned,
+        })
+        .collect();
+    window.set_quick_actions(std::rc::Rc::new(slint::VecModel::from(quick_actions)).into());
+    let quick_action_candidates: Vec<QuickActionEntry> = vm
+        .quick_action_candidates
+        .iter()
+        .map(|action| QuickActionEntry {
+            id: action.id.as_str().into(),
+            label: action.label.as_str().into(),
+            enabled: action.enabled,
+            pinned: action.pinned,
+        })
+        .collect();
+    window.set_quick_action_candidates(
+        std::rc::Rc::new(slint::VecModel::from(quick_action_candidates)).into(),
+    );
+    let modifier_rows: Vec<ModifierEntry> = vm
+        .modifier_rows
+        .iter()
+        .map(|modifier| ModifierEntry {
+            id: modifier.id.as_str().into(),
+            title: modifier.title.as_str().into(),
+            subtitle: modifier.subtitle.as_str().into(),
+            enabled: modifier.enabled,
+            kind: modifier.kind.as_str().into(),
+            axis: modifier.axis,
+            positive_to_negative: modifier.positive_to_negative,
+            can_move_up: modifier.can_move_up,
+            can_move_down: modifier.can_move_down,
+        })
+        .collect();
+    window.set_modifier_rows(std::rc::Rc::new(slint::VecModel::from(modifier_rows)).into());
+    window.set_paint_pixel_grid(vm.paint_pixel_grid);
+    window.set_paint_canvas_zoom(vm.paint_canvas_zoom);
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -8377,6 +9694,58 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let paint_stroke_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_2d_stroke(move |norm_x, norm_y, phase| {
+        if let Ok(mut bridge) = paint_stroke_bridge.lock() {
+            bridge.apply(UiIntent::Paint2dStroke {
+                norm_x,
+                norm_y,
+                phase,
+            });
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(canvas_img) = bridge.render_paint_canvas() {
+                    window.set_paint_canvas_image(canvas_img);
+                }
+                if let Some(frame) = bridge.render_viewport() {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let pixel_grid_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_paint_pixel_grid(move || {
+        if let Ok(mut bridge) = pixel_grid_bridge.lock() {
+            bridge.apply(UiIntent::TogglePaintPixelGrid);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(canvas_img) = bridge.render_paint_canvas() {
+                    window.set_paint_canvas_image(canvas_img);
+                }
+            }
+        }
+    });
+
+    let canvas_zoom_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_set_paint_canvas_zoom(move |zoom| {
+        if let Ok(mut bridge) = canvas_zoom_bridge.lock() {
+            bridge.apply(UiIntent::SetPaintCanvasZoom(zoom));
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(canvas_img) = bridge.render_paint_canvas() {
+                    window.set_paint_canvas_image(canvas_img);
+                }
+            }
+        }
+    });
+
     let uv_click_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_uv_editor_clicked(move |u, v, extend| {
@@ -9177,12 +10546,215 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
             }
         }
     });
-}
 
-#[cfg(test)]
+    let material_slot_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_material_slot_selected(move |slot| {
+        if let Ok(mut bridge) = material_slot_bridge.lock() {
+            bridge.select_material_slot(slot);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let material_color_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_material_base_color_changed(move |red, green, blue| {
+        if let Ok(mut bridge) = material_color_bridge.lock() {
+            bridge.set_active_material_base_color(red, green, blue);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let material_scalar_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_material_scalar_committed(move |field, slot, text| {
+        let Ok(mut bridge) = material_scalar_bridge.lock() else {
+            return false;
+        };
+        let Ok(value) = numeric::parse_numeric(text.as_str()) else {
+            return false;
+        };
+        bridge.select_material_slot(slot);
+        let result = bridge.set_active_material_scalar(field.as_str(), value);
+        if let Some(window) = window_weak.upgrade() {
+            sync_window_properties(&window, &bridge.view_model());
+            if let Some(frame) = bridge.render_viewport() {
+                window.set_viewport_image(frame);
+            }
+        }
+        result
+    });
+
+    let material_profile_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_material_profile_changed(move |profile| {
+        if let Ok(mut bridge) = material_profile_bridge.lock() {
+            bridge.set_active_material_profile(profile);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let material_alpha_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_material_alpha_mode_changed(move |mode| {
+        if let Ok(mut bridge) = material_alpha_bridge.lock() {
+            bridge.set_active_material_alpha_mode(mode);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let material_texture_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_material_albedo_create(move || {
+        if let Ok(mut bridge) = material_texture_bridge.lock() {
+            bridge.create_albedo_texture();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let material_texture_clear_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_material_albedo_clear(move || {
+        if let Ok(mut bridge) = material_texture_clear_bridge.lock() {
+            bridge.clear_albedo_texture();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let remove_material_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_remove_material(move |slot| {
+        if let Ok(mut bridge) = remove_material_bridge.lock() {
+            bridge.remove_material(slot);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let quick_execute_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_quick_action_executed(move |id| {
+        if let Ok(mut bridge) = quick_execute_bridge.lock() {
+            bridge.execute_quick_action(id.as_str());
+            let vm = bridge.view_model();
+            let frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let quick_action_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_quick_action_toggled(move |id| {
+        if let Ok(mut bridge) = quick_action_bridge.lock() {
+            bridge.toggle_quick_action(id.as_str());
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let quick_reset_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_quick_actions_reset(move || {
+        if let Ok(mut bridge) = quick_reset_bridge.lock() {
+            bridge.reset_quick_actions();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let modifier_add_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_modifier_add(move |kind| {
+        if let Ok(mut bridge) = modifier_add_bridge.lock() {
+            bridge.add_modifier(kind.as_str());
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let modifier_toggle_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_modifier_toggle(move |id, enabled| {
+        if let Ok(mut bridge) = modifier_toggle_bridge.lock() {
+            bridge.set_modifier_enabled(id.as_str(), enabled);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let modifier_remove_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_modifier_remove(move |id| {
+        if let Ok(mut bridge) = modifier_remove_bridge.lock() {
+            bridge.remove_modifier(id.as_str());
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let modifier_move_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_modifier_move(move |id, direction| {
+        if let Ok(mut bridge) = modifier_move_bridge.lock() {
+            bridge.move_modifier(id.as_str(), direction);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let modifier_apply_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_modifier_apply(move |id| {
+        if let Ok(mut bridge) = modifier_apply_bridge.lock() {
+            bridge.apply_modifier(id.as_str());
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let modifier_axis_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_modifier_axis_changed(move |id, axis| {
+        if let Ok(mut bridge) = modifier_axis_bridge.lock() {
+            bridge.set_modifier_axis(id.as_str(), axis);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+    let modifier_direction_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_modifier_direction_changed(move |id, direction| {
+        if let Ok(mut bridge) = modifier_direction_bridge.lock() {
+            bridge.set_modifier_direction(id.as_str(), direction);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+}
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn visible_edge_points(
         bridge: &SlintUiBridge<PlaceholderViewport>,
     ) -> Vec<((u32, u32), [f32; 2])> {
@@ -13266,5 +14838,252 @@ mod tests {
         assert_eq!(vm.material_slots.len(), 3);
         assert_eq!(vm.active_material_slot, 2);
         assert!(vm.material_slots[2].contains("Copy"));
+    }
+
+    #[test]
+    fn paint_2d_stroke_flow_and_undo() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        // Set bright red paint color
+        bridge.apply(UiIntent::SetPaintColor([1.0, 0.0, 0.0]));
+
+        // Check active texture initial pixel at (128, 128)
+        let initial_color = bridge
+            .state
+            .project
+            .active()
+            .and_then(|a| a.texture.as_ref())
+            .and_then(|t| t.get(128, 128))
+            .unwrap_or([0, 0, 0, 0]);
+
+        // Begin 2D stroke at center (0.5, 0.5)
+        bridge.apply(UiIntent::Paint2dStroke {
+            norm_x: 0.5,
+            norm_y: 0.5,
+            phase: 0,
+        });
+        assert!(bridge.paint_2d_last.is_some());
+
+        // Move stroke
+        bridge.apply(UiIntent::Paint2dStroke {
+            norm_x: 0.51,
+            norm_y: 0.51,
+            phase: 1,
+        });
+
+        // Finish stroke
+        bridge.apply(UiIntent::Paint2dStroke {
+            norm_x: 0.51,
+            norm_y: 0.51,
+            phase: 2,
+        });
+        assert!(bridge.paint_2d_last.is_none());
+
+        // Texture pixel should be red
+        let painted_color = bridge
+            .state
+            .project
+            .active()
+            .and_then(|a| a.texture.as_ref())
+            .and_then(|t| t.get(128, 128))
+            .expect("pixel");
+        assert_eq!(painted_color[0], 255);
+        assert_eq!(painted_color[1], 0);
+        assert_eq!(painted_color[2], 0);
+
+        // Undo stroke
+        bridge.apply(UiIntent::Undo);
+        let undone_color = bridge
+            .state
+            .project
+            .active()
+            .and_then(|a| a.texture.as_ref())
+            .and_then(|t| t.get(128, 128))
+            .unwrap_or([0, 0, 0, 0]);
+        assert_eq!(undone_color, initial_color);
+
+        // Redo stroke
+        bridge.apply(UiIntent::Redo);
+        let redone_color = bridge
+            .state
+            .project
+            .active()
+            .and_then(|a| a.texture.as_ref())
+            .and_then(|t| t.get(128, 128))
+            .expect("pixel");
+        assert_eq!(redone_color[0], 255);
+    }
+
+    #[test]
+    fn paint_pixel_grid_and_canvas_zoom() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.paint_pixel_grid);
+        assert_eq!(bridge.paint_canvas_zoom, 1);
+
+        // Toggle pixel grid
+        bridge.apply(UiIntent::TogglePaintPixelGrid);
+        assert!(!bridge.paint_pixel_grid);
+        assert!(!bridge.view_model().paint_pixel_grid);
+
+        bridge.apply(UiIntent::TogglePaintPixelGrid);
+        assert!(bridge.paint_pixel_grid);
+        assert!(bridge.view_model().paint_pixel_grid);
+
+        // Set zoom
+        bridge.apply(UiIntent::SetPaintCanvasZoom(4));
+        assert_eq!(bridge.paint_canvas_zoom, 4);
+        assert_eq!(bridge.view_model().paint_canvas_zoom, 4);
+
+        // Clamping upper bound
+        bridge.apply(UiIntent::SetPaintCanvasZoom(32));
+        assert_eq!(bridge.paint_canvas_zoom, 16);
+
+        // Clamping lower bound
+        bridge.apply(UiIntent::SetPaintCanvasZoom(-2));
+        assert_eq!(bridge.paint_canvas_zoom, 1);
+
+        // render_paint_canvas succeeds with zoom and grid
+        bridge.apply(UiIntent::SetPaintCanvasZoom(4));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+        let image = bridge.render_paint_canvas();
+        assert!(image.is_some());
+    }
+
+    #[test]
+    fn airbrush_continuous_dab_accumulation() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        bridge.apply(UiIntent::SetActiveTool("airbrush".to_string()));
+        bridge.apply(UiIntent::SetPaintColor([0.0, 1.0, 0.0]));
+        petunia_module_paint::PaintModule::ensure_stack(&mut bridge.state);
+
+        // Initially no stroke active, airbrush_tick returns false
+        assert!(!bridge.airbrush_tick());
+
+        // Start 2D stroke
+        bridge.paint_2d_stroke(0.5, 0.5, 0);
+        let pixel_after_dab1 = bridge
+            .state
+            .project
+            .active()
+            .and_then(|a| a.texture.as_ref())
+            .and_then(|t| t.get(128, 128))
+            .expect("pixel");
+
+        // Tick airbrush while pointer held
+        let ticked = bridge.airbrush_tick();
+        assert!(ticked);
+
+        let pixel_after_dab2 = bridge
+            .state
+            .project
+            .active()
+            .and_then(|a| a.texture.as_ref())
+            .and_then(|t| t.get(128, 128))
+            .expect("pixel");
+
+        // Alpha or color density increases or stays solid green
+        assert!(pixel_after_dab2[1] >= pixel_after_dab1[1]);
+        assert!(pixel_after_dab2[3] >= pixel_after_dab1[3]);
+
+        // Finish stroke
+        bridge.paint_2d_stroke(0.5, 0.5, 2);
+        assert!(!bridge.airbrush_tick());
+    }
+
+    #[test]
+    fn project_from_reference_and_bake_reference_intents() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::ProjectFromReference);
+        assert!(bridge.view_model().status_message.contains("Projected UVs"));
+
+        bridge.apply(UiIntent::BakeReference);
+        assert!(
+            bridge
+                .view_model()
+                .status_message
+                .contains("No visible reference image")
+        );
+
+        let ref_img =
+            petunia_core::ReferenceImage::from_rgba("ref1".to_string(), 1, 1, vec![255, 0, 0, 255]);
+        bridge.state.project.refs.push(ref_img);
+
+        bridge.apply(UiIntent::ProjectFromReference);
+        assert!(bridge.view_model().status_message.contains("Projected UVs"));
+        assert_eq!(bridge.state.project.undo.depth(), (2, 0));
+
+        bridge.apply(UiIntent::BakeReference);
+        assert!(
+            bridge
+                .view_model()
+                .status_message
+                .contains("Baked reference")
+        );
+        assert_eq!(bridge.state.project.undo.depth(), (3, 0));
+
+        bridge.apply(UiIntent::Undo);
+        assert_eq!(bridge.state.project.undo.depth(), (2, 1));
+    }
+
+    #[test]
+    fn material_editor_updates_values_and_undo() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let before = bridge.state.project.project.materials[0].roughness;
+        assert!(bridge.set_active_material_scalar("roughness", 0.2));
+        assert_eq!(bridge.view_model().material_roughness, 0.2);
+        assert!(bridge.state.undo());
+        assert_eq!(bridge.state.project.project.materials[0].roughness, before);
+    }
+
+    #[test]
+    fn quick_actions_are_controlled_and_execute_commands() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.toggle_quick_action("model.intersect"));
+        assert!(
+            bridge
+                .view_model()
+                .quick_action_candidates
+                .iter()
+                .any(|item| item.pinned)
+        );
+        bridge.state.project.active_mesh_mut().unwrap().select_all();
+        assert!(bridge.execute_quick_action("model.subdivide"));
+        assert!(bridge.toggle_quick_action("model.subdivide"));
+        assert!(
+            !bridge
+                .view_model()
+                .quick_actions
+                .iter()
+                .any(|item| item.id == "model.subdivide")
+        );
+    }
+
+    #[test]
+    fn modifier_stack_supports_live_rows_and_apply() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(bridge.add_modifier("mirror"));
+        assert!(bridge.add_modifier("symmetry"));
+        let rows = bridge.view_model().modifier_rows;
+        assert_eq!(rows.len(), 2);
+        assert!(bridge.set_modifier_axis(&rows[0].id, 1));
+        assert!(bridge.set_modifier_direction(&rows[1].id, false));
+        assert!(bridge.set_modifier_enabled(&rows[0].id, false));
+        assert_eq!(bridge.view_model().modifier_rows[0].axis, 1);
+        assert!(bridge.move_modifier(&rows[1].id, -1));
+        assert!(bridge.apply_modifier(&rows[1].id));
+        assert_eq!(bridge.view_model().modifier_rows.len(), 1);
+        assert!(bridge.state.undo());
+    }
+
+    #[test]
+    fn scale_tool_exposes_tool_options_immediately() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetActiveTool("scale".into()));
+        let vm = bridge.view_model();
+        assert!(vm.tool_options_active);
+        assert!(vm.tool_options_title.contains("Scale"));
     }
 }

@@ -798,6 +798,26 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "uv.project_reference",
+                "Project From Reference",
+                "Project UVs from the active reference image or fallback to camera view",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::UvUnwrapping),
+            UvProjectFromReferenceCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "paint.bake_reference",
+                "Bake Reference to Texture",
+                "Project UVs and bake visible reference image into the active texture",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::TexturePainting),
+            PaintBakeReferenceCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.merge",
                 "Merge Center",
                 "Merge selected vertices into center point",
@@ -1908,7 +1928,12 @@ impl Command for FlipDiagonalCmd {
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         if state.edit_mode() != EditMode::Edit {
             Err("Requires Edit mode")
-        } else if state.selection.is_empty() {
+        } else if state.selection.is_empty()
+            && !state
+                .project
+                .active_mesh()
+                .is_some_and(|m| m.has_selection())
+        {
             Err("Select quad or edge first")
         } else {
             Ok(())
@@ -2034,7 +2059,12 @@ impl Command for SelectLinkedCmd {
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         if state.edit_mode() != EditMode::Edit {
             Err("Requires Edit mode")
-        } else if state.selection.is_empty() {
+        } else if state.selection.is_empty()
+            && !state
+                .project
+                .active_mesh()
+                .is_some_and(|m| m.has_selection())
+        {
             Err("Select at least one element first")
         } else {
             Ok(())
@@ -3236,6 +3266,129 @@ impl Command for UvProjectFromViewCmd {
         };
         mesh.project_from_view(right, up, origin);
         state.set_status("Projected UVs from view");
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UvProjectFromReferenceCmd;
+
+impl Command for UvProjectFromReferenceCmd {
+    fn label(&self) -> &'static str {
+        "project from reference"
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let reference = state.project.refs.iter().find(|r| r.visible).cloned();
+        let (right, up, origin) = if let Some(ref_img) = reference {
+            let (vx, vy, vz) = match ref_img.axis {
+                crate::RefAxis::Front => (glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z),
+                crate::RefAxis::Back => (-glam::Vec3::X, glam::Vec3::Y, -glam::Vec3::Z),
+                crate::RefAxis::Left => (-glam::Vec3::Z, glam::Vec3::Y, -glam::Vec3::X),
+                crate::RefAxis::Right | crate::RefAxis::Side => {
+                    (glam::Vec3::Z, glam::Vec3::Y, glam::Vec3::X)
+                }
+                crate::RefAxis::Top => (glam::Vec3::X, -glam::Vec3::Z, glam::Vec3::Y),
+                crate::RefAxis::Bottom => (glam::Vec3::X, glam::Vec3::Z, -glam::Vec3::Y),
+            };
+            let rot = glam::Quat::from_axis_angle(vz, ref_img.rotation.to_radians());
+            let right = rot * vx;
+            let up = rot * vy;
+            let origin = vz * ref_img.offset;
+            (right, up, origin)
+        } else {
+            let origin = state.camera.eye();
+            let forward = state.camera.forward();
+            let up = state.camera.up();
+            let right = forward.cross(up).normalize_or_zero();
+            (right, up, origin)
+        };
+
+        let Some(mesh) = state.project.active_mesh_mut() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        mesh.project_from_view(right, up, origin);
+        state.set_status("Projected UVs from reference");
+        state.emit_mesh_changed();
+        state.mark_dirty();
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PaintBakeReferenceCmd;
+
+impl Command for PaintBakeReferenceCmd {
+    fn label(&self) -> &'static str {
+        "bake reference"
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let Some(ref_img) = state.project.refs.iter().find(|r| r.visible).cloned() else {
+            return Err(CommandError::Execution(
+                "No visible reference image to bake".into(),
+            ));
+        };
+        if ref_img.width == 0 || ref_img.height == 0 || ref_img.rgba.is_empty() {
+            return Err(CommandError::Execution(
+                "Reference image has no pixel data".into(),
+            ));
+        }
+
+        let (vx, vy, vz) = match ref_img.axis {
+            crate::RefAxis::Front => (glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z),
+            crate::RefAxis::Back => (-glam::Vec3::X, glam::Vec3::Y, -glam::Vec3::Z),
+            crate::RefAxis::Left => (-glam::Vec3::Z, glam::Vec3::Y, -glam::Vec3::X),
+            crate::RefAxis::Right | crate::RefAxis::Side => {
+                (glam::Vec3::Z, glam::Vec3::Y, glam::Vec3::X)
+            }
+            crate::RefAxis::Top => (glam::Vec3::X, -glam::Vec3::Z, glam::Vec3::Y),
+            crate::RefAxis::Bottom => (glam::Vec3::X, glam::Vec3::Z, -glam::Vec3::Y),
+        };
+        let rot = glam::Quat::from_axis_angle(vz, ref_img.rotation.to_radians());
+        let right = rot * vx;
+        let up = rot * vy;
+        let origin = vz * ref_img.offset;
+
+        let Some(mesh) = state.project.active_mesh_mut() else {
+            return Err(CommandError::NoActiveAsset);
+        };
+        mesh.project_from_view(right, up, origin);
+
+        let active_idx = state.project.active;
+        if let Some(asset) = state.project.assets.get_mut(active_idx) {
+            let tex = asset.texture.get_or_insert_with(|| {
+                petunia_project::Canvas::new(ref_img.width, ref_img.height, [255, 255, 255, 255])
+            });
+            let tw = tex.w as usize;
+            let th = tex.h as usize;
+            for y in 0..th {
+                for x in 0..tw {
+                    let rx = (x * ref_img.width as usize / tw).min(ref_img.width as usize - 1);
+                    let ry = (y * ref_img.height as usize / th).min(ref_img.height as usize - 1);
+                    let src_idx = (ry * ref_img.width as usize + rx) * 4;
+                    let dst_idx = (y * tw + x) * 4;
+                    if src_idx + 3 < ref_img.rgba.len() && dst_idx + 3 < tex.pixels.len() {
+                        let a = ref_img.rgba[src_idx + 3] as f32 / 255.0 * ref_img.opacity;
+                        if a > 0.01 {
+                            for c in 0..3 {
+                                let orig = tex.pixels[dst_idx + c] as f32;
+                                let new_val = ref_img.rgba[src_idx + c] as f32;
+                                tex.pixels[dst_idx + c] =
+                                    (orig * (1.0 - a) + new_val * a).round() as u8;
+                            }
+                            tex.pixels[dst_idx + 3] =
+                                (tex.pixels[dst_idx + 3] as f32 * (1.0 - a) + 255.0 * a).round()
+                                    as u8;
+                        }
+                    }
+                }
+            }
+        }
+
+        state.set_status("Baked reference image into texture");
+        state.emit_mesh_changed();
+        state.mark_dirty();
         Ok(())
     }
 }
