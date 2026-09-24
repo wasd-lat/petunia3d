@@ -2523,8 +2523,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if !selected_faces.is_empty()
             && let Some(mesh) = self.state.project.active_mesh_mut()
         {
-            for index in selected_faces {
-                mesh.faces[index].material_slot = Some(slot);
+            for index in &selected_faces {
+                mesh.faces[*index].material_slot = Some(slot);
             }
         }
         let message = if selected_faces.is_empty() {
