@@ -50,8 +50,8 @@ pub use schema_contracts::{
 };
 
 pub use command::{
-    AddPrimitiveCmd, BevelCmd, BooleanOpCmd, BoxSelectCmd, ClearSelectionCmd, Command,
-    CommandCategory, CommandDispatcher, CommandError, CommandMetadata, CommandPaletteItem,
+    AddPrimitiveCmd, BakeDecalCmd, BevelCmd, BooleanOpCmd, BoxSelectCmd, ClearSelectionCmd,
+    Command, CommandCategory, CommandDispatcher, CommandError, CommandMetadata, CommandPaletteItem,
     ConnectLoopsCmd, CycleSelectionDomainCmd, DeleteAssetCmd, DeleteSelectionCmd,
     DuplicateAssetCmd, DuplicateSelectionCmd, ExportGlbCmd, ExportObjCmd, ExtrudeIndividualCmd,
     ExtrudeSelectedCmd, FlipDiagonalCmd, FlipNormalsCmd, FrameSelectionCmd, ImportObjCmd,
@@ -59,11 +59,11 @@ pub use command::{
     LoopCutCmd, MergeCenterCmd, NewProjectCmd, OpenProjectCmd, PrimitiveKind, PushPullToolCmd,
     RedoCmd, ReorderAssetCmd, ResetCameraCmd, RevolveCmd, SaveActiveAsAssetCmd, SaveProjectAsCmd,
     SaveProjectCmd, ScaleSelectionCmd, SelectAllCmd, SelectLinkedCmd, SeparateSelectionCmd,
-    SetAssetCollectionCmd, SetSelectionDomainCmd, SubdivideSelectionCmd, SymmetrizeCmd,
-    ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd, ToggleCommandPaletteCmd, ToggleHelpCmd,
-    ToggleLockAssetCmd, ToggleProjectionCmd, ToggleSettingsCmd, ToggleVisibilityAssetCmd,
-    ToggleWireframeCmd, ToggleXRayCmd, UndoCmd, UnwrapAutoCmd, UvPackIslandsCmd,
-    UvProjectFromViewCmd, WeldCmd,
+    SetAssetCollectionCmd, SetDecalTransformCmd, SetSelectionDomainCmd, SubdivideSelectionCmd,
+    SymmetrizeCmd, ToggleCollectionLockCmd, ToggleCollectionVisibilityCmd, ToggleCommandPaletteCmd,
+    ToggleHelpCmd, ToggleLockAssetCmd, ToggleProjectionCmd, ToggleSettingsCmd,
+    ToggleVisibilityAssetCmd, ToggleWireframeCmd, ToggleXRayCmd, UndoCmd, UnwrapAutoCmd,
+    UvPackIslandsCmd, UvProjectFromViewCmd, WeldCmd,
 };
 pub use project_service::{ProjectService, ProjectServiceError, sanitize_filename};
 

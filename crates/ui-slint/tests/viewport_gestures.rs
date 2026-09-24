@@ -1,6 +1,6 @@
 //! Gestos reais do shell declarativo: o bridge isolado não cobre hit testing Slint.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
@@ -428,13 +428,99 @@ fn inspector_collapsed_rail_uses_spaced_icon_pills_and_single_tool_card() {
         "sem modal/HUD não há card de ferramenta"
     );
 
-    // Durante o modal, exatamente um card com controle de colapso.
+    // During modal, exactly one tool card with collapse / Durante o modal, exatamente um card de ferramenta com colapso.
     shell.set_tool_modal_active(true);
-    shell.set_tool_options_title("Bevel".into());
+    shell.set_tool_modal_title("Bevel".into());
+    let collapses: Vec<_> = ElementHandle::find_by_accessible_label(&shell, "Collapse")
+        .filter(|element| element.accessible_role() == Some(AccessibleRole::Button))
+        .collect();
+    assert_eq!(collapses.len(), 1, "um único card de ferramenta no modal");
+}
+
+#[test]
+fn floating_material_card_anchors_at_state_position() {
+    use petunia_ui_slint::SectionState;
+    i_slint_backend_testing::init_no_event_loop();
+    let shell = PetuniaSlintShell::new().expect("Slint shell");
+    shell.window().set_size(LogicalSize::new(1280.0, 800.0));
+    shell.show().expect("headless window");
+    shell.set_active_workspace("MODEL".into());
+    shell.set_label_tab_material("Material".into());
+    shell.set_label_material_assign("AssignX".into());
+    shell.set_material_docked(false);
+    let states = std::rc::Rc::new(slint::VecModel::from(vec![SectionState {
+        id: "material".into(),
+        docked: false,
+        x: 200.0,
+        y: 100.0,
+        pin_open: false,
+        pinned_asset: "".into(),
+    }]));
+    shell.set_section_states(states.into());
+
+    // Floating card anchors exactly at (200, 100) / Card flutuante ancora exatamente em (200, 100).
+    let cards: Vec<_> = ElementHandle::find_by_accessible_label(&shell, "Material")
+        .filter(|element| element.accessible_role() == Some(AccessibleRole::Groupbox))
+        .collect();
+    assert_eq!(cards.len(), 1, "um único card flutuante de Material");
+    let pos = cards[0].absolute_position();
     assert!(
-        ElementHandle::find_by_accessible_label(&shell, "Collapse tool options")
-            .next()
-            .is_some(),
-        "card único deve aparecer durante o modal"
+        (pos.x - 200.0).abs() < 2.0 && (pos.y - 100.0).abs() < 2.0,
+        "card deve ancorar em (200, 100), veio ({}, {})",
+        pos.x,
+        pos.y
     );
+    // Content exists in a single copy (floating only, no docked duplicate) / Conteúdo existe em uma única cópia (só flutuante, sem duplicata ancorada).
+    let assigns: Vec<_> = ElementHandle::find_by_accessible_label(&shell, "AssignX")
+        .filter(|element| element.accessible_role() == Some(AccessibleRole::Button))
+        .collect();
+    assert_eq!(assigns.len(), 1, "Assign deve existir em cópia única");
+}
+
+#[test]
+fn dragging_floating_card_header_reports_clamped_move() {
+    use petunia_ui_slint::SectionState;
+    i_slint_backend_testing::init_no_event_loop();
+    let shell = PetuniaSlintShell::new().expect("Slint shell");
+    shell.window().set_size(LogicalSize::new(1280.0, 800.0));
+    shell.show().expect("headless window");
+    shell.set_active_workspace("MODEL".into());
+    shell.set_label_tab_material("Material".into());
+    shell.set_material_docked(false);
+    let states = std::rc::Rc::new(slint::VecModel::from(vec![SectionState {
+        id: "material".into(),
+        docked: false,
+        x: 200.0,
+        y: 100.0,
+        pin_open: false,
+        pinned_asset: "".into(),
+    }]));
+    shell.set_section_states(states.into());
+
+    let moves = Rc::new(RefCell::new(Vec::new()));
+    let moves_callback = Rc::clone(&moves);
+    shell.on_section_moved(move |id, x, y| {
+        moves_callback.borrow_mut().push((id.to_string(), x, y));
+    });
+    // Press center of card header, drag +50px right, release / Press no meio do header do card, arrasta +50px à direita, solta.
+    let start = LogicalPosition::new(300.0, 120.0);
+    move_pointer(&shell, start.x, start.y);
+    shell.window().dispatch_event(WindowEvent::PointerPressed {
+        position: start,
+        button: PointerEventButton::Left,
+    });
+    move_pointer(&shell, 350.0, 120.0);
+    shell.window().dispatch_event(WindowEvent::PointerReleased {
+        position: LogicalPosition::new(350.0, 120.0),
+        button: PointerEventButton::Left,
+    });
+    let moves = moves.borrow();
+    assert!(!moves.is_empty(), "arrasto deve emitir section-moved");
+    let (id, x, y) = moves.last().unwrap();
+    assert_eq!(id, "material");
+    assert!(
+        (x - 250.0).abs() < 3.0,
+        "x deve acompanhar o arrasto, veio {x}"
+    );
+    assert!((y - 100.0).abs() < 3.0, "y deve ficar parado, veio {y}");
 }

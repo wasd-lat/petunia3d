@@ -2119,6 +2119,54 @@ fn paint_layer_mutations_reject_unknown_ids_and_non_finite_opacity() {
 }
 
 #[test]
+fn decal_layer_transform_and_bake_workflow() {
+    // Tests decal layer creation, transform mutation, view_model exposure and baking to raster
+    // Testa criação de camada decal, mutação de transformação, exposição no view_model e bake para raster
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+
+    // Initially no decal layer / Inicialmente sem camada decal
+    assert!(!bridge.view_model().active_layer_is_decal);
+
+    // Add decal layer / Adiciona camada decal
+    bridge.apply(UiIntent::AddDecalLayer);
+    let vm = bridge.view_model();
+    assert!(vm.active_layer_is_decal);
+    assert_eq!(vm.decal_center_u, 0.5);
+    assert_eq!(vm.decal_center_v, 0.5);
+    assert_eq!(vm.decal_scale_u, 0.25);
+    assert_eq!(vm.decal_scale_v, 0.25);
+
+    let decal_id = vm.paint_layers.last().unwrap().id.clone();
+
+    // Mutate decal transform / Modifica transformação do decalque
+    bridge.apply(UiIntent::SetDecalTransform {
+        layer_id: decal_id.clone(),
+        center_u: 0.7,
+        center_v: 0.3,
+        scale_u: 0.4,
+        scale_v: 0.4,
+        rotation_deg: 45.0,
+    });
+
+    let vm = bridge.view_model();
+    assert!(vm.active_layer_is_decal);
+    assert!((vm.decal_center_u - 0.7).abs() < 1e-4);
+    assert!((vm.decal_center_v - 0.3).abs() < 1e-4);
+    assert!((vm.decal_scale_u - 0.4).abs() < 1e-4);
+    assert!((vm.decal_scale_v - 0.4).abs() < 1e-4);
+    assert!((vm.decal_rotation_deg - 45.0).abs() < 1e-3);
+
+    // Bake decal to raster / Converte decalque para raster
+    bridge.apply(UiIntent::BakeActiveDecal);
+    let vm = bridge.view_model();
+    assert!(
+        !vm.active_layer_is_decal,
+        "baked layer should now be Raster / camada rasterizada agora deve ser Raster"
+    );
+}
+
+#[test]
 fn uv_editor_builds_a_real_layout_path_from_mesh_uvs() {
     let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     let editor = bridge.view_model().uv_editor;
@@ -3137,6 +3185,25 @@ fn drag_link_only_exists_during_a_tool_session() {
     assert!(!link_active);
     assert!(compute_drag_link(&bridge.state, 1024.0, 768.0, pointer, link_active).is_empty());
     assert!(bridge.view_model().drag_link_commands.is_empty());
+}
+
+#[test]
+fn drag_link_with_tool_feedback_snap() {
+    // Tests ToolFeedback integration in compute_drag_link with magnetic snap (P3D-131)
+    // Testa integração do ToolFeedback em compute_drag_link com atração magnética (P3D-131)
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(1024, 768);
+    bridge.begin_viewport_transform(TransformKind::Position, 512.0, 384.0);
+
+    // Free drag cord / Cordão de arrasto livre
+    let pointer = [600.0, 300.0];
+    let free_link = compute_drag_link(&bridge.state, 1024.0, 768.0, pointer, true);
+    assert!(!free_link.is_empty());
+
+    // Enable snap / Ativa snap magnético
+    bridge.state.session.snap_enabled = true;
+    let snapped_link = compute_drag_link(&bridge.state, 1024.0, 768.0, pointer, true);
+    assert!(!snapped_link.is_empty());
 }
 
 #[test]

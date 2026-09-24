@@ -818,6 +818,33 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "paint.set_decal_transform",
+                "Set Decal Transform",
+                "Update position, scale and rotation of a decal layer",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::TexturePainting),
+            SetDecalTransformCmd {
+                layer_id: uuid::Uuid::nil(),
+                center_uv: [0.5, 0.5],
+                scale_uv: [0.25, 0.25],
+                rotation_rad: 0.0,
+            },
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "paint.bake_decal",
+                "Bake Decal to Raster",
+                "Bake a live decal layer into a static raster layer",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::TexturePainting),
+            BakeDecalCmd {
+                layer_id: uuid::Uuid::nil(),
+            },
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "model.merge",
                 "Merge Center",
                 "Merge selected vertices into center point",
@@ -3618,5 +3645,109 @@ impl Command for ConnectLoopsCmd {
             .map_err(CommandError::Execution)?;
         state.set_status("Connected loops");
         Ok(())
+    }
+}
+
+/// Altera a posição, escala e rotação de uma camada Decal na pilha de pintura ativa (P3D-133).
+/// Changes the position, scale, and rotation of a Decal layer in the active paint stack (P3D-133).
+#[derive(Debug, Clone)]
+pub struct SetDecalTransformCmd {
+    pub layer_id: uuid::Uuid,
+    pub center_uv: [f32; 2],
+    pub scale_uv: [f32; 2],
+    pub rotation_rad: f32,
+}
+
+impl Command for SetDecalTransformCmd {
+    fn label(&self) -> &'static str {
+        "set decal transform"
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        let Some(asset) = state.project.active() else {
+            return Err("No active asset");
+        };
+        let Some(stack) = asset.paint_stack.as_ref() else {
+            return Err("No paint stack");
+        };
+        if stack.layers.iter().any(|l| {
+            l.id == self.layer_id
+                && matches!(l.kind, petunia_project::paint_layers::LayerKind::Decal(_))
+        }) {
+            Ok(())
+        } else {
+            Err("Decal layer not found")
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let active = state.project.active;
+        if let Some(asset) = state.project.assets.get_mut(active)
+            && let Some(stack) = asset.paint_stack.as_mut()
+            && stack.set_decal_transform(
+                self.layer_id,
+                self.center_uv,
+                self.scale_uv,
+                self.rotation_rad,
+            )
+        {
+            state.mark_dirty();
+            state.render.mark_dirty();
+            Ok(())
+        } else {
+            Err(CommandError::Execution(
+                "Failed to update decal transform".into(),
+            ))
+        }
+    }
+}
+
+/// Converte uma camada Decal em uma camada Raster estática por rasterização da projeção (P3D-160).
+/// Converts a Decal layer into a static Raster layer by baking its projection (P3D-160).
+#[derive(Debug, Clone)]
+pub struct BakeDecalCmd {
+    pub layer_id: uuid::Uuid,
+}
+
+impl Command for BakeDecalCmd {
+    fn label(&self) -> &'static str {
+        "bake decal to raster"
+    }
+
+    fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
+        let Some(asset) = state.project.active() else {
+            return Err("No active asset");
+        };
+        let Some(stack) = asset.paint_stack.as_ref() else {
+            return Err("No paint stack");
+        };
+        if stack.layers.iter().any(|l| {
+            l.id == self.layer_id
+                && matches!(l.kind, petunia_project::paint_layers::LayerKind::Decal(_))
+        }) {
+            Ok(())
+        } else {
+            Err("Decal layer not found")
+        }
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        let active = state.project.active;
+        if let Some(asset) = state.project.assets.get_mut(active)
+            && let Some(stack) = asset.paint_stack.as_mut()
+        {
+            let (target_w, target_h) = stack
+                .active()
+                .and_then(|l| l.canvas())
+                .map(|c| (c.w, c.h))
+                .unwrap_or((512, 512));
+            if stack.bake_decal_to_raster(self.layer_id, target_w, target_h) {
+                state.mark_dirty();
+                state.render.mark_dirty();
+                state.set_status("Decalque convertido para camada raster".to_string());
+                return Ok(());
+            }
+        }
+        Err(CommandError::Execution("Failed to bake decal".into()))
     }
 }

@@ -443,7 +443,8 @@ component ToolCard inherits Rectangle {
     in-out property <bool> collapsed: false;
     callback collapse-toggled;
 
-    width: 240px;
+    width: 250px;
+    height: card-layout.preferred-height;
     border-radius: 8px;
     background: DesignTokens.surface-raised;
     border-width: 1px;
@@ -452,9 +453,10 @@ component ToolCard inherits Rectangle {
     drop-shadow-color: #00000080;
     drop-shadow-offset-y: 4px;
 
-    VerticalLayout {
+    card-layout := VerticalLayout {
         padding: 10px;
         spacing: 8px;
+        alignment: start;
 
         HorizontalLayout {
             height: 20px;
@@ -482,8 +484,8 @@ component ToolCard inherits Rectangle {
 
         VerticalLayout {
             visible: !root.collapsed;
-            vertical-stretch: 0;
             spacing: 8px;
+            alignment: start;
             @children
         }
     }
@@ -1052,12 +1054,14 @@ component FloatSectionCard inherits Rectangle {
     in property <string> pin-open-label: "Keep open";
     in property <string> pin-asset-label: "Pin to active part";
     in property <string> unpin-asset-label: "Unpin";
+    in property <length> container-width: 1280px;
+    in property <length> container-height: 800px;
     callback moved(string, float, float);
     callback dock-requested(string);
     callback pin-open-toggled(string);
     callback asset-pin-changed(string, string);
 
-    accessible-role: none;
+    accessible-role: groupbox;
     accessible-label: root.title;
     width: root.card-width;
     border-radius: 8px;
@@ -1096,8 +1100,8 @@ component FloatSectionCard inherits Rectangle {
                     if self.pressed {
                         root.moved(
                             root.section-id,
-                            max(0px, min(root.card-x * 1px + self.mouse-x - self.last-x, parent.width - 80px)) / 1px,
-                            max(40px, min(root.card-y * 1px + self.mouse-y - self.last-y, parent.height - 80px)) / 1px
+                            max(0px, min(root.card-x * 1px + self.mouse-x - self.last-x, root.container-width - 80px)) / 1px,
+                            max(40px, min(root.card-y * 1px + self.mouse-y - self.last-y, root.container-height - 80px)) / 1px
                         );
                         self.last-x = self.mouse-x;
                         self.last-y = self.mouse-y;
@@ -1667,6 +1671,8 @@ component MaterialBody inherits VerticalLayout {
         height: 28px;
         border-radius: 5px;
         background: DesignTokens.accent;
+        accessible-role: button;
+        accessible-label: root.assign-label;
         HorizontalLayout {
             alignment: center;
             spacing: 4px;
@@ -2651,6 +2657,14 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> paint-fill-scope: "ConnectedPixels";
     in-out property <string> paint-projection: "Surface";
     in-out property <string> paint-lock: "None";
+    in-out property <bool> active-layer-is-decal: false;
+    in-out property <float> decal-center-u: 0.5;
+    in-out property <float> decal-center-v: 0.5;
+    in-out property <float> decal-scale-u: 0.25;
+    in-out property <float> decal-scale-v: 0.25;
+    in-out property <float> decal-rotation-deg: 0.0;
+    callback decal-transform-changed(string, float, float, float, float, float);
+    callback bake-active-decal();
     in-out property <bool> loop-cut-active: false;
     in-out property <float> loop-cut-slide: 0.0;
     in-out property <int> loop-cut-cuts: 1;
@@ -3663,7 +3677,7 @@ export component PetuniaSlintShell inherits Window {
                     // ponteiro: o TouchArea abaixo segue livre.
                     if root.hover-label != "" || root.selection-summary != "" || root.context-hint != "": Rectangle {
                         x: 14px;
-                        y: 56px;
+                        y: (loop-cut-active || loop-cut-armed || tool-modal-active || profile-active || operation-hud-active || root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale" || root.active-tool == "knife" || root.active-tool == "slice") ? (root.tool-properties-collapsed ? 102px : 206px) : 56px;
                         width: min(280px, parent.width * 0.4);
                         height: preselection-content.preferred-height;
                         border-radius: 8px;
@@ -4074,39 +4088,204 @@ export component PetuniaSlintShell inherits Window {
                         collapsed: root.tool-properties-collapsed;
                         collapse-toggled => { root.tool-properties-collapsed = !root.tool-properties-collapsed; }
 
-                        if root.active-tool == "move": VerticalLayout {
+                        // Common adjustments row (Snap, Proportional Editing and Pivot) / Linha de ajustes comuns (Snap, Proportional Editing e Pivot)
+                        if root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale": HorizontalLayout {
                             spacing: 4px;
-                            Text { text: "Interactive Move"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; }
-                            Text { text: "Drag gizmo axes to translate · G shortcut"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
-                            Text { text: "Shift for precision · Ctrl for snap"; color: DesignTokens.text-muted; font-size: 9px; }
+                            height: 24px;
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 4px;
+                                background: root.snap-enabled ? DesignTokens.accent.transparentize(0.8) : DesignTokens.surface;
+                                border-width: 1px;
+                                border-color: root.snap-enabled ? DesignTokens.accent : DesignTokens.border;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    IconDisplay {
+                                        icon: IconSet.Magnet;
+                                        size: 11px;
+                                        stroke: root.snap-enabled ? DesignTokens.accent : DesignTokens.text-secondary;
+                                    }
+                                    Text {
+                                        text: root.snap-enabled ? root.snap-target : "Snap";
+                                        color: root.snap-enabled ? DesignTokens.accent : DesignTokens.text-secondary;
+                                        font-size: 9px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.toggle-snap-enabled(); } }
+                            }
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 4px;
+                                background: root.proportional-editing ? DesignTokens.accent.transparentize(0.8) : DesignTokens.surface;
+                                border-width: 1px;
+                                border-color: root.proportional-editing ? DesignTokens.accent : DesignTokens.border;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    IconDisplay {
+                                        icon: IconSet.CircleDot;
+                                        size: 11px;
+                                        stroke: root.proportional-editing ? DesignTokens.accent : DesignTokens.text-secondary;
+                                    }
+                                    Text {
+                                        text: root.proportional-editing ? "\{round(root.proportional-radius * 10) / 10}" : "Prop";
+                                        color: root.proportional-editing ? DesignTokens.accent : DesignTokens.text-secondary;
+                                        font-size: 9px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.toggle-proportional-editing(); } }
+                            }
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 4px;
+                                background: root.pivot-menu-open ? DesignTokens.surface-raised : DesignTokens.surface;
+                                border-width: 1px;
+                                border-color: DesignTokens.border;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text {
+                                        text: root.pivot-label != "" ? root.pivot-label : "Pivot";
+                                        color: DesignTokens.text-secondary;
+                                        font-size: 9px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.pivot-menu-toggled(!root.pivot-menu-open); } }
+                            }
+                        }
+
+                        if root.active-tool == "move": Vector3Field {
+                            row-label: "Position";
+                            field-hint: root.label-numeric-field-hint;
+                            x-value: root.pos-x;
+                            y-value: root.pos-y;
+                            z-value: root.pos-z;
+                            scrubbed(axis, delta, fine) => { root.transform-scrubbed("pos", axis, delta, fine); }
+                            scrub-started => { root.transform-scrub-started("pos"); }
+                            scrub-finished => { root.transform-scrub-finished(); }
+                            text-committed(axis, text) => { root.transform-text-committed("pos", axis, text) }
+                            scrub-cancelled => { root.transform-scrub-cancelled(); }
                         }
 
                         if root.active-tool == "rotate": VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Interactive Rotate"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; }
-                            Text { text: "Drag gizmo rings to rotate · R shortcut"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
-                            Text { text: "Shift for precision · Ctrl for snap"; color: DesignTokens.text-muted; font-size: 9px; }
+                            spacing: 6px;
+                            Vector3Field {
+                                row-label: "Rotation";
+                                field-hint: root.label-numeric-field-hint;
+                                step: 1;
+                                x-value: root.rot-x;
+                                y-value: root.rot-y;
+                                z-value: root.rot-z;
+                                scrubbed(axis, delta, fine) => { root.transform-scrubbed("rot", axis, delta, fine); }
+                                scrub-started => { root.transform-scrub-started("rot"); }
+                                scrub-finished => { root.transform-scrub-finished(); }
+                                text-committed(axis, text) => { root.transform-text-committed("rot", axis, text) }
+                                scrub-cancelled => { root.transform-scrub-cancelled(); }
+                            }
+                            HorizontalLayout {
+                                spacing: 4px;
+                                height: 22px;
+                                Text { text: "Step 90°:"; color: DesignTokens.text-muted; font-size: 9px; vertical-alignment: center; }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 3px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: "+90° X"; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.transform-scrubbed("rot", 0, 90, false); root.transform-scrub-finished(); } }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 3px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: "+90° Y"; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.transform-scrubbed("rot", 1, 90, false); root.transform-scrub-finished(); } }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 3px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: "+90° Z"; color: DesignTokens.text-primary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.transform-scrubbed("rot", 2, 90, false); root.transform-scrub-finished(); } }
+                                }
+                            }
                         }
 
-                        if root.active-tool == "scale": VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Interactive Scale"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; }
-                            Text { text: "Drag gizmo handles to scale · S shortcut"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
-                            Text { text: "Shift for precision"; color: DesignTokens.text-muted; font-size: 9px; }
+                        if root.active-tool == "scale": Vector3Field {
+                            row-label: "Scale";
+                            field-hint: root.label-numeric-field-hint;
+                            x-value: root.scale-x;
+                            y-value: root.scale-y;
+                            z-value: root.scale-z;
+                            scrubbed(axis, delta, fine) => { root.transform-scrubbed("scale", axis, delta, fine); }
+                            scrub-started => { root.transform-scrub-started("scale"); }
+                            scrub-finished => { root.transform-scrub-finished(); }
+                            text-committed(axis, text) => { root.transform-text-committed("scale", axis, text) }
+                            scrub-cancelled => { root.transform-scrub-cancelled(); }
                         }
 
                         if root.active-tool == "knife": VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Knife Cut Tool"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; }
-                            Text { text: "Click to place vertices across faces"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
+                            spacing: 6px;
+                            Text { text: "Click vertices or edges to draw cut path"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                height: 26px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.command-executed("view.cancel_active"); } }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.accent;
+                                    Text { text: "Cut"; color: DesignTokens.canvas; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.command-executed("model.knife"); } }
+                                }
+                            }
                             Text { text: "Enter confirm · Esc cancel"; color: DesignTokens.text-muted; font-size: 9px; }
                         }
 
                         if root.active-tool == "slice": VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "Bisect / Slice"; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; }
-                            Text { text: "Drag a cutting line across the mesh"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
-                            Text { text: "Esc cancel"; color: DesignTokens.text-muted; font-size: 9px; }
+                            spacing: 6px;
+                            Text { text: "Drag a cut line across the mesh to bisect"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                height: 26px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text { text: root.label-cancel; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.viewport-transform-end(); } }
+                                }
+                            }
+                            Text { text: "Drag mouse across mesh · Esc cancel"; color: DesignTokens.text-muted; font-size: 9px; }
+                        }
+
+                        Text {
+                            text: (root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale") ? "G move · R rotate · S scale · Shift precision" : "";
+                            color: DesignTokens.text-muted;
+                            font-size: 9px;
                         }
                     }
 
@@ -4770,46 +4949,46 @@ export component PetuniaSlintShell inherits Window {
                                 toggle-all => { root.toggle-all-sections(); }
 
                                 MaterialBody {
-                                    active-name : root.active-material-name;
+                                    active-name: root.active-material-name;
                                     active-slot <=> root.active-material-slot;
-                                    slots : root.material-slots;
-                                    profile : root.material-profile;
-                                    base-color : root.material-base-color;
-                                    palette : root.material-palette;
-                                    roughness : root.material-roughness;
-                                    metallic : root.material-metallic;
-                                    emission-strength : root.material-emission-strength;
+                                    slots: root.material-slots;
+                                    profile: root.material-profile;
+                                    base-color: root.material-base-color;
+                                    palette: root.material-palette;
+                                    roughness: root.material-roughness;
+                                    metallic: root.material-metallic;
+                                    emission-strength: root.material-emission-strength;
                                     advanced-open <=> root.material-advanced-open;
-                                    normal-scale : root.material-normal-scale;
-                                    alpha-mode : root.material-alpha-mode;
-                                    alpha-cutoff : root.material-alpha-cutoff;
-                                    has-albedo : root.material-has-albedo;
-                                    albedo-text-label : root.material-albedo-label;
-                                    assign-label : root.label-material-assign;
-                                    new-label : root.label-material-new;
-                                    duplicate-label : root.label-material-duplicate;
-                                    remove-label : root.label-material-remove;
-                                    profile-label : root.label-material-profile;
-                                    profile-pbr-label : root.label-material-profile-pbr;
-                                    profile-unlit-label : root.label-material-profile-unlit;
-                                    profile-toon-label : root.label-material-profile-toon;
-                                    profile-glass-label : root.label-material-profile-glass;
-                                    profile-emissive-label : root.label-material-profile-emissive;
-                                    base-color-label : root.label-material-base-color;
-                                    roughness-label : root.label-material-roughness;
-                                    metallic-label : root.label-material-metallic;
-                                    emission-label : root.label-material-emission-strength;
-                                    advanced-label : root.label-material-advanced;
-                                    normal-scale-label : root.label-material-normal-scale;
-                                    alpha-mode-label : root.label-material-alpha-mode;
-                                    alpha-opaque-label : root.label-material-alpha-opaque;
-                                    alpha-mask-label : root.label-material-alpha-mask;
-                                    alpha-blend-label : root.label-material-alpha-blend;
-                                    alpha-cutoff-label : root.label-material-alpha-cutoff;
-                                    albedo-label : root.label-material-texture-albedo;
-                                    create-texture-label : root.label-material-create-texture;
-                                    clear-texture-label : root.label-material-clear-texture;
-                                    no-texture-label : root.label-material-no-texture;
+                                    normal-scale: root.material-normal-scale;
+                                    alpha-mode: root.material-alpha-mode;
+                                    alpha-cutoff: root.material-alpha-cutoff;
+                                    has-albedo: root.material-has-albedo;
+                                    albedo-text-label: root.material-albedo-label;
+                                    assign-label: root.label-material-assign;
+                                    new-label: root.label-material-new;
+                                    duplicate-label: root.label-material-duplicate;
+                                    remove-label: root.label-material-remove;
+                                    profile-label: root.label-material-profile;
+                                    profile-pbr-label: root.label-material-profile-pbr;
+                                    profile-unlit-label: root.label-material-profile-unlit;
+                                    profile-toon-label: root.label-material-profile-toon;
+                                    profile-glass-label: root.label-material-profile-glass;
+                                    profile-emissive-label: root.label-material-profile-emissive;
+                                    base-color-label: root.label-material-base-color;
+                                    roughness-label: root.label-material-roughness;
+                                    metallic-label: root.label-material-metallic;
+                                    emission-label: root.label-material-emission-strength;
+                                    advanced-label: root.label-material-advanced;
+                                    normal-scale-label: root.label-material-normal-scale;
+                                    alpha-mode-label: root.label-material-alpha-mode;
+                                    alpha-opaque-label: root.label-material-alpha-opaque;
+                                    alpha-mask-label: root.label-material-alpha-mask;
+                                    alpha-blend-label: root.label-material-alpha-blend;
+                                    alpha-cutoff-label: root.label-material-alpha-cutoff;
+                                    albedo-label: root.label-material-texture-albedo;
+                                    create-texture-label: root.label-material-create-texture;
+                                    clear-texture-label: root.label-material-clear-texture;
+                                    no-texture-label: root.label-material-no-texture;
                                     assign-material-slot(slot) => { root.assign-material-slot(slot); }
                                     create-material => { root.create-material(); }
                                     duplicate-material(slot) => { root.duplicate-material(slot); }
@@ -5451,6 +5630,119 @@ export component PetuniaSlintShell inherits Window {
                                                 maximum: 1.0;
                                                 value: layer.opacity;
                                                 changed(value) => { root.paint-layer-opacity-set(layer.id, value); }
+                                            }
+                                        }
+                                    }
+
+                                    if root.active-layer-is-decal: VerticalLayout {
+                                        spacing: 6px;
+                                        padding-top: 4px;
+
+                                        Text {
+                                            text: "Decal Transform (UV)";
+                                            color: DesignTokens.text-primary;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            Text {
+                                                text: "Position";
+                                                color: DesignTokens.text-secondary;
+                                                font-size: 10px;
+                                                width: 52px;
+                                                vertical-alignment: center;
+                                            }
+                                            NumericField {
+                                                label: "U";
+                                                value: root.decal-center-u;
+                                                step: 0.05;
+                                                scrubbed(delta, _) => {
+                                                    root.decal-center-u = Math.clamp(root.decal-center-u + delta * 0.01, 0.0, 1.0);
+                                                    root.decal-transform-changed("", root.decal-center-u, root.decal-center-v, root.decal-scale-u, root.decal-scale-v, root.decal-rotation-deg);
+                                                }
+                                            }
+                                            NumericField {
+                                                label: "V";
+                                                value: root.decal-center-v;
+                                                step: 0.05;
+                                                scrubbed(delta, _) => {
+                                                    root.decal-center-v = Math.clamp(root.decal-center-v + delta * 0.01, 0.0, 1.0);
+                                                    root.decal-transform-changed("", root.decal-center-u, root.decal-center-v, root.decal-scale-u, root.decal-scale-v, root.decal-rotation-deg);
+                                                }
+                                            }
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            Text {
+                                                text: "Scale";
+                                                color: DesignTokens.text-secondary;
+                                                font-size: 10px;
+                                                width: 52px;
+                                                vertical-alignment: center;
+                                            }
+                                            NumericField {
+                                                label: "U";
+                                                value: root.decal-scale-u;
+                                                step: 0.05;
+                                                scrubbed(delta, _) => {
+                                                    root.decal-scale-u = Math.max(0.01, root.decal-scale-u + delta * 0.01);
+                                                    root.decal-transform-changed("", root.decal-center-u, root.decal-center-v, root.decal-scale-u, root.decal-scale-v, root.decal-rotation-deg);
+                                                }
+                                            }
+                                            NumericField {
+                                                label: "V";
+                                                value: root.decal-scale-v;
+                                                step: 0.05;
+                                                scrubbed(delta, _) => {
+                                                    root.decal-scale-v = Math.max(0.01, root.decal-scale-v + delta * 0.01);
+                                                    root.decal-transform-changed("", root.decal-center-u, root.decal-center-v, root.decal-scale-u, root.decal-scale-v, root.decal-rotation-deg);
+                                                }
+                                            }
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            Text {
+                                                text: "Rotation";
+                                                color: DesignTokens.text-secondary;
+                                                font-size: 10px;
+                                                width: 52px;
+                                                vertical-alignment: center;
+                                            }
+                                            NumericField {
+                                                label: "Deg";
+                                                value: root.decal-rotation-deg;
+                                                step: 5.0;
+                                                scrubbed(delta, _) => {
+                                                    root.decal-rotation-deg = root.decal-rotation-deg + delta * 1.0;
+                                                    root.decal-transform-changed("", root.decal-center-u, root.decal-center-v, root.decal-scale-u, root.decal-scale-v, root.decal-rotation-deg);
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            height: 26px;
+                                            border-radius: 4px;
+                                            background: bake-touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 6px;
+                                                IconDisplay { icon: IconSet.Check; size: 12px; stroke: DesignTokens.accent; }
+                                                Text {
+                                                    text: "Bake to Raster";
+                                                    color: DesignTokens.text-primary;
+                                                    font-size: 11px;
+                                                    font-weight: 600;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            bake-touch := TouchArea {
+                                                clicked => { root.bake-active-decal(); }
                                             }
                                         }
                                     }
@@ -6271,10 +6563,12 @@ export component PetuniaSlintShell inherits Window {
             x: float-state.x * 1px;
             y: float-state.y * 1px;
             section-id: float-state.id;
-            title: float-state.id == "parts" ? root.label-parts : (float-state.id == "transform" ? root.label-tab-transform : (float-state.id == "object" ? root.label-tab-object : (float-state.id == "modifiers" ? root.label-tab-modifiers : (float-state.id == "quick_actions" ? root.label-quick-actions : float-state.id))));
+            title: float-state.id == "parts" ? root.label-parts : (float-state.id == "transform" ? root.label-tab-transform : (float-state.id == "object" ? root.label-tab-object : (float-state.id == "modifiers" ? root.label-tab-modifiers : (float-state.id == "quick_actions" ? root.label-quick-actions : (float-state.id == "material" ? root.label-tab-material : float-state.id)))));
             card-x: float-state.x;
             card-y: float-state.y;
             card-width: root.inspector-width;
+            container-width: root.width;
+            container-height: root.height;
             pin-open: float-state.pin-open;
             pinned-asset: float-state.pinned-asset;
             active-asset-id: root.object-id;
@@ -6289,6 +6583,21 @@ export component PetuniaSlintShell inherits Window {
             asset-pin-changed(id, asset) => { root.section-asset-pin-changed(id, asset); }
             if float-state.id == "transform": TransformBody {
                 field-hint: root.label-numeric-field-hint;
+                pos-x: root.pos-x;
+                pos-y: root.pos-y;
+                pos-z: root.pos-z;
+                rot-x: root.rot-x;
+                rot-y: root.rot-y;
+                rot-z: root.rot-z;
+                scale-x: root.scale-x;
+                scale-y: root.scale-y;
+                scale-z: root.scale-z;
+                scrubbed(kind, axis, delta, fine) => { root.transform-scrubbed(kind, axis, delta, fine); }
+                scrub-started(kind) => { root.transform-scrub-started(kind); }
+                scrub-finished => { root.transform-scrub-finished(); }
+                text-committed(kind, axis, text) => { root.transform-text-committed(kind, axis, text) }
+                scrub-cancelled => { root.transform-scrub-cancelled(); }
+            }
             if float-state.id == "modifiers": ModifiersBody {
                 rows: root.modifier-rows;
                 add-mirror-label: root.label-modifier-add-mirror;
@@ -6327,46 +6636,46 @@ export component PetuniaSlintShell inherits Window {
                 delete-requested => { root.delete-requested(); }
             }
             if float-state.id == "material": MaterialBody {
-    active-name : root.active-material-name;
+    active-name: root.active-material-name;
     active-slot <=> root.active-material-slot;
-    slots : root.material-slots;
-    profile : root.material-profile;
-    base-color : root.material-base-color;
-    palette : root.material-palette;
-    roughness : root.material-roughness;
-    metallic : root.material-metallic;
-    emission-strength : root.material-emission-strength;
+    slots: root.material-slots;
+    profile: root.material-profile;
+    base-color: root.material-base-color;
+    palette: root.material-palette;
+    roughness: root.material-roughness;
+    metallic: root.material-metallic;
+    emission-strength: root.material-emission-strength;
     advanced-open <=> root.material-advanced-open;
-    normal-scale : root.material-normal-scale;
-    alpha-mode : root.material-alpha-mode;
-    alpha-cutoff : root.material-alpha-cutoff;
-    has-albedo : root.material-has-albedo;
-    albedo-text-label : root.material-albedo-label;
-    assign-label : root.label-material-assign;
-    new-label : root.label-material-new;
-    duplicate-label : root.label-material-duplicate;
-    remove-label : root.label-material-remove;
-    profile-label : root.label-material-profile;
-    profile-pbr-label : root.label-material-profile-pbr;
-    profile-unlit-label : root.label-material-profile-unlit;
-    profile-toon-label : root.label-material-profile-toon;
-    profile-glass-label : root.label-material-profile-glass;
-    profile-emissive-label : root.label-material-profile-emissive;
-    base-color-label : root.label-material-base-color;
-    roughness-label : root.label-material-roughness;
-    metallic-label : root.label-material-metallic;
-    emission-label : root.label-material-emission-strength;
-    advanced-label : root.label-material-advanced;
-    normal-scale-label : root.label-material-normal-scale;
-    alpha-mode-label : root.label-material-alpha-mode;
-    alpha-opaque-label : root.label-material-alpha-opaque;
-    alpha-mask-label : root.label-material-alpha-mask;
-    alpha-blend-label : root.label-material-alpha-blend;
-    alpha-cutoff-label : root.label-material-alpha-cutoff;
-    albedo-label : root.label-material-texture-albedo;
-    create-texture-label : root.label-material-create-texture;
-    clear-texture-label : root.label-material-clear-texture;
-    no-texture-label : root.label-material-no-texture;
+    normal-scale: root.material-normal-scale;
+    alpha-mode: root.material-alpha-mode;
+    alpha-cutoff: root.material-alpha-cutoff;
+    has-albedo: root.material-has-albedo;
+    albedo-text-label: root.material-albedo-label;
+    assign-label: root.label-material-assign;
+    new-label: root.label-material-new;
+    duplicate-label: root.label-material-duplicate;
+    remove-label: root.label-material-remove;
+    profile-label: root.label-material-profile;
+    profile-pbr-label: root.label-material-profile-pbr;
+    profile-unlit-label: root.label-material-profile-unlit;
+    profile-toon-label: root.label-material-profile-toon;
+    profile-glass-label: root.label-material-profile-glass;
+    profile-emissive-label: root.label-material-profile-emissive;
+    base-color-label: root.label-material-base-color;
+    roughness-label: root.label-material-roughness;
+    metallic-label: root.label-material-metallic;
+    emission-label: root.label-material-emission-strength;
+    advanced-label: root.label-material-advanced;
+    normal-scale-label: root.label-material-normal-scale;
+    alpha-mode-label: root.label-material-alpha-mode;
+    alpha-opaque-label: root.label-material-alpha-opaque;
+    alpha-mask-label: root.label-material-alpha-mask;
+    alpha-blend-label: root.label-material-alpha-blend;
+    alpha-cutoff-label: root.label-material-alpha-cutoff;
+    albedo-label: root.label-material-texture-albedo;
+    create-texture-label: root.label-material-create-texture;
+    clear-texture-label: root.label-material-clear-texture;
+    no-texture-label: root.label-material-no-texture;
     assign-material-slot(slot) => { root.assign-material-slot(slot); }
     create-material => { root.create-material(); }
     duplicate-material(slot) => { root.duplicate-material(slot); }
@@ -6380,21 +6689,6 @@ export component PetuniaSlintShell inherits Window {
     material-albedo-clear => { root.material-albedo-clear(); }
 }
 
-                pos-x: root.pos-x;
-                pos-y: root.pos-y;
-                pos-z: root.pos-z;
-                rot-x: root.rot-x;
-                rot-y: root.rot-y;
-                rot-z: root.rot-z;
-                scale-x: root.scale-x;
-                scale-y: root.scale-y;
-                scale-z: root.scale-z;
-                scrubbed(kind, axis, delta, fine) => { root.transform-scrubbed(kind, axis, delta, fine); }
-                scrub-started(kind) => { root.transform-scrub-started(kind); }
-                scrub-finished => { root.transform-scrub-finished(); }
-                text-committed(kind, axis, text) => { root.transform-text-committed(kind, axis, text) }
-                scrub-cancelled => { root.transform-scrub-cancelled(); }
-            }
             if float-state.id == "parts": PartsBody {
                 search-label: root.label-search-parts;
                 selected-only-label: root.label-selected-parts-only;

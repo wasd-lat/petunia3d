@@ -4,11 +4,11 @@
 
 use petunia_core::ProjectService;
 use petunia_core::command::{
-    AddPrimitiveCmd, BoxSelectCmd, ClearSelectionCmd, CommandDispatcher, CommandError,
-    DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd, DuplicateSelectionCmd,
+    AddPrimitiveCmd, BakeDecalCmd, BoxSelectCmd, ClearSelectionCmd, CommandDispatcher,
+    CommandError, DeleteAssetCmd, DeleteSelectionCmd, DuplicateAssetCmd, DuplicateSelectionCmd,
     ExtrudeIndividualCmd, FlipDiagonalCmd, FlipNormalsCmd, InvertSelectionCmd, MergeCenterCmd,
     PrimitiveKind, ReorderAssetCmd, RevolveCmd, SelectAllCmd, SelectLinkedCmd,
-    SetAssetCollectionCmd, SubdivideSelectionCmd, ToggleCollectionLockCmd,
+    SetAssetCollectionCmd, SetDecalTransformCmd, SubdivideSelectionCmd, ToggleCollectionLockCmd,
     ToggleCollectionVisibilityCmd, ToggleLockAssetCmd, ToggleVisibilityAssetCmd,
 };
 use petunia_core::state::{ASSET_NAME_MAX_LEN, AppState, AssetRenameError, EditMode};
@@ -1104,4 +1104,68 @@ fn test_project_from_reference_and_bake_commands() {
     // 5. Undo restores previous state
     assert!(state.undo());
     assert_eq!(state.project.undo.depth().0, 2);
+}
+
+#[test]
+fn test_decal_commands_transform_and_bake() {
+    // Tests SetDecalTransformCmd and BakeDecalCmd transactional execution and undo/redo
+    // Testa execução transacional e desfazer/refazer de SetDecalTransformCmd e BakeDecalCmd
+    let mut state = AppState::default();
+    let decal_canvas = petunia_project::Canvas::new(8, 8, [255, 128, 0, 255]);
+    let decal =
+        petunia_project::paint_layers::DecalLayer::new(decal_canvas, [0.5, 0.5], [0.25, 0.25], 0.0);
+    let decal_id = {
+        let asset = state.project.active_mut().unwrap();
+        let stack = asset.paint_stack.get_or_insert_with(|| {
+            petunia_project::paint_layers::PaintLayerStack::with_base(
+                "Base",
+                petunia_project::Canvas::new(32, 32, [0, 0, 0, 255]),
+            )
+        });
+        stack.add_layer(petunia_project::paint_layers::PaintLayer::new_decal(
+            "Decal 1", decal,
+        ))
+    };
+
+    // 1. Dispatch SetDecalTransformCmd / Despacha SetDecalTransformCmd
+    assert!(
+        state
+            .dispatch(&SetDecalTransformCmd {
+                layer_id: decal_id,
+                center_uv: [0.6, 0.4],
+                scale_uv: [0.3, 0.3],
+                rotation_rad: 1.57,
+            })
+            .is_ok()
+    );
+
+    let asset = state.project.active().unwrap();
+    let stack = asset.paint_stack.as_ref().unwrap();
+    if let petunia_project::paint_layers::LayerKind::Decal(d) =
+        &stack.layers.iter().find(|l| l.id == decal_id).unwrap().kind
+    {
+        assert_eq!(d.center_uv, [0.6, 0.4]);
+        assert_eq!(d.scale_uv, [0.3, 0.3]);
+        assert_eq!(d.rotation_rad, 1.57);
+    } else {
+        panic!("expected Decal layer / esperava camada Decal");
+    }
+
+    // 2. Dispatch BakeDecalCmd / Despacha BakeDecalCmd
+    assert!(state.dispatch(&BakeDecalCmd { layer_id: decal_id }).is_ok());
+    let asset = state.project.active().unwrap();
+    let stack = asset.paint_stack.as_ref().unwrap();
+    assert!(matches!(
+        stack.layers.iter().find(|l| l.id == decal_id).unwrap().kind,
+        petunia_project::paint_layers::LayerKind::Raster(_)
+    ));
+
+    // 3. Undo restores decal layer / Undo restaura camada decal
+    assert!(state.undo());
+    let asset = state.project.active().unwrap();
+    let stack = asset.paint_stack.as_ref().unwrap();
+    assert!(matches!(
+        stack.layers.iter().find(|l| l.id == decal_id).unwrap().kind,
+        petunia_project::paint_layers::LayerKind::Decal(_)
+    ));
 }

@@ -330,6 +330,84 @@ impl PaintLayerStack {
         }
     }
 
+    /// Updates the coordinates, scale and rotation of a Decal layer (P3D-133).
+    /// Atualiza as coordenadas, escala e rotação de uma camada Decal (P3D-133).
+    pub fn set_decal_transform(
+        &mut self,
+        id: uuid::Uuid,
+        center_uv: [f32; 2],
+        scale_uv: [f32; 2],
+        rotation_rad: f32,
+    ) -> bool {
+        if !center_uv[0].is_finite()
+            || !center_uv[1].is_finite()
+            || !scale_uv[0].is_finite()
+            || !scale_uv[1].is_finite()
+            || !rotation_rad.is_finite()
+            || scale_uv[0] <= 0.0
+            || scale_uv[1] <= 0.0
+        {
+            return false;
+        }
+        if let Some(layer) = self.layers.iter_mut().find(|l| l.id == id)
+            && let LayerKind::Decal(ref mut decal) = layer.kind
+        {
+            decal.center_uv = center_uv;
+            decal.scale_uv = scale_uv;
+            decal.rotation_rad = rotation_rad;
+            return true;
+        }
+        false
+    }
+
+    /// Converts a Decal layer into a static Raster layer by baking its projection (P3D-160).
+    /// Converte uma camada de Decal em Raster aplicando sua projeção estaticamente (P3D-160).
+    pub fn bake_decal_to_raster(&mut self, id: uuid::Uuid, target_w: u32, target_h: u32) -> bool {
+        if target_w == 0 || target_h == 0 {
+            return false;
+        }
+        let Some(pos) = self.layers.iter().position(|l| l.id == id) else {
+            return false;
+        };
+        let LayerKind::Decal(decal) = &self.layers[pos].kind else {
+            return false;
+        };
+
+        let mut baked = Canvas::new(target_w, target_h, [0, 0, 0, 0]);
+        let cos_rot = (-decal.rotation_rad).cos();
+        let sin_rot = (-decal.rotation_rad).sin();
+
+        for y in 0..target_h {
+            for x in 0..target_w {
+                let u = (x as f32 + 0.5) / target_w as f32;
+                let v = (y as f32 + 0.5) / target_h as f32;
+
+                let dx = u - decal.center_uv[0];
+                let dy = v - decal.center_uv[1];
+
+                let rx = dx * cos_rot - dy * sin_rot;
+                let ry = dx * sin_rot + dy * cos_rot;
+
+                let decal_u = rx / decal.scale_uv[0] + 0.5;
+                let decal_v = ry / decal.scale_uv[1] + 0.5;
+
+                if (0.0..=1.0).contains(&decal_u) && (0.0..=1.0).contains(&decal_v) {
+                    let sx = (decal_u * decal.image.w as f32).clamp(0.0, decal.image.w as f32 - 1.0)
+                        as u32;
+                    let sy = (decal_v * decal.image.h as f32).clamp(0.0, decal.image.h as f32 - 1.0)
+                        as u32;
+
+                    if let Some(src) = decal.image.get(sx, sy) {
+                        baked.set(x, y, src);
+                    }
+                }
+            }
+        }
+
+        self.layers[pos].kind = LayerKind::Raster(baked);
+        true
+    }
+
     /// Executa a composição determinística de todas as camadas sobre o canvas base.
     pub fn composite(&self, base: &mut Canvas) {
         for layer in &self.layers {
@@ -1070,5 +1148,39 @@ mod tests {
             PaintEffect::Pixelate { cell_size: 4 },
         ));
         assert!(!stack.is_tileable());
+    }
+
+    #[test]
+    fn test_decal_transform_and_bake_to_raster() {
+        // Tests decal transform mutation and baking to a static raster layer
+        // Testa a mutação de transformação do decalque e bake para camada raster estática
+        let mut stack = PaintLayerStack::with_base("Base", Canvas::new(32, 32, [0, 0, 0, 255]));
+        let decal_canvas = Canvas::new(8, 8, [255, 0, 0, 255]);
+        let decal = DecalLayer::new(decal_canvas, [0.5, 0.5], [0.25, 0.25], 0.0);
+        let decal_id = stack.add_layer(PaintLayer::new_decal("Sticker", decal));
+
+        // Valid transform update / Atualização válida de transformação
+        assert!(stack.set_decal_transform(decal_id, [0.4, 0.6], [0.3, 0.3], 0.5));
+        if let Some(layer) = stack.layers.iter().find(|l| l.id == decal_id) {
+            if let LayerKind::Decal(ref d) = layer.kind {
+                assert_eq!(d.center_uv, [0.4, 0.6]);
+                assert_eq!(d.scale_uv, [0.3, 0.3]);
+                assert_eq!(d.rotation_rad, 0.5);
+            } else {
+                panic!("layer should be Decal / camada deveria ser Decal");
+            }
+        }
+
+        // Invalid transform rejected / Transformação inválida rejeitada
+        assert!(!stack.set_decal_transform(decal_id, [f32::NAN, 0.0], [0.1, 0.1], 0.0));
+        assert!(!stack.set_decal_transform(decal_id, [0.0, 0.0], [-0.1, 0.1], 0.0));
+
+        // Bake to raster / Bake para raster
+        assert!(stack.bake_decal_to_raster(decal_id, 32, 32));
+        if let Some(layer) = stack.layers.iter().find(|l| l.id == decal_id) {
+            assert!(matches!(layer.kind, LayerKind::Raster(_)));
+        } else {
+            panic!("layer should exist after bake / camada deveria existir após bake");
+        }
     }
 }

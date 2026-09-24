@@ -5,6 +5,13 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Decal 3D Projection, Layer Baking & Modal Tool Feedback (24/09/2026, Master MVP)
+- Manipulação paramétrica de decalques de pintura: suporte a transformação no espaço UV (`PaintLayerStack::set_decal_transform`) e rasterização destrutiva controlada (`PaintLayerStack::bake_decal_to_raster`).
+- Comandos transacionais de domínio `SetDecalTransformCmd` e `BakeDecalCmd` com histórico de desfazer/refazer completo no dispatcher de comandos.
+- Controles de UI para decalques no painel de camadas do workspace PAINT (Center U/V, Scale U/V, Rotation em graus e botão de Bake para textura raster).
+- Feedback visual de ferramentas modais (`ToolFeedback`) conectado ao enlaçamento de arrasto (`compute_drag_link`) com linhas pontilhadas de projeção e indicação de snap magnético no HUD.
+- Clamping de posicionamento de cards flutuantes (`FloatSectionCard`) vinculado às dimensões da janela e árvore de acessibilidade Slint com semântica padronizada `groupbox`.
+
 ### Outliner / Parts Hierarchy & UV Editor Seams (24/09/2026, Master MVP)
 - Reordenação transacional de assets na hierarquia (`ReorderAssetCmd`, `Project::reorder_asset`) com persistência da seleção ativa e suporte a desfazer/refazer.
 - Ações completas no menu de contexto de peças/assets: Isolar / Desisolar (`scene.isolate` / `scene.un_isolate`), Mover para Cima (`scene.move_up`) e Mover para Baixo (`scene.move_down`).

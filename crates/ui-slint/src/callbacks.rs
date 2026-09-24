@@ -503,6 +503,12 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
         })
         .collect();
     window.set_paint_layers(layer_entries.as_slice().into());
+    window.set_active_layer_is_decal(vm.active_layer_is_decal);
+    window.set_decal_center_u(vm.decal_center_u);
+    window.set_decal_center_v(vm.decal_center_v);
+    window.set_decal_scale_u(vm.decal_scale_u);
+    window.set_decal_scale_v(vm.decal_scale_v);
+    window.set_decal_rotation_deg(vm.decal_rotation_deg);
     window.set_loop_cut_active(vm.loop_cut_active);
     window.set_loop_cut_slide(vm.loop_cut_slide);
     window.set_loop_cut_cuts(vm.loop_cut_cuts);
@@ -3335,6 +3341,62 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
             }
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let decal_transform_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    // Handles decal transform changes (P3D-133) / Trata alterações na transformação do decalque (P3D-133)
+    window.on_decal_transform_changed(move |id, cu, cv, su, sv, rot| {
+        if let Ok(mut bridge) = decal_transform_bridge.lock() {
+            let target_id = if id.is_empty() {
+                bridge
+                    .state
+                    .project
+                    .assets
+                    .get(bridge.state.project.active)
+                    .and_then(|asset| asset.paint_stack.as_ref())
+                    .and_then(|stack| stack.active())
+                    .map(|layer| layer.id.to_string())
+                    .unwrap_or_default()
+            } else {
+                id.as_str().to_string()
+            };
+            if !target_id.is_empty() {
+                bridge.apply(UiIntent::SetDecalTransform {
+                    layer_id: target_id,
+                    center_u: cu,
+                    center_v: cv,
+                    scale_u: su,
+                    scale_v: sv,
+                    rotation_deg: rot,
+                });
+                let vm = bridge.view_model();
+                let new_frame = bridge.render_viewport();
+                if let Some(window) = window_weak.upgrade() {
+                    sync_window_properties(&window, &vm);
+                    if let Some(frame) = new_frame {
+                        window.set_viewport_image(frame);
+                    }
+                }
+            }
+        }
+    });
+
+    let bake_decal_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    // Bakes active decal layer to static raster (P3D-160) / Converte decalque ativo em raster estático (P3D-160)
+    window.on_bake_active_decal(move || {
+        if let Ok(mut bridge) = bake_decal_bridge.lock() {
+            bridge.apply(UiIntent::BakeActiveDecal);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
             }
         }
     });

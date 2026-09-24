@@ -341,8 +341,8 @@ pub(crate) fn dotted_link_commands(from: [f32; 2], to: [f32; 2]) -> String {
     commands
 }
 
-/// Cordão pivô→mouse da ferramenta ativa. Fora de sessão de manipulação
-/// retorna vazio e o Path some da tela.
+/// Active tool pivot-to-pointer or guide-line feedback cord (P3D-131).
+/// Cordão pivô→mouse ou guia de telemetria da ferramenta ativa (P3D-131).
 pub(crate) fn compute_drag_link(
     state: &AppState,
     width: f32,
@@ -353,8 +353,12 @@ pub(crate) fn compute_drag_link(
     if !link_active || width <= 1.0 || height <= 1.0 {
         return String::new();
     }
-    let pivot = state.calculate_pivot(state.session.pivot_point);
     let view_proj = state.session.camera.view_proj();
+    let fb = state.current_tool_feedback();
+    let pivot = fb
+        .as_ref()
+        .map(|f| f.origin)
+        .unwrap_or_else(|| state.calculate_pivot(state.session.pivot_point));
     let clip = view_proj * pivot.extend(1.0);
     if clip.w <= 0.05 {
         return String::new();
@@ -364,7 +368,28 @@ pub(crate) fn compute_drag_link(
         (clip.x * inv_w * 0.5 + 0.5) * width,
         (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height,
     ];
-    dotted_link_commands(base, pointer)
+
+    let target = if let Some(fb) = fb
+        && fb.is_snapped
+        && (fb.current - fb.origin).length() > 1e-4
+    {
+        // When snapped to magnetic target with non-zero delta, project the 3D snapped coordinate
+        // Quando atraído por alvo magnético com delta não-nulo, projeta a coordenada 3D sob snap
+        let clip_t = view_proj * fb.current.extend(1.0);
+        if clip_t.w > 0.05 {
+            let inv_t = 1.0 / clip_t.w;
+            [
+                (clip_t.x * inv_t * 0.5 + 0.5) * width,
+                (1.0 - (clip_t.y * inv_t * 0.5 + 0.5)) * height,
+            ]
+        } else {
+            pointer
+        }
+    } else {
+        pointer
+    };
+
+    dotted_link_commands(base, target)
 }
 
 /// Resumo legível da seleção (Object Info do Blender): o que está

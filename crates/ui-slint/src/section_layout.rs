@@ -285,6 +285,28 @@ mod tests {
     }
 
     #[test]
+    fn toggle_all_sections_skips_pinned_open() {
+        let (mut bridge, _path) = hermetic_bridge("toggle-all");
+        assert_eq!(
+            bridge.toggle_all_sections([true; 6]),
+            [false, false, false, false, false, false]
+        );
+        bridge.apply(UiIntent::SetSectionPinOpen {
+            section: InspectorSectionId::Parts,
+            pin_open: true,
+        });
+        assert_eq!(
+            bridge.toggle_all_sections([true; 6]),
+            [true, false, false, false, false, false]
+        );
+        assert_eq!(
+            bridge.toggle_all_sections([false, true, false, true, false, true]),
+            [true, true, true, true, true, true]
+        );
+        let _ = std::fs::remove_file(&_path);
+    }
+
+    #[test]
     fn unknown_section_ids_are_rejected() {
         assert_eq!(section_id_from_str("nope"), None);
         assert_eq!(section_id_from_str(""), None);
@@ -310,6 +332,98 @@ mod tests {
         assert!(!reloaded.section_layout(InspectorSectionId::Material).docked);
         assert!(reloaded.invert_vertical_drag);
         let _ = std::fs::remove_file(&path);
+    }
+
+    fn two_asset_bridge() -> (SlintUiBridge<PlaceholderViewport>, String, String) {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.state.project.assets[0].name = "First".to_string();
+        bridge
+            .state
+            .project
+            .add("Second", petunia_core::Mesh::cube(1.0));
+        let first = bridge.state.project.assets[0].id.to_string();
+        let second = bridge.state.project.assets[1].id.to_string();
+        (bridge, first, second)
+    }
+
+    #[test]
+    fn pinned_object_section_shows_pinned_asset_with_active_fallback() {
+        // Note: `add` makes the new asset active, so Second is active here.
+        // Nota: `add` ativa o asset novo, então Second está ativo aqui.
+        let (mut bridge, first, second) = two_asset_bridge();
+        assert_eq!(bridge.view_model().object_name, "Second");
+        bridge.apply(UiIntent::SetSectionPinnedAsset {
+            section: InspectorSectionId::Object,
+            asset: Some(first.clone()),
+        });
+        let vm = bridge.view_model();
+        assert_eq!(vm.object_name, "First");
+        assert_eq!(vm.object_id, first);
+        bridge.apply(UiIntent::SetSectionPinnedAsset {
+            section: InspectorSectionId::Object,
+            asset: Some("not-a-uuid".to_string()),
+        });
+        let vm = bridge.view_model();
+        assert_eq!(vm.object_name, "Second");
+        assert_eq!(vm.object_id, second);
+    }
+
+    #[test]
+    fn pinned_modifiers_act_on_displayed_stack() {
+        // Second is active; the modifier lives on First (non-active), so only
+        // owner search can reach it. / Second está ativo; o modifier vive em
+        // First (não-ativo), então só a busca por dono o alcança.
+        let (mut bridge, first, _second) = two_asset_bridge();
+        bridge.state.project.assets[0]
+            .modifiers
+            .push(petunia_project::ModifierInstance::mirror(0, 0.001));
+        let modifier_id = bridge.state.project.assets[0].modifiers[0].id.to_string();
+        bridge.apply(UiIntent::SetSectionPinnedAsset {
+            section: InspectorSectionId::Modifiers,
+            asset: Some(first),
+        });
+        assert_eq!(bridge.view_model().modifier_rows.len(), 1);
+        assert!(bridge.set_modifier_enabled(&modifier_id, false));
+        assert!(!bridge.state.project.assets[0].modifiers[0].enabled);
+    }
+
+    #[test]
+    fn pinned_material_resolves_asset_material() {
+        // Slot 0 holds Other; Second owns PinnedMat. Display must follow the
+        // pin, not the active slot. / Slot 0 tem Other; Second detém PinnedMat.
+        // A exibição deve seguir o pin, não o slot ativo.
+        let (mut bridge, _first, second) = two_asset_bridge();
+        bridge
+            .state
+            .project
+            .project
+            .add_material(petunia_project::Material::new("Other".to_string()));
+        let material_id = bridge
+            .state
+            .project
+            .project
+            .add_material(petunia_project::Material::new("PinnedMat".to_string()));
+        bridge.state.project.assets[1].material_id = Some(material_id);
+        bridge.active_material_slot = 0;
+        bridge.apply(UiIntent::SetSectionPinnedAsset {
+            section: InspectorSectionId::Material,
+            asset: Some(second),
+        });
+        assert_eq!(bridge.view_model().material_name, "PinnedMat");
+    }
+
+    #[test]
+    fn add_modifier_targets_pinned_asset() {
+        // Pinned to First (non-active): creation must land there, not on Second.
+        // Fixado em First (não-ativo): a criação deve ir para lá, não Second.
+        let (mut bridge, first, _second) = two_asset_bridge();
+        bridge.apply(UiIntent::SetSectionPinnedAsset {
+            section: InspectorSectionId::Modifiers,
+            asset: Some(first),
+        });
+        assert!(bridge.add_modifier("mirror"));
+        assert_eq!(bridge.state.project.assets[0].modifiers.len(), 1);
+        assert!(bridge.state.project.assets[1].modifiers.is_empty());
     }
 
     #[test]

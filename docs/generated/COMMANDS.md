@@ -14,7 +14,7 @@ description: Catálogo canônico de comandos gerados a partir do CommandDispatch
 > **Single Source of Truth (P3D-100, P3D-119)**
 > Todos os comandos do Petunia3D são registrados centralmente no `CommandDispatcher`, permitindo despacho transacional com histórico (Undo/Redo), Command Palette e telemetria.
 
-Total de comandos registrados no motor: **91**.
+Total de comandos registrados no motor: **93**.
 
 ## Tabela Geral de Comandos
 
@@ -81,7 +81,9 @@ Total de comandos registrados no motor: **91**.
 | `select.invert` | **Invert Selection** | `Select` | Não | — | Invert geometry selection in active mesh |
 | `select.linked` | **Select Linked** | `Select` | Não | — | Select connected geometry elements |
 | `select.none` | **Deselect All** | `Select` | Não | — | Clear current geometry selection |
+| `paint.bake_decal` | **Bake Decal to Raster** | `Tools` | Sim | TexturePainting | Bake a live decal layer into a static raster layer |
 | `paint.bake_reference` | **Bake Reference to Texture** | `Tools` | Sim | TexturePainting | Project UVs and bake visible reference image into the active texture |
+| `paint.set_decal_transform` | **Set Decal Transform** | `Tools` | Sim | TexturePainting | Update position, scale and rotation of a decal layer |
 | `tools.toggle_proportional` | **Toggle Proportional Editing** | `Tools` | Não | Modeling | Toggle proportional editing with falloff radius |
 | `tools.toggle_snap` | **Toggle Magnet Snap** | `Tools` | Não | Modeling | Toggle snapping to grid, vertices, edges or faces |
 | `uv.pack_islands` | **Pack UV Islands** | `Tools` | Sim | UvUnwrapping | Pack UV islands into 0..1 without overlaps |

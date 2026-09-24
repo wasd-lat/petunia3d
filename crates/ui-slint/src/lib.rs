@@ -314,6 +314,15 @@ pub enum UiIntent {
         segments: usize,
     },
     AddDecalLayer,
+    SetDecalTransform {
+        layer_id: String,
+        center_u: f32,
+        center_v: f32,
+        scale_u: f32,
+        scale_v: f32,
+        rotation_deg: f32,
+    },
+    BakeActiveDecal,
     SetSectionDocked {
         section: petunia_config::InspectorSectionId,
         docked: bool,
@@ -1139,6 +1148,42 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             UiIntent::AddDecalLayer => {
                 self.add_decal_layer();
             }
+            UiIntent::SetDecalTransform {
+                layer_id,
+                center_u,
+                center_v,
+                scale_u,
+                scale_v,
+                rotation_deg,
+            } => {
+                // Dispatches command to update decal transformation (P3D-133)
+                // Despacha comando para atualizar transformação do decalque (P3D-133)
+                if let Ok(id) = uuid::Uuid::parse_str(&layer_id) {
+                    let _ = self.state.dispatch(&petunia_core::SetDecalTransformCmd {
+                        layer_id: id,
+                        center_uv: [center_u, center_v],
+                        scale_uv: [scale_u, scale_v],
+                        rotation_rad: rotation_deg.to_radians(),
+                    });
+                }
+            }
+            UiIntent::BakeActiveDecal => {
+                // Bakes active decal layer to static raster (P3D-160)
+                // Rasteriza a camada decal ativa para raster estático (P3D-160)
+                if let Some(active_layer) = self
+                    .state
+                    .project
+                    .assets
+                    .get(self.state.project.active)
+                    .and_then(|asset| asset.paint_stack.as_ref())
+                    .and_then(|stack| stack.active())
+                {
+                    let id = active_layer.id;
+                    let _ = self
+                        .state
+                        .dispatch(&petunia_core::BakeDecalCmd { layer_id: id });
+                }
+            }
             UiIntent::SetSectionDocked { section, docked } => {
                 self.set_section_docked(section, docked);
             }
@@ -1492,6 +1537,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     } else {
                         lines.push(format!("Value   {:.3}", modal.value));
                     }
+                }
+            }
+            if let Some(fb) = self.state.current_tool_feedback() {
+                // ToolFeedback telemetry for magnetic snapping (P3D-131)
+                // Telemetria de ToolFeedback para atração magnética (P3D-131)
+                if fb.is_snapped {
+                    lines.push("Snap   Active".to_string());
                 }
             }
             vm.operation_hud_active = true;
@@ -2038,11 +2090,58 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
     }
 
+    /// Asset displayed by a section: the pinned asset when set and resolvable,
+    /// otherwise the active selection. Fail-safe fallback, never panics.
+    /// Asset exibido por uma seção: o asset fixado quando definido e resolvível,
+    /// senão a seleção ativa. Fallback fail-safe, nunca pânico.
+    pub fn section_asset(
+        &self,
+        section: petunia_config::InspectorSectionId,
+    ) -> Option<&petunia_project::Asset> {
+        self.section_layouts[section_layout::section_index(section)]
+            .pinned_asset
+            .as_deref()
+            .and_then(|id| uuid::Uuid::parse_str(id).ok())
+            .and_then(|id| {
+                self.state
+                    .project
+                    .assets
+                    .iter()
+                    .find(|asset| asset.id == id)
+            })
+            .or_else(|| self.state.project.active())
+    }
+
+    /// Index of the asset owning a modifier id (any asset, not just the active
+    /// one) so sections pinned to another asset act on the displayed stack.
+    /// Modifier ids are unique; the active path behaves exactly as before.
+    /// Índice do asset dono de um modifier (qualquer asset, não só o ativo)
+    /// para seções fixadas agirem na pilha exibida. Ids são únicos; o caminho
+    /// ativo comporta-se exatamente como antes.
+    fn find_modifier_owner(&self, id: uuid::Uuid) -> Option<usize> {
+        self.state
+            .project
+            .assets
+            .iter()
+            .position(|asset| asset.modifiers.iter().any(|modifier| modifier.id == id))
+    }
+
     pub fn add_modifier(&mut self, kind: &str) -> bool {
-        let asset_index = self.state.project.active;
-        if asset_index == usize::MAX {
+        // Creation follows the displayed Modifiers section: pinned asset when
+        // set, active selection otherwise. / A criação segue a seção exibida.
+        let asset_index = self
+            .section_asset(petunia_config::InspectorSectionId::Modifiers)
+            .map(|asset| asset.id)
+            .and_then(|id| {
+                self.state
+                    .project
+                    .assets
+                    .iter()
+                    .position(|asset| asset.id == id)
+            });
+        let Some(asset_index) = asset_index else {
             return false;
-        }
+        };
         if self.state.project.assets.get(asset_index).is_none() {
             return false;
         }
@@ -2063,10 +2162,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Ok(id) = uuid::Uuid::parse_str(id) else {
             return false;
         };
-        let asset_index = self.state.project.active;
-        if asset_index == usize::MAX {
+        let Some(asset_index) = self.find_modifier_owner(id) else {
             return false;
-        }
+        };
         let Some(asset) = self.state.project.assets.get_mut(asset_index) else {
             return false;
         };
@@ -2092,10 +2190,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Ok(id) = uuid::Uuid::parse_str(id) else {
             return false;
         };
-        let asset_index = self.state.project.active;
-        if asset_index == usize::MAX {
+        let Some(asset_index) = self.find_modifier_owner(id) else {
             return false;
-        }
+        };
         if !self.state.project.assets[asset_index]
             .modifiers
             .iter()
@@ -2115,10 +2212,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Ok(id) = uuid::Uuid::parse_str(id) else {
             return false;
         };
-        let asset_index = self.state.project.active;
-        if asset_index == usize::MAX {
+        let Some(asset_index) = self.find_modifier_owner(id) else {
             return false;
-        }
+        };
         let Some(current) = self.state.project.assets[asset_index]
             .modifiers
             .iter()
@@ -2149,10 +2245,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Ok(id) = uuid::Uuid::parse_str(id) else {
             return false;
         };
-        let asset_index = self.state.project.active;
-        if asset_index == usize::MAX {
+        let Some(asset_index) = self.find_modifier_owner(id) else {
             return false;
-        }
+        };
         let axis_value = (axis.clamp(0, 2)) as usize;
         self.state.checkpoint("change modifier axis");
         let Some(asset) = self.state.project.assets.get_mut(asset_index) else {
@@ -2173,10 +2268,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Ok(id) = uuid::Uuid::parse_str(id) else {
             return false;
         };
-        let asset_index = self.state.project.active;
-        if asset_index == usize::MAX {
+        let Some(asset_index) = self.find_modifier_owner(id) else {
             return false;
-        }
+        };
         self.state.checkpoint("change modifier direction");
         let Some(asset) = self.state.project.assets.get_mut(asset_index) else {
             return false;
@@ -2199,10 +2293,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Ok(id) = uuid::Uuid::parse_str(id) else {
             return false;
         };
-        let asset_index = self.state.project.active;
-        if asset_index == usize::MAX {
+        let Some(asset_index) = self.find_modifier_owner(id) else {
             return false;
-        }
+        };
         let Some(asset) = self.state.project.assets.get(asset_index) else {
             return false;
         };
@@ -6221,6 +6314,27 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             .to_string();
             vm.paint_effect_params = effect_params(&effect);
         }
+        if let Some(decal) = self
+            .state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active())
+            .and_then(|layer| match &layer.kind {
+                petunia_project::paint_layers::LayerKind::Decal(decal) => Some(decal.clone()),
+                _ => None,
+            })
+        {
+            // Populates decal transformation fields (P3D-133)
+            // Preenche campos de transformação do decalque (P3D-133)
+            vm.active_layer_is_decal = true;
+            vm.decal_center_u = decal.center_uv[0];
+            vm.decal_center_v = decal.center_uv[1];
+            vm.decal_scale_u = decal.scale_uv[0];
+            vm.decal_scale_v = decal.scale_uv[1];
+            vm.decal_rotation_deg = decal.rotation_rad.to_degrees();
+        }
         if let Some((width, height)) = self.paint_canvas_dimensions() {
             vm.paint_canvas_size = format!("{width} × {height}");
             vm.paint_canvas_revision = self.state.project.assets[self.state.project.active]
@@ -6372,7 +6486,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.state
                 .t_id(petunia_config::text_id::UI_NO_TOOL_PARAMETERS)
         };
-        if let Some(asset) = self.state.project.active() {
+        if let Some(asset) = self.section_asset(petunia_config::InspectorSectionId::Object) {
             vm.object_has_selection = true;
             vm.object_id = asset.id.to_string();
             vm.object_name = asset.name.clone();
@@ -6391,7 +6505,22 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 });
             vm.object_modifier_count = asset.modifiers.len() as i32;
         }
-        let material_slot = vm.active_material_slot.max(0) as usize;
+        // Display follows the pinned asset's material when the Material section
+        // is pinned and resolvable; slot actions stay selection-contextual.
+        // Exibição segue o material do asset fixado quando resolvível; ações de
+        // slot seguem selection-context.
+        let material_slot = self
+            .section_asset(petunia_config::InspectorSectionId::Material)
+            .and_then(|asset| asset.material_id)
+            .and_then(|id| {
+                self.state
+                    .project
+                    .project
+                    .materials
+                    .iter()
+                    .position(|material| material.id == id)
+            })
+            .unwrap_or_else(|| vm.active_material_slot.max(0) as usize);
         if let Some(material) = self.state.project.project.materials.get(material_slot) {
             vm.material_has_selection = true;
             vm.material_id = material.id.to_string();
@@ -6471,7 +6600,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 pinned: pinned_ids.iter().any(|pinned| pinned == id),
             })
             .collect();
-        if let Some(asset) = self.state.project.active() {
+        if let Some(asset) = self.section_asset(petunia_config::InspectorSectionId::Modifiers) {
             vm.modifier_rows = asset
                 .modifiers
                 .iter()
