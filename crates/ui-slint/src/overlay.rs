@@ -21,6 +21,7 @@ pub enum OverlayId {
     /// LIFO fechar o menu certo quando os dois modos competem.
     ContextMenu,
     MenuBar,
+    PivotMenu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

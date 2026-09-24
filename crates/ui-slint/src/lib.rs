@@ -151,6 +151,17 @@ impl ToolModalKind {
         }
     }
 
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Extrude => "model.extrude",
+            Self::ExtrudeIndividual => "model.extrude_individual",
+            Self::Inset => "model.inset",
+            Self::Bevel => "model.bevel",
+            Self::PushPull => "model.push_pull",
+            Self::ScaleSelection => "model.scale_selection",
+        }
+    }
+
     pub const fn title(self) -> &'static str {
         match self {
             Self::Extrude => "Extrude",
@@ -242,6 +253,8 @@ pub enum UiIntent {
     ImportModelFrom(PathBuf),
     ExportActiveObjTo(PathBuf),
     ExportSceneGlbTo(PathBuf),
+    ImportPalette(PathBuf),
+    ExportPalette(PathBuf),
     SelectSceneAsset(String),
     ToggleSceneAssetVisibility(String),
     ToggleSceneAssetLock(String),
@@ -269,6 +282,38 @@ pub struct SceneItemModel {
     pub active: bool,
     pub verts: usize,
     pub tris: usize,
+}
+
+/// Ação rápida do Inspector MODEL derivada do Command Registry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuickActionModel {
+    pub id: String,
+    pub label: String,
+    pub enabled: bool,
+    pub active: bool,
+    pub pinned: bool,
+}
+
+/// Opção de material do projeto para o seletor do Inspector.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialOptionModel {
+    pub id: String,
+    pub name: String,
+    pub active: bool,
+}
+
+/// Linha funcional da pilha Mirror/Symmetry no Inspector MODEL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModifierRowModel {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub enabled: bool,
+    pub kind: String,
+    pub axis: i32,
+    pub positive_to_negative: bool,
+    pub can_move_up: bool,
+    pub can_move_down: bool,
 }
 
 /// Snapshot pequeno para apresentação. Não expõe estruturas internas do core ao
@@ -376,6 +421,12 @@ pub struct ShellViewModel {
     pub label_search_assets: String,
     pub label_search_parts: String,
     pub label_inspector: String,
+    pub label_expand_inspector: String,
+    pub label_collapse_inspector: String,
+    pub label_tab_parts: String,
+    pub label_tab_transform: String,
+    pub label_tab_material: String,
+    pub label_tab_object: String,
     pub label_numeric_field_hint: String,
     pub label_model_select: String,
     pub label_model_position: String,
@@ -460,6 +511,7 @@ pub struct ShellViewModel {
     pub profile_active: bool,
     pub pivot_id: String,
     pub pivot_label: String,
+    pub pivot_menu_open: bool,
     pub pivot_median_label: String,
     pub pivot_bounds_label: String,
     pub pivot_cursor_label: String,
@@ -657,6 +709,12 @@ impl ShellViewModel {
             label_search_assets: String::new(),
             label_search_parts: String::new(),
             label_inspector: String::new(),
+            label_expand_inspector: String::new(),
+            label_collapse_inspector: String::new(),
+            label_tab_parts: String::new(),
+            label_tab_transform: String::new(),
+            label_tab_material: String::new(),
+            label_tab_object: String::new(),
             label_numeric_field_hint: String::new(),
             label_model_select: String::new(),
             label_model_position: String::new(),
@@ -746,6 +804,7 @@ impl ShellViewModel {
                 PivotPoint::Cursor3D => petunia_config::text_id::PIVOT_CURSOR,
                 PivotPoint::IndividualOrigins => petunia_config::text_id::PIVOT_INDIVIDUAL,
             }),
+            pivot_menu_open: false,
             pivot_median_label: state.t_id(petunia_config::text_id::PIVOT_MEDIAN),
             pivot_bounds_label: state.t_id(petunia_config::text_id::PIVOT_BOUNDS),
             pivot_cursor_label: state.t_id(petunia_config::text_id::PIVOT_CURSOR),
@@ -894,6 +953,7 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub context_menu: Option<ContextMenuState>,
     /// Menu da barra superior aberto, se houver.
     pub menu_open: Option<MenuKind>,
+    pub pivot_menu_open: bool,
     /// Popover de opções de shading aberto.
     pub shading_popover_open: bool,
     pub pointer_position: [f32; 2],
@@ -1182,6 +1242,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             rename_draft: None,
             context_menu: None,
             menu_open: None,
+            pivot_menu_open: false,
             shape_anchor: None,
             slice_anchor: None,
             loop_cut: None,
@@ -1345,6 +1406,31 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         .state
                         .set_status(format!("exported {}", path.display())),
                     Err(error) => self.state.set_status(format!("export failed: {error}")),
+                }
+            }
+            UiIntent::ImportPalette(path) => {
+                match petunia_module_paint::PaintModule::import_palette_file(&mut self.state, &path)
+                {
+                    Ok(count) => {
+                        self.state
+                            .set_status(format!("imported palette ({count} colors)"));
+                        self.state.mark_dirty();
+                    }
+                    Err(error) => {
+                        self.state
+                            .set_status(format!("palette import failed: {error}"));
+                    }
+                }
+            }
+            UiIntent::ExportPalette(path) => {
+                match petunia_module_paint::PaintModule::export_palette_file(&self.state, &path) {
+                    Ok(()) => {
+                        self.state.set_status("palette exported successfully");
+                    }
+                    Err(error) => {
+                        self.state
+                            .set_status(format!("palette export failed: {error}"));
+                    }
                 }
             }
             UiIntent::Undo => {
@@ -2154,13 +2240,24 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
-    pub fn set_pivot_menu_open(&mut self, open: bool) {
+    pub fn set_pivot_menu_open(&mut self, open: bool) -> bool {
         self.shading_popover_open = false;
-        self.state.ui.status = if open {
-            "Choose a transform pivot".to_string()
-        } else {
-            self.state.ui.status.clone()
-        };
+        if open {
+            self.close_menu();
+            self.close_context_menu();
+            self.overlays.push(OverlayEntry {
+                id: OverlayId::PivotMenu,
+                kind: OverlayKind::Popover,
+                pinned: false,
+                dismiss_on_escape: true,
+                dismiss_on_click_away: true,
+            });
+            self.pivot_menu_open = true;
+            self.state.set_status("Choose a transform pivot");
+        } else if self.overlays.remove(OverlayId::PivotMenu).is_some() {
+            self.pivot_menu_open = false;
+        }
+        self.pivot_menu_open == open
     }
 
     pub fn set_profile_depth(&mut self, depth: f32) -> bool {
@@ -3368,11 +3465,34 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
-    /// Marca ou desmarca como costura todas as arestas da face UV selecionada.
+    /// Marca ou desmarca como costura as arestas selecionadas ou da face UV selecionada.
     pub fn toggle_selected_uv_seams(&mut self) -> bool {
         let Some(mesh) = self.state.project.active_mesh_mut() else {
             return false;
         };
+        let selected_edges: Vec<(u32, u32)> = mesh.selected_edges.iter().copied().collect();
+        if !selected_edges.is_empty() {
+            self.state.checkpoint("toggle uv seams");
+            let Some(mesh) = self.state.project.active_mesh_mut() else {
+                return false;
+            };
+            for (a, b) in selected_edges {
+                mesh.toggle_seam(a, b);
+            }
+            let count = self
+                .state
+                .project
+                .active_mesh()
+                .map(|mesh| mesh.uv_seams.len())
+                .unwrap_or(0);
+            self.state.set_status(format!(
+                "UV seams on selected edges toggled ({count} total)"
+            ));
+            self.state.emit_mesh_changed();
+            self.state.mark_dirty();
+            return true;
+        }
+
         let Some(face) = mesh.faces.iter().find(|face| face.selected) else {
             self.state
                 .set_status("UV: select a face in the viewport first");
@@ -4360,6 +4480,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn select_viewport(&mut self, normalized_x: f32, normalized_y: f32, extend: bool) {
+        self.select_viewport_ext(normalized_x, normalized_y, extend, false);
+    }
+
+    pub fn select_viewport_ext(
+        &mut self,
+        normalized_x: f32,
+        normalized_y: f32,
+        extend: bool,
+        loop_select: bool,
+    ) {
         if !normalized_x.is_finite() || !normalized_y.is_finite() {
             return;
         }
@@ -4452,30 +4582,36 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             Target::Edge(a, b) => {
                 if let Some(mesh) = self.state.project.active_mesh_mut() {
-                    if !extend {
-                        mesh.deselect_all();
-                    }
-                    if extend && mesh.selected_edges.contains(&(a, b)) {
-                        mesh.selected_edges.remove(&(a, b));
+                    if loop_select {
+                        let count = mesh.select_edge_loop((a, b), extend);
+                        self.state
+                            .set_status(format!("Selected edge loop ({count} edges)"));
                     } else {
-                        mesh.selected_edges.insert((a, b));
-                    }
-                    // Operações de malha usam os vértices das arestas selecionadas.
-                    // Recalcular impede que um Shift-click para desmarcar deixe
-                    // vértices invisivelmente selecionados.
-                    for vertex in &mut mesh.verts {
-                        vertex.selected = false;
-                    }
-                    for &(start, end) in &mesh.selected_edges {
-                        if let Some(vertex) = mesh.verts.get_mut(start as usize) {
-                            vertex.selected = true;
+                        if !extend {
+                            mesh.deselect_all();
                         }
-                        if let Some(vertex) = mesh.verts.get_mut(end as usize) {
-                            vertex.selected = true;
+                        if extend && mesh.selected_edges.contains(&(a, b)) {
+                            mesh.selected_edges.remove(&(a, b));
+                        } else {
+                            mesh.selected_edges.insert((a, b));
                         }
+                        // Operações de malha usam os vértices das arestas selecionadas.
+                        // Recalcular impede que um Shift-click para desmarcar deixe
+                        // vértices invisivelmente selecionados.
+                        for vertex in &mut mesh.verts {
+                            vertex.selected = false;
+                        }
+                        for &(start, end) in &mesh.selected_edges {
+                            if let Some(vertex) = mesh.verts.get_mut(start as usize) {
+                                vertex.selected = true;
+                            }
+                            if let Some(vertex) = mesh.verts.get_mut(end as usize) {
+                                vertex.selected = true;
+                            }
+                        }
+                        self.state.set_status(format!("Edge {a}-{b} selected"));
                     }
                 }
-                self.state.set_status(format!("Edge {a}-{b} selected"));
             }
             Target::Face(face) => {
                 if let Some(mesh) = self.state.project.active_mesh_mut() {
@@ -5203,6 +5339,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if let Some(kind) = self.menu_open {
             vm.menu_open = kind.id().to_string();
         }
+        vm.pivot_menu_open = self.pivot_menu_open;
         let translated = |id: petunia_config::TextId| self.state.t_id(id);
         vm.label_parts = translated(petunia_config::text_id::UI_PARTS);
         vm.label_project_asset_library =
@@ -5222,6 +5359,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_search_assets = translated(petunia_config::text_id::UI_SEARCH_ASSETS);
         vm.label_search_parts = translated(petunia_config::text_id::UI_SEARCH_PARTS);
         vm.label_inspector = translated(petunia_config::text_id::UI_INSPECTOR);
+        vm.label_expand_inspector = translated(petunia_config::text_id::UI_EXPAND_INSPECTOR);
+        vm.label_collapse_inspector = translated(petunia_config::text_id::UI_COLLAPSE_INSPECTOR);
+        vm.label_tab_parts = translated(petunia_config::text_id::UI_TAB_PARTS);
+        vm.label_tab_transform = translated(petunia_config::text_id::UI_TAB_TRANSFORM);
+        vm.label_tab_material = translated(petunia_config::text_id::UI_TAB_MATERIAL);
+        vm.label_tab_object = translated(petunia_config::text_id::UI_TAB_OBJECT);
         vm.label_numeric_field_hint = translated(petunia_config::text_id::UI_NUMERIC_FIELD_HINT);
         vm.label_model_select = translated(petunia_config::text_id::TOOLS_SELECT);
         vm.label_model_position = translated(petunia_config::text_id::TRANSFORM_POSITION);
@@ -5516,6 +5659,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             OverlayId::OutlinerContextMenu => self.context_menu = None,
             OverlayId::ContextMenu => self.context_menu = None,
             OverlayId::MenuBar => self.menu_open = None,
+            OverlayId::PivotMenu => self.pivot_menu_open = false,
         }
     }
 }
@@ -6531,6 +6675,7 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_boolean_ready(vm.boolean_ready);
     window.set_boolean_keep_parts(vm.boolean_keep_parts);
     window.set_menu_open(vm.menu_open.as_str().into());
+    window.set_pivot_menu_open(vm.pivot_menu_open);
     window.set_menu_file_label(vm.menu_file_label.as_str().into());
     window.set_menu_edit_label(vm.menu_edit_label.as_str().into());
     window.set_menu_view_label(vm.menu_view_label.as_str().into());
@@ -6564,6 +6709,12 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_label_search_assets(vm.label_search_assets.as_str().into());
     window.set_label_search_parts(vm.label_search_parts.as_str().into());
     window.set_label_inspector(vm.label_inspector.as_str().into());
+    window.set_label_expand_inspector(vm.label_expand_inspector.as_str().into());
+    window.set_label_collapse_inspector(vm.label_collapse_inspector.as_str().into());
+    window.set_label_tab_parts(vm.label_tab_parts.as_str().into());
+    window.set_label_tab_transform(vm.label_tab_transform.as_str().into());
+    window.set_label_tab_material(vm.label_tab_material.as_str().into());
+    window.set_label_tab_object(vm.label_tab_object.as_str().into());
     window.set_label_numeric_field_hint(vm.label_numeric_field_hint.as_str().into());
     window.set_label_model_select(vm.label_model_select.as_str().into());
     window.set_label_model_position(vm.label_model_position.as_str().into());
@@ -6866,6 +7017,8 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                 "file.import_obj" => service.import_model().await,
                 "file.export_obj" => service.export_obj().await,
                 "file.export_glb" => service.export_glb().await,
+                "palette.import" => service.import_palette().await,
+                "palette.export" => service.export_palette().await,
                 _ => None,
             };
             let Some(path) = path else {
@@ -6877,6 +7030,8 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
                     "file.import_obj" => UiIntent::ImportModelFrom(path),
                     "file.export_obj" => UiIntent::ExportActiveObjTo(path),
                     "file.export_glb" => UiIntent::ExportSceneGlbTo(path),
+                    "palette.import" => UiIntent::ImportPalette(path),
+                    "palette.export" => UiIntent::ExportPalette(path),
                     _ => UiIntent::SaveProjectTo(path),
                 };
                 let needs_render = matches!(id.as_str(), "file.open" | "file.import_obj");
@@ -7307,9 +7462,9 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
 
     let viewport_select_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_viewport_select(move |x, y, extend| {
+    window.on_viewport_select(move |x, y, extend, loop_select| {
         if let Ok(mut bridge) = viewport_select_bridge.lock() {
-            bridge.select_viewport(x, y, extend);
+            bridge.select_viewport_ext(x, y, extend, loop_select);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -8380,10 +8535,11 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     let pivot_menu_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_pivot_menu_toggled(move |open| {
-        if let Ok(_bridge) = pivot_menu_bridge.lock()
-            && let Some(window) = window_weak.upgrade()
-        {
-            window.set_pivot_menu_open(open);
+        if let Ok(mut bridge) = pivot_menu_bridge.lock() {
+            bridge.set_pivot_menu_open(open);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
         }
     });
 
@@ -10737,6 +10893,13 @@ mod tests {
         assert!(bridge.set_pivot_point("cursor"));
         assert_eq!(bridge.state.session.pivot_point, PivotPoint::Cursor3D);
         assert_eq!(bridge.view_model().pivot_id, "cursor");
+        assert!(bridge.set_pivot_menu_open(true));
+        assert_eq!(
+            bridge.overlays.top().map(|entry| entry.id),
+            Some(OverlayId::PivotMenu)
+        );
+        assert!(bridge.handle_escape());
+        assert!(!bridge.pivot_menu_open);
         assert!(!bridge.set_pivot_point("unknown"));
     }
 
@@ -12791,5 +12954,73 @@ mod tests {
 
         bridge.execute_command(CommandId::SaveActiveAsAsset);
         assert_eq!(bridge.state.project.assets.len(), 3);
+    }
+
+    #[test]
+    fn edge_loop_selection_via_select_viewport_ext() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.execute_command(CommandId::AddPlane);
+        bridge.state.set_selection_domain(SelectionDomain::Edge);
+
+        // Direct call to select_edge_loop through mesh or select_viewport_ext
+        let count = bridge
+            .state
+            .project
+            .active_mesh_mut()
+            .unwrap()
+            .select_edge_loop((0, 1), false);
+        assert_eq!(count, 4, "boundary loop of plane has 4 edges");
+        let active = bridge.state.project.active_mesh().unwrap();
+        assert_eq!(active.selected_edges.len(), 4);
+        assert!(active.verts.iter().all(|v| v.selected));
+    }
+
+    #[test]
+    fn palette_import_and_export_intents_work() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let temp_dir = std::env::temp_dir();
+        let gpl_path = temp_dir.join("test_sprint1_palette.gpl");
+
+        let content = "GIMP Palette\nName: Test\nColumns: 4\n#\n255   0   0 Red\n  0 255   0 Green\n  0   0 255 Blue\n";
+        std::fs::write(&gpl_path, content).unwrap();
+
+        bridge.apply(UiIntent::ImportPalette(gpl_path.clone()));
+        assert!(bridge.state.ui.status.contains("imported palette"));
+        assert_eq!(bridge.state.project.palette.len(), 3);
+
+        let export_path = temp_dir.join("test_sprint1_export.gpl");
+        bridge.apply(UiIntent::ExportPalette(export_path.clone()));
+        assert!(
+            bridge
+                .state
+                .ui
+                .status
+                .contains("palette exported successfully")
+        );
+        assert!(export_path.exists());
+
+        let _ = std::fs::remove_file(gpl_path);
+        let _ = std::fs::remove_file(export_path);
+    }
+
+    #[test]
+    fn uv_seam_toggle_with_selected_edges() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        let mesh = bridge.state.project.active_mesh_mut().unwrap();
+        mesh.faces[0].selected = false;
+        mesh.selected_edges.insert((0, 1));
+        mesh.selected_edges.insert((1, 2));
+
+        assert!(bridge.toggle_selected_uv_seams());
+        let seams = bridge.state.project.active_mesh().unwrap().uv_seams.clone();
+        assert_eq!(seams.len(), 2);
+        assert!(seams.contains(&(0, 1)));
+        assert!(seams.contains(&(1, 2)));
+        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+        // Toggling again removes them
+        assert!(bridge.toggle_selected_uv_seams());
+        let seams_after = bridge.state.project.active_mesh().unwrap().uv_seams.clone();
+        assert!(seams_after.is_empty());
     }
 }

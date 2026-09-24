@@ -550,11 +550,13 @@ component NumericField inherits Rectangle {
     property <bool> invalid: false;
     property <string> draft;
 
+    min-height: 28px;
+    max-height: 28px;
+
     accessible-role: spinbox;
     accessible-label: root.full-label;
     accessible-value: Math.round(root.value * 100) / 100;
     forward-focus: field-focus;
-    height: 24px;
     border-radius: 4px;
     background: touch.pressed ? DesignTokens.surface-hover : DesignTokens.surface-raised;
     border-width: 1px;
@@ -706,12 +708,14 @@ component Vector3Field inherits HorizontalLayout {
 
     spacing: 6px;
     alignment: center;
+    height: 28px;
 
     Text {
         text: root.row-label;
         color: DesignTokens.text-secondary;
         font-size: 11px;
-        width: 52px;
+        min-width: 52px;
+        max-width: 52px;
         vertical-alignment: center;
     }
 
@@ -871,6 +875,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> model-transform-open: true;
     in-out property <bool> model-material-open: false;
     in-out property <bool> model-object-open: true;
+    in-out property <bool> inspector-collapsed: false;
     in-out property <bool> compact-shell: false;
     in-out property <bool> command-search-visible: false;
     in-out property <bool> scene-drawer-visible: false;
@@ -1052,6 +1057,12 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-wire-overlay-hint: "";
     in-out property <string> label-hide-part: "";
     in-out property <string> label-inspector: "";
+    in-out property <string> label-collapse-inspector: "";
+    in-out property <string> label-expand-inspector: "";
+    in-out property <string> label-tab-parts: "";
+    in-out property <string> label-tab-transform: "";
+    in-out property <string> label-tab-material: "";
+    in-out property <string> label-tab-object: "";
     in-out property <string> label-numeric-field-hint: "";
     in-out property <string> label-model-select: "";
     in-out property <string> label-model-position: "";
@@ -1158,7 +1169,7 @@ export component PetuniaSlintShell inherits Window {
     callback viewport-pan(float, float);
     callback viewport-zoom(float);
     callback viewport-resized(float, float);
-    callback viewport-select(float, float, bool);
+    callback viewport-select(float, float, bool, bool);
     callback viewport-box-select(float, float, float, float, bool, bool);
     callback viewport-lasso-select(string, bool, bool);
     callback viewport-transform-begin(string, float, float);
@@ -1729,6 +1740,7 @@ export component PetuniaSlintShell inherits Window {
                         property <bool> is-keyboard-transform-drag: false;
                         property <bool> consume-click: false;
                         property <bool> tool-drag-fine: false;
+                        property <bool> loop-selection: false;
                         property <string> local-kind: "";
 
                         function clear-gesture() {
@@ -1746,6 +1758,7 @@ export component PetuniaSlintShell inherits Window {
                             self.is-gizmo-drag = false;
                             self.is-keyboard-transform-drag = false;
                             self.consume-click = false;
+                            self.loop-selection = false;
                             self.is-painting = false;
                             self.is-orbit = false;
                             self.is-pan = false;
@@ -1783,12 +1796,13 @@ export component PetuniaSlintShell inherits Window {
                                 moved-since-down = false;
                                 consume-click = false;
                                 extend-selection = event.modifiers.shift;
+                                loop-selection = event.modifiers.alt;
                                 is-transform = false;
                                 pending-transform = false;
                                 pending-box-select = false;
                                 if event.button == PointerEventButton.left && root.active-tool == "draw_profile" {
                                     consume-click = true;
-                                    root.viewport-select(self.mouse-x / self.width, self.mouse-y / self.height, false);
+                                    root.viewport-select(self.mouse-x / self.width, self.mouse-y / self.height, false, false);
                                 } else if event.button == PointerEventButton.middle
                                     && !root.tool-modal-active && !root.loop-cut-active && !root.loop-cut-armed
                                     && !root.profile-active && root.active-tool != "slice" {
@@ -2006,7 +2020,7 @@ export component PetuniaSlintShell inherits Window {
                         clicked => {
                             if !consume-click && !moved-since-down && !is-transform && !is-painting
                                 && root.active-workspace != "PAINT" {
-                                root.viewport-select(self.mouse-x / self.width, self.mouse-y / self.height, extend-selection);
+                                root.viewport-select(self.mouse-x / self.width, self.mouse-y / self.height, extend-selection, loop-selection);
                             }
                             consume-click = false;
                         }
@@ -2529,6 +2543,18 @@ export component PetuniaSlintShell inherits Window {
                                 active: active-tool == "fill";
                                 clicked => { root.active-tool-changed("fill"); }
                             }
+                            if active-workspace == "PAINT": ToolButton {
+                                icon: IconSet.SquareDashed;
+                                semantic-label: "Line";
+                                active: active-tool == "line";
+                                clicked => { root.active-tool-changed("line"); }
+                            }
+                            if active-workspace == "PAINT": ToolButton {
+                                icon: IconSet.Square;
+                                semantic-label: "Rectangle";
+                                active: active-tool == "rectangle";
+                                clicked => { root.active-tool-changed("rectangle"); }
+                            }
 
                             if active-workspace == "UV": ToolButton {
                                 icon: IconSet.Maximize2;
@@ -2692,14 +2718,99 @@ export component PetuniaSlintShell inherits Window {
                 }
 
                 if inspector-visible && !compact-shell: Rectangle {
-                    width: inspector-width;
+                    width: inspector-collapsed ? 48px : inspector-width;
                     y: 0;
                     height: 100%;
-                    background: DesignTokens.surface;
-                    border-width: 1px;
-                    border-color: DesignTokens.border;
-                    VerticalLayout {
-                        padding: 12px;
+                    background: transparent;
+
+                    if inspector-collapsed: Rectangle {
+                        x: 0;
+                        width: 48px;
+                        height: 100%;
+                        background: DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 16px;
+                            alignment: start;
+
+                            Rectangle {
+                                width: 24px;
+                                height: 24px;
+                                accessible-role: button;
+                                accessible-label: root.label-expand-inspector;
+                                IconDisplay {
+                                    icon: IconSet.ChevronLeft;
+                                    size: 16px;
+                                    stroke: DesignTokens.text-secondary;
+                                }
+                                TouchArea {
+                                    clicked => { root.inspector-collapsed = false; }
+                                }
+                            }
+
+                            Text {
+                                text: root.label-tab-parts;
+                                color: DesignTokens.text-muted;
+                                font-size: 10px;
+                                font-weight: 600;
+                                transform-rotation: -90deg;
+                                TouchArea {
+                                    clicked => {
+                                        root.inspector-collapsed = false;
+                                        root.model-parts-open = true;
+                                    }
+                                }
+                            }
+                            Text {
+                                text: root.label-tab-transform;
+                                color: DesignTokens.text-muted;
+                                font-size: 10px;
+                                font-weight: 600;
+                                transform-rotation: -90deg;
+                                TouchArea {
+                                    clicked => {
+                                        root.inspector-collapsed = false;
+                                        root.model-transform-open = true;
+                                    }
+                                }
+                            }
+                            Text {
+                                text: root.label-tab-material;
+                                color: DesignTokens.text-muted;
+                                font-size: 10px;
+                                font-weight: 600;
+                                transform-rotation: -90deg;
+                                TouchArea {
+                                    clicked => {
+                                        root.inspector-collapsed = false;
+                                        root.model-material-open = true;
+                                    }
+                                }
+                            }
+                            Text {
+                                text: root.label-tab-object;
+                                color: DesignTokens.text-muted;
+                                font-size: 10px;
+                                font-weight: 600;
+                                transform-rotation: -90deg;
+                                TouchArea {
+                                    clicked => {
+                                        root.inspector-collapsed = false;
+                                        root.model-object-open = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !inspector-collapsed: VerticalLayout {
+                        padding-left: 8px;
+                        padding-right: 12px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
                         spacing: 10px;
                         HorizontalLayout {
                             height: 28px;
@@ -2709,6 +2820,12 @@ export component PetuniaSlintShell inherits Window {
                                 font-size: 13px;
                                 font-weight: 700;
                                 vertical-alignment: center;
+                            }
+                            TopAction {
+                                icon: IconSet.ChevronRight;
+                                semantic-label: root.label-collapse-inspector;
+                                active: false;
+                                clicked => { root.inspector-collapsed = true; }
                             }
                             Rectangle { horizontal-stretch: 1; }
                             Text {
@@ -3504,6 +3621,41 @@ export component PetuniaSlintShell inherits Window {
                                             swatch-color: #111111;
                                             selected: root.paint-color == #111111;
                                             clicked => { root.paint-color-changed(0.07, 0.07, 0.07); }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        padding-top: 4px;
+                                        Rectangle {
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            horizontal-stretch: 1;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 4px;
+                                                IconDisplay { icon: IconSet.Download; size: 12px; stroke: DesignTokens.text-primary; }
+                                                Text { text: "Import"; color: DesignTokens.text-primary; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                            }
+                                            TouchArea { clicked => { root.command-file-action("palette.import"); } }
+                                        }
+                                        Rectangle {
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            horizontal-stretch: 1;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 4px;
+                                                IconDisplay { icon: IconSet.Upload; size: 12px; stroke: DesignTokens.text-primary; }
+                                                Text { text: "Export"; color: DesignTokens.text-primary; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                            }
+                                            TouchArea { clicked => { root.command-file-action("palette.export"); } }
                                         }
                                     }
                                 }

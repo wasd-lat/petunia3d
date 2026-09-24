@@ -975,6 +975,9 @@ pub struct UiState {
     pub toolbar_hidden: Vec<String>,
     /// Colunas de atalhos da toolbar esquerda (1 ou 2).
     pub toolbar_columns: u8,
+    /// Ações rápidas do Inspector MODEL como ids canônicos de comando.
+    /// Vazio = conjunto padrão; nunca altera semântica do documento.
+    pub model_quick_actions: Vec<String>,
     /// Lado do dock Outliner/Inspector.
     pub dock_side: DockSide,
     /// Disposição dos painéis do dock (empilhados ou lado a lado).
@@ -1039,6 +1042,7 @@ impl UiState {
             toolbar_order: Vec::new(),
             toolbar_hidden: Vec::new(),
             toolbar_columns: 1,
+            model_quick_actions: Vec::new(),
             dock_side: DockSide::Right,
             dock_orientation: DockOrientation::Stacked,
             left_width: TOOLBAR_DEFAULT_WIDTH,
@@ -1096,6 +1100,87 @@ impl UiState {
             return false;
         }
         self.shell_asset_library_height = clamped;
+        true
+    }
+
+    /// Catálogo controlado de ações rápidas do Inspector MODEL.
+    pub const MODEL_QUICK_ACTION_CANDIDATES: [&'static str; 8] = [
+        "model.subdivide",
+        "model.fuse",
+        "model.cut",
+        "model.join",
+        "model.intersect",
+        "model.merge",
+        "model.slice",
+        "model.loop_cut",
+    ];
+
+    /// Conjunto padrão de ações rápidas, sem esconder capacidade essencial.
+    pub const MODEL_QUICK_ACTION_DEFAULTS: [&'static str; 4] =
+        ["model.subdivide", "model.fuse", "model.cut", "model.join"];
+
+    /// Máximo de ações rápidas para preservar contexto em vez de volume.
+    pub const MODEL_QUICK_ACTION_LIMIT: usize = 6;
+
+    /// Ids efetivos, sanitizados contra o catálogo controlado.
+    pub fn model_quick_action_ids(&self) -> Vec<String> {
+        if self.model_quick_actions.is_empty() {
+            return Self::MODEL_QUICK_ACTION_DEFAULTS
+                .iter()
+                .map(|id| id.to_string())
+                .collect();
+        }
+        let mut ids = Vec::new();
+        for id in &self.model_quick_actions {
+            if Self::MODEL_QUICK_ACTION_CANDIDATES.contains(&id.as_str())
+                && !ids.iter().any(|kept| kept == id)
+            {
+                ids.push(id.clone());
+            }
+            if ids.len() >= Self::MODEL_QUICK_ACTION_LIMIT {
+                break;
+            }
+        }
+        if ids.is_empty() {
+            return Self::MODEL_QUICK_ACTION_DEFAULTS
+                .iter()
+                .map(|id| id.to_string())
+                .collect();
+        }
+        ids
+    }
+
+    /// Fixa ou solta uma ação rápida. Retorna `true` quando mudou.
+    pub fn set_model_quick_action_pinned(&mut self, id: &str, pinned: bool) -> bool {
+        if !Self::MODEL_QUICK_ACTION_CANDIDATES.contains(&id) {
+            return false;
+        }
+        let mut ids = self.model_quick_action_ids();
+        if pinned {
+            if ids.iter().any(|kept| kept == id) {
+                return false;
+            }
+            if ids.len() >= Self::MODEL_QUICK_ACTION_LIMIT {
+                return false;
+            }
+            ids.push(id.to_string());
+        } else {
+            let before = ids.len();
+            ids.retain(|kept| kept != id);
+            if ids.len() == before {
+                return false;
+            }
+        }
+        self.model_quick_actions = ids;
+        true
+    }
+
+    /// Restaura o conjunto padrão de ações rápidas.
+    pub fn reset_model_quick_actions(&mut self) -> bool {
+        if self.model_quick_actions.is_empty() {
+            return false;
+        }
+        self.model_quick_actions.clear();
         true
     }
 }
@@ -2736,5 +2821,66 @@ mod workspace_memory_tests {
             seen[idx] = true;
         }
         assert!(seen.iter().all(|s| *s));
+    }
+}
+
+#[cfg(test)]
+mod model_quick_action_tests {
+    use super::*;
+
+    #[test]
+    fn empty_preferences_resolve_to_canonical_defaults() {
+        let state = AppState::new("en");
+        assert_eq!(
+            state.ui.model_quick_action_ids(),
+            vec![
+                "model.subdivide".to_string(),
+                "model.fuse".to_string(),
+                "model.cut".to_string(),
+                "model.join".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn pinning_sanitizes_unknown_ids_duplicates_and_limit() {
+        let mut state = AppState::new("en");
+        assert!(
+            !state
+                .ui
+                .set_model_quick_action_pinned("model.unknown", true)
+        );
+        assert!(state.ui.set_model_quick_action_pinned("model.merge", true));
+        assert!(!state.ui.set_model_quick_action_pinned("model.merge", true));
+        assert!(state.ui.set_model_quick_action_pinned("model.slice", true));
+        assert!(
+            !state
+                .ui
+                .set_model_quick_action_pinned("model.loop_cut", false)
+        );
+        assert_eq!(
+            state.ui.model_quick_action_ids(),
+            vec![
+                "model.subdivide".to_string(),
+                "model.fuse".to_string(),
+                "model.cut".to_string(),
+                "model.join".to_string(),
+                "model.merge".to_string(),
+                "model.slice".to_string(),
+            ]
+        );
+        assert!(
+            !state
+                .ui
+                .set_model_quick_action_pinned("model.intersect", true)
+        );
+        assert!(state.ui.set_model_quick_action_pinned("model.merge", false));
+        assert!(
+            state
+                .ui
+                .set_model_quick_action_pinned("model.intersect", true)
+        );
+        assert!(state.ui.reset_model_quick_actions());
+        assert!(!state.ui.reset_model_quick_actions());
     }
 }

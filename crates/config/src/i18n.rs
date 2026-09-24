@@ -184,14 +184,27 @@ pub mod text_id {
     pub const UI_TAB_MATERIAL: TextId = TextId::new("ui.tab_material");
     pub const UI_TAB_OBJECT: TextId = TextId::new("ui.tab_object");
     pub const UI_TAB_MODIFIERS: TextId = TextId::new("ui.tab_modifiers");
+    pub const UI_OBJECT_NAME: TextId = TextId::new("ui.object_name");
+    pub const UI_OBJECT_VISIBILITY: TextId = TextId::new("ui.object_visibility");
+    pub const UI_OBJECT_LOCK: TextId = TextId::new("ui.object_lock");
+    pub const UI_OBJECT_NO_SELECTION: TextId = TextId::new("ui.object_no_selection");
+    pub const UI_RESIZE_PANEL_WIDTH: TextId = TextId::new("ui.resize_panel_width");
     pub const UI_TOOL_CARD: TextId = TextId::new("ui.tool_card");
+    pub const UI_TOOL_OPTIONS: TextId = TextId::new("ui.tool_options");
+    pub const UI_TOOL_OPTIONS_EXPAND: TextId = TextId::new("ui.tool_options_expand");
+    pub const UI_TOOL_OPTIONS_COLLAPSE: TextId = TextId::new("ui.tool_options_collapse");
     pub const UI_NO_TOOL_PARAMETERS: TextId = TextId::new("ui.no_tool_parameters");
     pub const UI_LAST_OPERATION: TextId = TextId::new("ui.last_operation");
     pub const UI_STATS_VERTS: TextId = TextId::new("ui.stats_verts");
+    pub const UI_STATS_FACES: TextId = TextId::new("ui.stats_faces");
     pub const UI_STATS_TRIS: TextId = TextId::new("ui.stats_tris");
     pub const UI_STATS_SELECTION: TextId = TextId::new("ui.stats_selection");
     pub const UI_QUICK_ACTIONS: TextId = TextId::new("ui.quick_actions");
     pub const UI_QUICK_ACTION_CUSTOMIZE: TextId = TextId::new("ui.quick_action_customize");
+    pub const UI_QUICK_ACTION_ADD: TextId = TextId::new("ui.quick_action_add");
+    pub const UI_QUICK_ACTION_REMOVE: TextId = TextId::new("ui.quick_action_remove");
+    pub const UI_QUICK_ACTION_RESET: TextId = TextId::new("ui.quick_action_reset");
+    pub const UI_QUICK_ACTION_DONE: TextId = TextId::new("ui.quick_action_done");
     pub const UI_ACTION_SUBDIVIDE: TextId = TextId::new("ui.action_subdivide");
     pub const UI_ACTION_FUSE: TextId = TextId::new("ui.action_fuse");
     pub const UI_ACTION_CUT: TextId = TextId::new("ui.action_cut");
@@ -202,14 +215,43 @@ pub mod text_id {
     pub const UI_ACTION_LOOP_CUT: TextId = TextId::new("ui.action_loop_cut");
     pub const UI_MATERIAL_EDITOR: TextId = TextId::new("ui.material_editor");
     pub const UI_MATERIAL_NAME: TextId = TextId::new("ui.material_name");
+    pub const UI_MATERIAL_BASE_COLOR: TextId = TextId::new("ui.material_base_color");
+    pub const UI_MATERIAL_ASSIGN: TextId = TextId::new("ui.material_assign");
+    pub const UI_MATERIAL_NEW: TextId = TextId::new("ui.material_new");
+    pub const UI_MATERIAL_DUPLICATE: TextId = TextId::new("ui.material_duplicate");
+    pub const UI_MATERIAL_REMOVE: TextId = TextId::new("ui.material_remove");
+    pub const UI_MATERIAL_NO_MATERIAL: TextId = TextId::new("ui.material_no_material");
+    pub const UI_MATERIAL_NO_SELECTION: TextId = TextId::new("ui.material_no_selection");
     pub const UI_MATERIAL_PROFILE: TextId = TextId::new("ui.material_profile");
     pub const UI_MATERIAL_ROUGHNESS: TextId = TextId::new("ui.material_roughness");
     pub const UI_MATERIAL_METALLIC: TextId = TextId::new("ui.material_metallic");
     pub const UI_MATERIAL_NORMAL_SCALE: TextId = TextId::new("ui.material_normal_scale");
     pub const UI_MATERIAL_EMISSION: TextId = TextId::new("ui.material_emission");
+    pub const UI_MATERIAL_EMISSION_STRENGTH: TextId = TextId::new("ui.material_emission_strength");
     pub const UI_MATERIAL_ALPHA_MODE: TextId = TextId::new("ui.material_alpha_mode");
+    pub const UI_MATERIAL_ALPHA_CUTOFF: TextId = TextId::new("ui.material_alpha_cutoff");
+    pub const UI_MATERIAL_TEXTURE_ALBEDO: TextId = TextId::new("ui.material_texture_albedo");
+    pub const UI_MATERIAL_NO_TEXTURE: TextId = TextId::new("ui.material_no_texture");
+    pub const UI_MATERIAL_CREATE_TEXTURE: TextId = TextId::new("ui.material_create_texture");
+    pub const UI_MATERIAL_CLEAR_TEXTURE: TextId = TextId::new("ui.material_clear_texture");
+    pub const UI_MATERIAL_PROFILE_PBR: TextId = TextId::new("ui.material_profile_pbr");
+    pub const UI_MATERIAL_PROFILE_UNLIT: TextId = TextId::new("ui.material_profile_unlit");
+    pub const UI_MATERIAL_PROFILE_TOON: TextId = TextId::new("ui.material_profile_toon");
+    pub const UI_MATERIAL_PROFILE_GLASS: TextId = TextId::new("ui.material_profile_glass");
+    pub const UI_MATERIAL_PROFILE_EMISSIVE: TextId = TextId::new("ui.material_profile_emissive");
+    pub const UI_MATERIAL_ALPHA_OPAQUE: TextId = TextId::new("ui.material_alpha_opaque");
+    pub const UI_MATERIAL_ALPHA_MASK: TextId = TextId::new("ui.material_alpha_mask");
+    pub const UI_MATERIAL_ALPHA_BLEND: TextId = TextId::new("ui.material_alpha_blend");
     pub const UI_MATERIAL_ADVANCED: TextId = TextId::new("ui.material_advanced");
     pub const UI_MODIFIERS_EMPTY: TextId = TextId::new("ui.modifiers_empty");
+    pub const UI_MODIFIER_MIRROR: TextId = TextId::new("ui.modifier_mirror");
+    pub const UI_MODIFIER_SYMMETRY: TextId = TextId::new("ui.modifier_symmetry");
+    pub const UI_MODIFIER_APPLY: TextId = TextId::new("ui.modifier_apply");
+    pub const UI_MODIFIER_DIRECTION: TextId = TextId::new("ui.modifier_direction");
+    pub const UI_MODIFIER_POSITIVE_TO_NEGATIVE: TextId =
+        TextId::new("ui.modifier_positive_to_negative");
+    pub const UI_MODIFIER_NEGATIVE_TO_POSITIVE: TextId =
+        TextId::new("ui.modifier_negative_to_positive");
     pub const UI_MODIFIER_ADD_MIRROR: TextId = TextId::new("ui.modifier_add_mirror");
     pub const UI_MODIFIER_ADD_SYMMETRY: TextId = TextId::new("ui.modifier_add_symmetry");
     pub const UI_MODIFIER_AXIS: TextId = TextId::new("ui.modifier_axis");
@@ -453,14 +495,27 @@ pub mod text_id {
         UI_TAB_MATERIAL,
         UI_TAB_OBJECT,
         UI_TAB_MODIFIERS,
+        UI_OBJECT_NAME,
+        UI_OBJECT_VISIBILITY,
+        UI_OBJECT_LOCK,
+        UI_OBJECT_NO_SELECTION,
+        UI_RESIZE_PANEL_WIDTH,
         UI_TOOL_CARD,
+        UI_TOOL_OPTIONS,
+        UI_TOOL_OPTIONS_EXPAND,
+        UI_TOOL_OPTIONS_COLLAPSE,
         UI_NO_TOOL_PARAMETERS,
         UI_LAST_OPERATION,
         UI_STATS_VERTS,
+        UI_STATS_FACES,
         UI_STATS_TRIS,
         UI_STATS_SELECTION,
         UI_QUICK_ACTIONS,
         UI_QUICK_ACTION_CUSTOMIZE,
+        UI_QUICK_ACTION_ADD,
+        UI_QUICK_ACTION_REMOVE,
+        UI_QUICK_ACTION_RESET,
+        UI_QUICK_ACTION_DONE,
         UI_ACTION_SUBDIVIDE,
         UI_ACTION_FUSE,
         UI_ACTION_CUT,
@@ -471,14 +526,41 @@ pub mod text_id {
         UI_ACTION_LOOP_CUT,
         UI_MATERIAL_EDITOR,
         UI_MATERIAL_NAME,
+        UI_MATERIAL_BASE_COLOR,
+        UI_MATERIAL_ASSIGN,
+        UI_MATERIAL_NEW,
+        UI_MATERIAL_DUPLICATE,
+        UI_MATERIAL_REMOVE,
+        UI_MATERIAL_NO_MATERIAL,
+        UI_MATERIAL_NO_SELECTION,
         UI_MATERIAL_PROFILE,
         UI_MATERIAL_ROUGHNESS,
         UI_MATERIAL_METALLIC,
         UI_MATERIAL_NORMAL_SCALE,
         UI_MATERIAL_EMISSION,
+        UI_MATERIAL_EMISSION_STRENGTH,
         UI_MATERIAL_ALPHA_MODE,
+        UI_MATERIAL_ALPHA_CUTOFF,
+        UI_MATERIAL_TEXTURE_ALBEDO,
+        UI_MATERIAL_NO_TEXTURE,
+        UI_MATERIAL_CREATE_TEXTURE,
+        UI_MATERIAL_CLEAR_TEXTURE,
+        UI_MATERIAL_PROFILE_PBR,
+        UI_MATERIAL_PROFILE_UNLIT,
+        UI_MATERIAL_PROFILE_TOON,
+        UI_MATERIAL_PROFILE_GLASS,
+        UI_MATERIAL_PROFILE_EMISSIVE,
+        UI_MATERIAL_ALPHA_OPAQUE,
+        UI_MATERIAL_ALPHA_MASK,
+        UI_MATERIAL_ALPHA_BLEND,
         UI_MATERIAL_ADVANCED,
         UI_MODIFIERS_EMPTY,
+        UI_MODIFIER_MIRROR,
+        UI_MODIFIER_SYMMETRY,
+        UI_MODIFIER_APPLY,
+        UI_MODIFIER_DIRECTION,
+        UI_MODIFIER_POSITIVE_TO_NEGATIVE,
+        UI_MODIFIER_NEGATIVE_TO_POSITIVE,
         UI_MODIFIER_ADD_MIRROR,
         UI_MODIFIER_ADD_SYMMETRY,
         UI_MODIFIER_AXIS,

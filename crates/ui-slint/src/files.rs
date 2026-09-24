@@ -103,6 +103,25 @@ impl FileDialogService {
             .await
             .map(|file| file.path().to_path_buf())
     }
+
+    /// Importa uma paleta de cores do disco (.gpl ou .hex).
+    pub async fn import_palette(&self) -> Option<PathBuf> {
+        rfd::AsyncFileDialog::new()
+            .add_filter("Color Palette", &["gpl", "hex"])
+            .pick_file()
+            .await
+            .map(|file| file.path().to_path_buf())
+    }
+
+    /// Exporta a paleta de cores ativa (.gpl).
+    pub async fn export_palette(&self) -> Option<PathBuf> {
+        rfd::AsyncFileDialog::new()
+            .add_filter("GIMP Palette", &["gpl"])
+            .set_file_name("palette.gpl")
+            .save_file()
+            .await
+            .map(|file| file.path().to_path_buf())
+    }
 }
 
 #[cfg(test)]

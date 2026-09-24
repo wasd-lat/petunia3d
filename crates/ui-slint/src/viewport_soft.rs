@@ -433,22 +433,26 @@ impl PetuniaViewport for Software3dViewport {
                     let selected = active
                         && state.selection_domain == SelectionDomain::Edge
                         && mesh.selected_edges.contains(&(a, b));
+                    let is_seam = active
+                        && (mesh.uv_seams.contains(&(a, b)) || mesh.uv_seams.contains(&(b, a)));
                     let hover = active && state.hover == HoverTarget::Edge(a, b);
                     let color = if selected {
                         state.selection_rgb.map(|value| value as f32 / 255.0)
+                    } else if is_seam {
+                        [0.96, 0.48, 0.12]
                     } else if hover {
                         [0.49, 0.86, 1.0]
                     } else {
                         [0.32, 0.35, 0.40]
                     };
-                    if selected || hover {
+                    if selected || hover || is_seam {
                         self.world_line_width(
                             mesh.verts[a as usize].vec(),
                             mesh.verts[b as usize].vec(),
                             &vp,
                             color,
                             through,
-                            if hover {
+                            if hover || is_seam {
                                 state.selection_thickness * 1.35
                             } else {
                                 state.selection_thickness
