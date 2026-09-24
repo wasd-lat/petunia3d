@@ -85,7 +85,7 @@ em vez de aplicados em silêncio: o Blender **não** usa sidebar translúcida so
 a viewport (Sidebar é região opaca) nem **um** único painel inferior (Status Bar
 persistente + Adjust Last Operation transitório coexistem); a decisão final é do
 produto e vale para o shell Slint. Detalhes em
-[`ADR 004`](../../architecture/adr/004-inspector-translucido-alca-modifiers.md).
+[`ADR 004`](../architecture/adr/004-inspector-translucido-alca-modifiers.md).
 
 | # | Requisito | Estado inicial | Delta aplicado |
 | --- | --- | --- | --- |

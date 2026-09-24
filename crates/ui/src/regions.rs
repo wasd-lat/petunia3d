@@ -204,6 +204,29 @@ pub fn modal_sizes(
     (default, min, max)
 }
 
+/// Canonical calculation for scene panel height as indexed in `ui-map.json`.
+/// Cálculo canônico para a altura do painel Scene conforme indexado no `ui-map.json`.
+pub fn scene_panel_height(
+    total_h: f32,
+    collapsed: bool,
+    auto: bool,
+    manual_frac: f32,
+    content_est: f32,
+) -> f32 {
+    const DOCK_HEADER_H: f32 = 32.0;
+    const DOCK_SEPARATOR_H: f32 = 6.0;
+    if collapsed {
+        return DOCK_HEADER_H;
+    }
+    if auto {
+        let max_auto = (total_h * 0.38).max(DOCK_HEADER_H);
+        (content_est + DOCK_HEADER_H).clamp(DOCK_HEADER_H, max_auto)
+    } else {
+        let available = (total_h - DOCK_SEPARATOR_H - DOCK_HEADER_H).max(DOCK_HEADER_H);
+        (total_h * manual_frac.clamp(0.1, 0.9)).clamp(DOCK_HEADER_H, available)
+    }
+}
+
 const REGIONS_KEY: &str = "petunia_ui_regions";
 
 /// Reseta as regiões no início do frame (evita slots obsoletos de painéis ocultos).

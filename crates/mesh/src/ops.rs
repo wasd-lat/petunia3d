@@ -973,7 +973,11 @@ impl Mesh {
                     if let (Some(w0), Some(w1)) = (w0, w1)
                         && w0 != w1
                     {
-                        let p_u = f0.verts.iter().position(|&x| x == u).unwrap();
+                        // Guard against non-manifold edge vertex indexing to prevent runtime panics.
+                        // Proteção contra indexação de vértice não-manifold para prevenir pânicos em tempo de execução.
+                        let Some(p_u) = f0.verts.iter().position(|&x| x == u) else {
+                            return false;
+                        };
                         let next_u = f0.verts[(p_u + 1) % 3];
                         let (new_f0, new_f1) = if next_u == v {
                             (vec![w0, u, w1], vec![w1, v, w0])

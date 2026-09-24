@@ -7,10 +7,6 @@
       "path": ".github/workflows/docs.yml"
     },
     {
-      "hash": "d22c3b9657c8aa4c",
-      "path": "docs/.vitepress/.env.local"
-    },
-    {
       "hash": "34fc2a4d1bc2e64e",
       "path": "docs/.vitepress/bibleSidebar.ts"
     },

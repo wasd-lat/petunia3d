@@ -256,7 +256,12 @@ static TOOLBAR_ORDER_DRAG: PetuniaDragList = PetuniaDragList::new(PetuniaDragSpe
 /// O paine é o tile `Tools` da árvore do shell: a largura, o divisor e a
 /// posição vêm do `PetuniaShellLayout`, não de um `Panel::left` local. A
 /// moldura (fundo, borda e margem) continua aqui — ela é a identidade visual da
-/// paleta, não geometria de layout.
+/// Public entrypoint for the toolbar drawing, delegating to `draw_contents`.
+/// Ponto de entrada público para desenho da barra de ferramentas, delegando a `draw_contents`.
+pub fn draw(ui: &mut Ui, state: &mut AppState, tools: &ToolRegistry) {
+    draw_contents(ui, state, tools);
+}
+
 pub fn draw_contents(ui: &mut Ui, state: &mut AppState, tools: &ToolRegistry) {
     let frame = egui::Frame::new()
         .fill(tokens::bg_panel(state))

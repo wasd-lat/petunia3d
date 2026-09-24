@@ -71,6 +71,35 @@ pub mod workspaces;
 pub use recovery_dialog::{RecoveryAction, draw as draw_recovery_dialog};
 pub use tokens::apply_theme_to_egui;
 
+/// Canonical entrypoint for the right dock/panel as indexed in `ui-map.json`.
+/// Ponto de entrada canônico para o dock/painel direito conforme indexado no `ui-map.json`.
+pub fn right_panel(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    tools: &ToolRegistry,
+    registry: &mut ModuleRegistry,
+) {
+    properties_panel::draw(ui, state, tools, registry);
+}
+
+/// Canonical entrypoint for the split dock as indexed in `ui-map.json`.
+/// Ponto de entrada canônico para o dock dividido conforme indexado no `ui-map.json`.
+pub fn draw_split_dock(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    tools: &ToolRegistry,
+    registry: &mut ModuleRegistry,
+) {
+    properties_panel::draw(ui, state, tools, registry);
+}
+
+/// Canonical entrypoint for the animate workspace center strip as indexed in `ui-map.json`.
+/// Ponto de entrada canônico para o centro do workspace Animate conforme indexado no `ui-map.json`.
+pub fn animate_workspace_center(ui: &mut egui::Ui, state: &mut AppState) {
+    let rect = ui.available_rect_before_wrap();
+    viewport_3d(ui, state, rect);
+}
+
 pub fn rect_to_logical(r: egui::Rect) -> petunia_core::viewport::LogicalRect {
     petunia_core::viewport::LogicalRect::from_min_max([r.min.x, r.min.y], [r.max.x, r.max.y])
 }
