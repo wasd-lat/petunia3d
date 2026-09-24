@@ -153,6 +153,8 @@ impl WgpuViewport {
             state.show_triangulation,
             state.textured,
             state.show_wireframe_overlay,
+            state.show_face_orientation,
+            state.show_uv_checker,
             state.selection_domain,
             state.hover,
         );
@@ -267,6 +269,8 @@ mod tests {
                         show_triangulation: false,
                         textured: false,
                         show_wireframe_overlay: false,
+                        show_face_orientation: false,
+                        show_uv_checker: false,
                         selection_domain: petunia_core::SelectionDomain::Object,
                         xray_opacity: 0.42,
                         selection_rgb: [233, 106, 0],

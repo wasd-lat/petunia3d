@@ -1013,6 +1013,13 @@ export component PetuniaSlintShell inherits Window {
     in-out property <int> gizmo-constraint-axis-a: -1;
     in-out property <int> gizmo-constraint-axis-b: -1;
     in-out property <bool> show-xray: false;
+    in-out property <bool> show-face-orientation: false;
+    in-out property <bool> show-uv-checker: false;
+    in-out property <bool> proportional-editing: false;
+    in-out property <float> proportional-radius: 1.0;
+    in-out property <string> proportional-falloff: "smooth";
+    in-out property <bool> snap-enabled: false;
+    in-out property <string> snap-target: "grid";
     in-out property <bool> gizmo-visible: false;
     in-out property <bool> selection-overlay-visible: false;
     in-out property <string> selection-outline-commands: "";
@@ -1425,6 +1432,17 @@ export component PetuniaSlintShell inherits Window {
     callback brush-size-changed(float);
     callback brush-opacity-changed(float);
     callback shortcut-requested(string, bool, bool, bool);
+    callback toggle-face-orientation;
+    callback toggle-uv-checker;
+    callback toggle-proportional-editing;
+    callback set-proportional-radius(float);
+    callback set-proportional-falloff(string);
+    callback adjust-proportional-radius(float);
+    callback toggle-snap-enabled;
+    callback set-snap-target(string);
+    callback add-profile-rectangle(float, float);
+    callback add-profile-circle(float, int);
+    callback paint-decal-layer-added;
 
     // Cor e espessura de um handle do gizmo conforme o estado da interação.
     function gizmo-handle-color(axis: int, base: color) -> color {
@@ -2334,6 +2352,18 @@ export component PetuniaSlintShell inherits Window {
                                 description: root.hint-model-pivot;
                                 active: root.pivot-menu-open;
                                 clicked => { root.pivot-menu-toggled(!root.pivot-menu-open); }
+                            }
+                            if root.viewport-region-width >= 680: ViewportBarButton {
+                                icon: IconSet.Magnet;
+                                label: root.snap-enabled ? "Snap (\{root.snap-target})" : "Snap";
+                                active: root.snap-enabled;
+                                clicked => { root.toggle-snap-enabled(); }
+                            }
+                            if root.viewport-region-width >= 750: ViewportBarButton {
+                                icon: IconSet.CircleDot;
+                                label: root.proportional-editing ? "Prop (\{round(root.proportional-radius * 10) / 10})" : "Prop";
+                                active: root.proportional-editing;
+                                clicked => { root.toggle-proportional-editing(); }
                             }
 
                             Rectangle { horizontal-stretch: 1; }
@@ -4429,6 +4459,18 @@ export component PetuniaSlintShell inherits Window {
                                             accessible-label: "Add group";
                                             TouchArea { clicked => { root.paint-layer-group-added(); } }
                                         }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 3px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            IconDisplay { icon: IconSet.Square; size: 12px; stroke: DesignTokens.text-secondary; }
+                                            accessible-role: button;
+                                            accessible-label: "Add decal layer";
+                                            TouchArea { clicked => { root.paint-decal-layer-added(); } }
+                                        }
                                     }
 
                                     for layer in root.paint-layers: Rectangle {
@@ -4953,6 +4995,33 @@ export component PetuniaSlintShell inherits Window {
                                             TouchArea { clicked => { root.uv-rotated(15.0); } }
                                         }
                                     }
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 28px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "↺ 90° CCW"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Rotate UV 90 degrees counter-clockwise";
+                                            TouchArea { clicked => { root.uv-rotated(-90.0); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "↻ 90° CW"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Rotate UV 90 degrees clockwise";
+                                            TouchArea { clicked => { root.uv-rotated(90.0); } }
+                                        }
+                                    }
                                     if root.uv-layout-truncated: Text {
                                         text: "Layout truncated: only the first 2000 faces are drawn.";
                                         color: DesignTokens.text-muted;
@@ -5475,7 +5544,39 @@ export component PetuniaSlintShell inherits Window {
                         Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface; Text { text: root.label-profile-revolve; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-revolve(); } } }
                         Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.accent; Text { text: root.label-profile-generate; color: DesignTokens.canvas; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-generate(); } } }
                     }
+                    HorizontalLayout {
+                        spacing: 5px; height: 26px;
+                        Rectangle {
+                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                            Text { text: "Add Rect"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.add-profile-rectangle(2.0, 1.0); } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                            Text { text: "Add Circle"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.add-profile-circle(1.0, 16); } }
+                        }
+                    }
                     Text { text: root.hint-model-profile; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
+                }
+
+                if !profile-active && root.active-tool == "draw_profile": VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "2D Profile Presets:"; color: DesignTokens.text-secondary; font-size: 10px; }
+                    HorizontalLayout {
+                        spacing: 5px; height: 26px;
+                        Rectangle {
+                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                            Text { text: "Rectangle"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.add-profile-rectangle(2.0, 1.0); } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface-raised; border-width: 1px; border-color: DesignTokens.border;
+                            Text { text: "Circle"; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.add-profile-circle(1.0, 16); } }
+                        }
+                    }
+                    Text { text: "Click on canvas to plot vertices or insert a 2D primitive."; color: DesignTokens.text-muted; font-size: 9px; wrap: word-wrap; }
                 }
 
                 if loop-cut-active: HorizontalLayout {
@@ -5785,6 +5886,48 @@ export component PetuniaSlintShell inherits Window {
                             vertical-alignment: center;
                         }
                         TouchArea { clicked => { root.toggle-wireframe-requested(); } }
+                    }
+
+                    Rectangle { height: 1px; background: DesignTokens.border; }
+
+                    Rectangle {
+                        height: 26px;
+                        border-radius: 4px;
+                        background: root.show-face-orientation ? DesignTokens.accent : DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        accessible-role: checkbox;
+                        accessible-label: "Face Orientation";
+                        accessible-checked: root.show-face-orientation;
+                        Text {
+                            text: root.show-face-orientation ? "Face Orientation: Front (Blue) / Back (Red)" : "Face Orientation: Off";
+                            color: root.show-face-orientation ? DesignTokens.canvas : DesignTokens.text-primary;
+                            font-size: 10px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.toggle-face-orientation(); } }
+                    }
+
+                    Rectangle {
+                        height: 26px;
+                        border-radius: 4px;
+                        background: root.show-uv-checker ? DesignTokens.accent : DesignTokens.surface;
+                        border-width: 1px;
+                        border-color: DesignTokens.border;
+                        accessible-role: checkbox;
+                        accessible-label: "UV Checkerboard";
+                        accessible-checked: root.show-uv-checker;
+                        Text {
+                            text: root.show-uv-checker ? "UV Checkerboard: On" : "UV Checkerboard: Off";
+                            color: root.show-uv-checker ? DesignTokens.canvas : DesignTokens.text-primary;
+                            font-size: 10px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.toggle-uv-checker(); } }
                     }
                 }
             }

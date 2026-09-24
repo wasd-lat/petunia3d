@@ -65,7 +65,9 @@ fn test_headless_command_dispatch_and_history() {
     assert_eq!(state.project.assets.len(), 2);
     assert_eq!(state.project.assets[1].name, "Plane");
 
-    // 2. SelectAllCmd
+    // 2. SelectAllCmd no contexto de edição de vértices
+    state.set_edit_mode(petunia_core::EditMode::Edit);
+    state.select_mode = petunia_core::SelectMode::Vertex;
     state.dispatch(&SelectAllCmd).expect("SelectAllCmd");
     let active_mesh = state.project.active_mesh().expect("Active mesh");
     assert!(active_mesh.verts.iter().all(|v| v.selected));
@@ -227,8 +229,17 @@ fn test_headless_complete_session_roundtrip() {
     // Adiciona modelo pelo caminho canônico de comando
     PrimitivesTool::add_primitive(&mut state, "Cylinder8");
 
-    // Seleciona e extrude (spine de comando)
-    state.dispatch(&SelectAllCmd).expect("SelectAll");
+    // Seleciona uma face e extrude no contexto de edição.
+    state.set_edit_mode(petunia_core::EditMode::Edit);
+    state.select_mode = petunia_core::SelectMode::Face;
+    if let Some(mesh) = state.project.active_mesh_mut() {
+        mesh.deselect_all();
+        mesh.faces[0].selected = true;
+        for &vertex in &mesh.faces[0].verts {
+            mesh.verts[vertex as usize].selected = true;
+        }
+    }
+    state.sync_selection();
     state
         .dispatch(&petunia_core::ExtrudeSelectedCmd { dist: 2.0 })
         .expect("Extrude");

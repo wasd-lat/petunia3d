@@ -43,7 +43,7 @@ fn hash_f32(h: u64, v: f32) -> u64 {
 }
 
 /// Flags de render que afetam buffers GPU (tudo que não é câmera).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FingerprintFlags {
     pub shading: Shading,
     pub xray: bool,
@@ -51,6 +51,8 @@ pub struct FingerprintFlags {
     pub textured: bool,
     pub edit_mode_is_edit: bool,
     pub show_wireframe_overlay: bool,
+    pub show_face_orientation: bool,
+    pub show_uv_checker: bool,
 }
 
 /// Fingerprint barato da cena para invalidação de buffers GPU.
@@ -70,6 +72,8 @@ pub fn fingerprint_scene(
     h = mix(h, flags.textured as u64);
     h = mix(h, flags.edit_mode_is_edit as u64);
     h = mix(h, flags.show_wireframe_overlay as u64);
+    h = mix(h, flags.show_face_orientation as u64);
+    h = mix(h, flags.show_uv_checker as u64);
     h = mix(h, project.assets.len() as u64);
     h = mix(h, project.materials.len() as u64);
     h = mix(h, project.topology_revision);
@@ -223,6 +227,8 @@ mod tests {
             textured: false,
             edit_mode_is_edit: false,
             show_wireframe_overlay: false,
+            show_face_orientation: false,
+            show_uv_checker: false,
         }
     }
 

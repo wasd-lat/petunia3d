@@ -3,8 +3,7 @@
 //! cada espécie atravessa persistência e exportadores de verdade.
 
 use petunia_core::{
-    AppState, DuplicateSelectionCmd, EditMode, PrimitiveKind, ProjectService, SelectAllCmd,
-    SubdivideSelectionCmd,
+    AppState, DuplicateSelectionCmd, EditMode, PrimitiveKind, ProjectService, SubdivideSelectionCmd,
 };
 
 fn all_kinds() -> [PrimitiveKind; 10] {
@@ -35,7 +34,7 @@ fn primitive_full_pipeline_per_species() {
         assert!(verts_before > 0, "{kind:?} sem vértices");
 
         // Select + Duplicate + ferramenta de modelagem sobre a malha criada.
-        state.dispatch(&SelectAllCmd).expect("select all");
+        state.select_object(Some(asset_idx), false);
         state.dispatch(&DuplicateSelectionCmd).expect("duplicate");
         assert_eq!(state.project.assets.len(), asset_idx + 2);
         state.project.active = asset_idx + 1;

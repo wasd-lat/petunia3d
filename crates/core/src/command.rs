@@ -933,6 +933,46 @@ impl CommandDispatcher {
         );
         d.register_with_meta(
             CommandMetadata::new(
+                "view.toggle_face_orientation",
+                "Toggle Face Orientation",
+                "Display front faces in blue and back faces in red",
+                CommandCategory::View,
+            )
+            .with_docs(DocsTopic::Navigation),
+            ToggleFaceOrientationCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "view.toggle_uv_checker",
+                "Toggle UV Checker",
+                "Display procedural checkerboard pattern for UV inspection",
+                CommandCategory::View,
+            )
+            .with_docs(DocsTopic::UvUnwrapping),
+            ToggleUvCheckerCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "tools.toggle_proportional",
+                "Toggle Proportional Editing",
+                "Toggle proportional editing with falloff radius",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::Modeling),
+            ToggleProportionalEditingCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
+                "tools.toggle_snap",
+                "Toggle Magnet Snap",
+                "Toggle snapping to grid, vertices, edges or faces",
+                CommandCategory::Tools,
+            )
+            .with_docs(DocsTopic::Modeling),
+            ToggleSnapCmd,
+        );
+        d.register_with_meta(
+            CommandMetadata::new(
                 "view.frame_selection",
                 "Frame Selection",
                 "Center 3D camera on selected geometry",
@@ -2921,6 +2961,107 @@ impl Command for ToggleXRayCmd {
 
     fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
         state.show_xray = !state.show_xray;
+        state.mark_dirty();
+        Ok(())
+    }
+}
+
+/// Comando para alternar o overlay visual de orientação de faces (azuis para fora, vermelhas para dentro).
+#[derive(Debug, Clone, Default)]
+pub struct ToggleFaceOrientationCmd;
+
+impl Command for ToggleFaceOrientationCmd {
+    fn label(&self) -> &'static str {
+        "toggle face orientation"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state.session.show_face_orientation = !state.session.show_face_orientation;
+        state.set_status(if state.session.show_face_orientation {
+            "Face orientation overlay enabled"
+        } else {
+            "Face orientation overlay disabled"
+        });
+        state.mark_dirty();
+        Ok(())
+    }
+}
+
+/// Comando para alternar o shader/overlay de mapa xadrez UV Checkerboard.
+#[derive(Debug, Clone, Default)]
+pub struct ToggleUvCheckerCmd;
+
+impl Command for ToggleUvCheckerCmd {
+    fn label(&self) -> &'static str {
+        "toggle uv checker"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state.session.show_uv_checker = !state.session.show_uv_checker;
+        state.set_status(if state.session.show_uv_checker {
+            "UV checker overlay enabled"
+        } else {
+            "UV checker overlay disabled"
+        });
+        state.mark_dirty();
+        Ok(())
+    }
+}
+
+/// Comando para alternar o modo de edição proporcional.
+#[derive(Debug, Clone, Default)]
+pub struct ToggleProportionalEditingCmd;
+
+impl Command for ToggleProportionalEditingCmd {
+    fn label(&self) -> &'static str {
+        "toggle proportional editing"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state.session.proportional_editing = !state.session.proportional_editing;
+        state.session.proportional_settings.enabled = state.session.proportional_editing;
+        state.set_status(if state.session.proportional_editing {
+            "Proportional editing enabled"
+        } else {
+            "Proportional editing disabled"
+        });
+        state.mark_dirty();
+        Ok(())
+    }
+}
+
+/// Comando para alternar o snap magnético.
+#[derive(Debug, Clone, Default)]
+pub struct ToggleSnapCmd;
+
+impl Command for ToggleSnapCmd {
+    fn label(&self) -> &'static str {
+        "toggle snap"
+    }
+
+    fn is_destructive(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, state: &mut AppState) -> Result<(), CommandError> {
+        state.session.snap_enabled = !state.session.snap_enabled;
+        state.set_status(if state.session.snap_enabled {
+            "Magnet snap enabled"
+        } else {
+            "Magnet snap disabled"
+        });
         state.mark_dirty();
         Ok(())
     }

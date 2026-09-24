@@ -431,6 +431,8 @@ impl GlRenderer {
                 textured: state.textured,
                 edit_mode_is_edit: state.edit_mode() == petunia_core::EditMode::Edit,
                 show_wireframe_overlay: state.show_wireframe_overlay,
+                show_face_orientation: state.show_face_orientation,
+                show_uv_checker: state.show_uv_checker,
             },
         );
         let cache_hit = self.mesh_valid && self.mesh_fp == fp.mesh;
@@ -760,6 +762,8 @@ impl GlRenderer {
                 textured: state.textured,
                 edit_mode_is_edit: state.edit_mode() == petunia_core::EditMode::Edit,
                 show_wireframe_overlay: state.show_wireframe_overlay,
+                show_face_orientation: state.show_face_orientation,
+                show_uv_checker: state.show_uv_checker,
             },
         );
         let fp = scene_fp.mesh ^ overlay_hash(state).wrapping_mul(0x9e3779b97f4a7c15);
@@ -914,6 +918,8 @@ impl GlRenderer {
                 textured: state.textured,
                 edit_mode_is_edit: state.edit_mode() == petunia_core::EditMode::Edit,
                 show_wireframe_overlay: state.show_wireframe_overlay,
+                show_face_orientation: state.show_face_orientation,
+                show_uv_checker: state.show_uv_checker,
             },
         );
         // Cache único para os dois passes (filtrado por `xray_pass` abaixo):

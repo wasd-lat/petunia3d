@@ -130,6 +130,58 @@ pub fn generate_revolve(state: &mut AppState) {
     }
 }
 
+/// Define um perfil 2D retangular centralizado no plano ativo.
+pub fn profile_set_rectangle(state: &mut AppState, width: f32, height: f32) {
+    profile_capture_frame(state);
+    let w = if width.is_finite() && width > 0.0 {
+        width
+    } else {
+        2.0
+    };
+    let h = if height.is_finite() && height > 0.0 {
+        height
+    } else {
+        1.5
+    };
+    state.profile.points = vec![
+        [-w * 0.5, -h * 0.5],
+        [w * 0.5, -h * 0.5],
+        [w * 0.5, h * 0.5],
+        [-w * 0.5, h * 0.5],
+    ];
+    state.profile.closed = true;
+    state.session.tools.active_tool = "draw_profile".to_string();
+    state.set_status(format!(
+        "Profile 2D Rectangle created ({:.1} x {:.1}): choose Extrude or Revolve",
+        w, h
+    ));
+    state.mark_dirty();
+}
+
+/// Define um perfil 2D circular centralizado no plano ativo.
+pub fn profile_set_circle(state: &mut AppState, radius: f32, segments: usize) {
+    profile_capture_frame(state);
+    let r = if radius.is_finite() && radius > 0.0 {
+        radius
+    } else {
+        1.0
+    };
+    let segs = segments.clamp(6, 64);
+    let mut points = Vec::with_capacity(segs);
+    for i in 0..segs {
+        let angle = std::f32::consts::TAU * (i as f32) / (segs as f32);
+        points.push([r * angle.cos(), r * angle.sin()]);
+    }
+    state.profile.points = points;
+    state.profile.closed = true;
+    state.session.tools.active_tool = "draw_profile".to_string();
+    state.set_status(format!(
+        "Profile 2D Circle created (r={:.1}, {} segs): choose Extrude or Revolve",
+        r, segs
+    ));
+    state.mark_dirty();
+}
+
 #[derive(Default)]
 pub struct DrawProfileTool;
 

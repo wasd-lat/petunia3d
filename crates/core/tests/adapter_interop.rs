@@ -83,6 +83,8 @@ fn scene_fingerprint_uses_revisions_after_mutation() {
         textured: false,
         edit_mode_is_edit: false,
         show_wireframe_overlay: false,
+        show_face_orientation: false,
+        show_uv_checker: false,
     };
     let a = petunia_core::fingerprint_scene(&state.project.project, &[], flags);
     state.emit_mesh_changed();

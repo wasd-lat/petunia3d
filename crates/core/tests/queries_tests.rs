@@ -1,7 +1,7 @@
 //! Testes unitários para Application API (Queries & DTOs) — Gauntlet G9 / F-010.
 
 use petunia_core::{
-    AddPrimitiveCmd, AppState, PrimitiveKind, ProjectService, SelectAllCmd, SelectMode,
+    AddPrimitiveCmd, AppState, EditMode, PrimitiveKind, ProjectService, SelectAllCmd, SelectMode,
 };
 use uuid::Uuid;
 
@@ -43,6 +43,7 @@ fn test_query_selection_details_and_center() {
     let mut state = AppState::new("en");
     ProjectService::new_project(&mut state);
 
+    state.set_edit_mode(EditMode::Edit);
     state.select_mode = SelectMode::Vertex;
     state.dispatch(&SelectAllCmd).expect("SelectAll");
 

@@ -30,7 +30,10 @@ pub mod transform;
 pub use bevel::BevelTool;
 pub use connect::ConnectTool;
 pub use dissolve::DissolveTool;
-pub use draw_profile::{DrawProfileTool, profile_screen_to_plane};
+pub use draw_profile::{
+    DrawProfileTool, profile_add_point, profile_screen_to_plane, profile_set_circle,
+    profile_set_rectangle,
+};
 pub use extrude::ExtrudeTool;
 pub use inset::InsetTool;
 pub use merge::MergeTool;

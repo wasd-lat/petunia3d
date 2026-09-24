@@ -55,6 +55,8 @@ pub struct ViewportRenderState {
     pub show_triangulation: bool,
     pub textured: bool,
     pub show_wireframe_overlay: bool,
+    pub show_face_orientation: bool,
+    pub show_uv_checker: bool,
     /// Domínio de seleção: a camada de seleção precisa saber o que desenhar.
     pub selection_domain: petunia_core::SelectionDomain,
     /// Opacidade da geometria em X-Ray.
@@ -75,6 +77,8 @@ impl Default for ViewportRenderState {
             show_triangulation: false,
             textured: false,
             show_wireframe_overlay: false,
+            show_face_orientation: false,
+            show_uv_checker: false,
             selection_domain: petunia_core::SelectionDomain::Object,
             xray_opacity: 0.42,
             selection_rgb: [233, 106, 0],
@@ -279,6 +283,22 @@ pub enum UiIntent {
     SetPaintCanvasZoom(i32),
     ProjectFromReference,
     BakeReference,
+    ToggleFaceOrientation,
+    ToggleUvChecker,
+    ToggleProportionalEditing,
+    SetProportionalRadius(f32),
+    SetProportionalFalloff(String),
+    ToggleSnapEnabled,
+    SetSnapTarget(String),
+    AddProfileRectangle {
+        width: f32,
+        height: f32,
+    },
+    AddProfileCircle {
+        radius: f32,
+        segments: usize,
+    },
+    AddDecalLayer,
 }
 
 /// Representação DTO de um item da árvore de cena do Outliner.
@@ -373,6 +393,13 @@ pub struct ShellViewModel {
     pub selection_thickness: f32,
     pub selection_color_hex: String,
     pub show_xray: bool,
+    pub show_face_orientation: bool,
+    pub show_uv_checker: bool,
+    pub proportional_editing: bool,
+    pub proportional_radius: f32,
+    pub proportional_falloff: String,
+    pub snap_enabled: bool,
+    pub snap_target: String,
     pub shading_popover_open: bool,
     /// HUD da operação: título, linhas de valor e dica de controles.
     pub operation_hud_active: bool,
@@ -783,6 +810,14 @@ impl ShellViewModel {
                 state.ui.selection_rgb[0], state.ui.selection_rgb[1], state.ui.selection_rgb[2]
             ),
             show_xray: state.session.show_xray,
+            show_face_orientation: state.session.show_face_orientation,
+            show_uv_checker: state.session.show_uv_checker,
+            proportional_editing: state.session.proportional_editing,
+            proportional_radius: state.session.proportional_settings.radius,
+            proportional_falloff: format!("{:?}", state.session.proportional_settings.falloff)
+                .to_lowercase(),
+            snap_enabled: state.session.snap_enabled,
+            snap_target: format!("{:?}", state.session.snap_settings.target).to_lowercase(),
             shading_popover_open: false,
             operation_hud_active: false,
             operation_hud_title: String::new(),
@@ -1918,6 +1953,36 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             UiIntent::BakeReference => {
                 self.bake_reference();
             }
+            UiIntent::ToggleFaceOrientation => {
+                self.toggle_face_orientation();
+            }
+            UiIntent::ToggleUvChecker => {
+                self.toggle_uv_checker();
+            }
+            UiIntent::ToggleProportionalEditing => {
+                self.toggle_proportional_editing();
+            }
+            UiIntent::SetProportionalRadius(radius) => {
+                self.set_proportional_radius(radius);
+            }
+            UiIntent::SetProportionalFalloff(falloff) => {
+                self.set_proportional_falloff(&falloff);
+            }
+            UiIntent::ToggleSnapEnabled => {
+                self.toggle_snap_enabled();
+            }
+            UiIntent::SetSnapTarget(target) => {
+                self.set_snap_target(&target);
+            }
+            UiIntent::AddProfileRectangle { width, height } => {
+                self.add_profile_rectangle(width, height);
+            }
+            UiIntent::AddProfileCircle { radius, segments } => {
+                self.add_profile_circle(radius, segments);
+            }
+            UiIntent::AddDecalLayer => {
+                self.add_decal_layer();
+            }
         }
         self.sync_viewport_context();
     }
@@ -1934,7 +1999,22 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 self.state.session.camera.pan(dx, dy);
             }
             ViewportGesture::Zoom { delta } => {
-                self.state.session.camera.zoom(delta);
+                if self.state.session.tools.modal.is_some()
+                    && self.state.session.proportional_editing
+                {
+                    let step = if delta > 0.0 { 0.25 } else { -0.25 };
+                    self.adjust_proportional_radius(step);
+                    if let Some(drag) = self.drag {
+                        self.update_viewport_transform_modified(
+                            drag.last_pointer[0],
+                            drag.last_pointer[1],
+                            false,
+                            false,
+                        );
+                    }
+                } else {
+                    self.state.session.camera.zoom(delta);
+                }
             }
         }
         self.state.mark_dirty();
@@ -1947,6 +2027,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             show_triangulation: self.state.session.show_triangulation,
             textured: self.state.session.textured,
             show_wireframe_overlay: self.state.session.show_wireframe_overlay,
+            show_face_orientation: self.state.session.show_face_orientation,
+            show_uv_checker: self.state.session.show_uv_checker,
             selection_domain: self.state.selection_domain(),
             xray_opacity: self.state.session.xray_opacity,
             selection_rgb: self.state.ui.selection_rgb,
@@ -3479,10 +3561,37 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         0.0,
                     ),
                 };
-                if snap {
-                    let step = self.state.session.snap_settings.grid_spacing.max(0.001);
-                    translation = (translation / step).round() * step;
-                    scalar = (scalar / step).round() * step;
+                if snap || self.state.session.snap_enabled {
+                    let mut settings = self.state.session.snap_settings.clone();
+                    settings.enabled = true;
+                    let mesh = self.state.project.active_mesh();
+                    let current_pivot = pivot + translation;
+                    let query = petunia_core::SnapQuery {
+                        point: current_pivot,
+                        start_point: Some(pivot),
+                        settings: &settings,
+                        mesh,
+                    };
+                    let snap_res = petunia_core::snap_point(query);
+                    if snap_res.snapped {
+                        translation = snap_res.point - pivot;
+                        match constraint {
+                            ModalConstraint::Axis(index) => {
+                                let a = axis(index);
+                                translation = a * translation.dot(a);
+                                scalar = translation.dot(a);
+                            }
+                            ModalConstraint::Plane(index) => {
+                                let a = axis(index);
+                                translation = translation - a * translation.dot(a);
+                            }
+                            ModalConstraint::Free => {}
+                        }
+                    } else if settings.target == petunia_core::SnapTarget::Grid {
+                        let step = settings.grid_spacing.max(0.001);
+                        translation = (translation / step).round() * step;
+                        scalar = (scalar / step).round() * step;
+                    }
                 }
                 self.state.update_modal(translation, scalar)
             }
@@ -3497,7 +3606,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 let change = (angle - drag.last_angle + 180.0).rem_euclid(360.0) - 180.0;
                 drag.rotation_angle += change;
                 drag.last_angle = angle;
-                let angle = if snap {
+                let angle = if snap || self.state.session.snap_enabled {
                     (drag.rotation_angle / 15.0).round() * 15.0
                 } else {
                     drag.rotation_angle
@@ -3513,7 +3622,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 } else {
                     1.0 + delta.x * 0.005
                 };
-                if snap {
+                if snap || self.state.session.snap_enabled {
                     factor = (factor * 10.0).round() / 10.0;
                 }
                 if factor.abs() < 0.001 {
@@ -4540,6 +4649,144 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             stack.add_group(format!("Group {}", stack.layers.len() + 1));
             true
         })
+    }
+
+    pub fn add_decal_layer(&mut self) -> bool {
+        self.mutate_paint_stack("add decal layer", |stack| {
+            let decal_img = petunia_project::Canvas::new(64, 64, [255, 200, 50, 255]);
+            let decal = petunia_project::paint_layers::DecalLayer::new(
+                decal_img,
+                [0.5, 0.5],
+                [0.25, 0.25],
+                0.0,
+            );
+            stack.add_layer(petunia_project::paint_layers::PaintLayer::new_decal(
+                format!("Decal {}", stack.layers.len() + 1),
+                decal,
+            ));
+            true
+        })
+    }
+
+    pub fn toggle_face_orientation(&mut self) -> bool {
+        self.state.session.show_face_orientation = !self.state.session.show_face_orientation;
+        let enabled = self.state.session.show_face_orientation;
+        self.state.render.mark_dirty();
+        self.state.set_status(if enabled {
+            "Orientação de faces (azul/vermelho) ativada"
+        } else {
+            "Orientação de faces desativada"
+        });
+        enabled
+    }
+
+    pub fn toggle_uv_checker(&mut self) -> bool {
+        self.state.session.show_uv_checker = !self.state.session.show_uv_checker;
+        let enabled = self.state.session.show_uv_checker;
+        self.state.render.mark_dirty();
+        self.state.set_status(if enabled {
+            "UV Checkerboard ativado"
+        } else {
+            "UV Checkerboard desativado"
+        });
+        enabled
+    }
+
+    pub fn toggle_proportional_editing(&mut self) -> bool {
+        self.state.session.proportional_editing = !self.state.session.proportional_editing;
+        let enabled = self.state.session.proportional_editing;
+        self.state.render.mark_dirty();
+        self.state.set_status(if enabled {
+            "Edição proporcional ativada"
+        } else {
+            "Edição proporcional desativada"
+        });
+        enabled
+    }
+
+    pub fn set_proportional_radius(&mut self, radius: f32) -> bool {
+        if !radius.is_finite() {
+            return false;
+        }
+        let r = radius.clamp(0.01, 100.0);
+        self.state.session.proportional_settings.radius = r;
+        self.state.render.mark_dirty();
+        true
+    }
+
+    pub fn adjust_proportional_radius(&mut self, delta: f32) -> bool {
+        if !delta.is_finite() {
+            return false;
+        }
+        let current = self.state.session.proportional_settings.radius;
+        let new_radius = (current + delta).clamp(0.05, 100.0);
+        self.set_proportional_radius(new_radius);
+        self.state
+            .set_status(format!("Raio proporcional: {:.2}", new_radius));
+        true
+    }
+
+    pub fn set_proportional_falloff(&mut self, falloff_str: &str) -> bool {
+        use petunia_core::ProportionalFalloff;
+        let falloff = match falloff_str.to_lowercase().as_str() {
+            "smooth" => ProportionalFalloff::Smooth,
+            "linear" => ProportionalFalloff::Linear,
+            "sphere" => ProportionalFalloff::Sphere,
+            "sharp" => ProportionalFalloff::Sharp,
+            "constant" => ProportionalFalloff::Constant,
+            _ => ProportionalFalloff::Smooth,
+        };
+        self.state.session.proportional_settings.falloff = falloff;
+        self.state.render.mark_dirty();
+        true
+    }
+
+    pub fn toggle_snap_enabled(&mut self) -> bool {
+        self.state.session.snap_enabled = !self.state.session.snap_enabled;
+        self.state.session.snap_settings.enabled = self.state.session.snap_enabled;
+        let enabled = self.state.session.snap_enabled;
+        self.state.render.mark_dirty();
+        self.state.set_status(if enabled {
+            "Snap magnético ativado"
+        } else {
+            "Snap magnético desativado"
+        });
+        enabled
+    }
+
+    pub fn set_snap_target(&mut self, target_str: &str) -> bool {
+        use petunia_core::SnapTarget;
+        let target = match target_str.to_lowercase().as_str() {
+            "grid" => SnapTarget::Grid,
+            "increment" => SnapTarget::Increment,
+            "vertex" | "point" => SnapTarget::Vertex,
+            "edge" => SnapTarget::Edge,
+            "face" => SnapTarget::Face,
+            _ => SnapTarget::Grid,
+        };
+        self.state.session.snap_settings.target = target;
+        self.state.render.mark_dirty();
+        self.state
+            .set_status(format!("Snap target: {}", target.label()));
+        true
+    }
+
+    pub fn add_profile_rectangle(&mut self, width: f32, height: f32) -> bool {
+        petunia_module_model::profile_set_rectangle(&mut self.state, width, height);
+        self.state.render.mark_dirty();
+        self.state.set_status(format!(
+            "Perfil retangular ({width:.1} x {height:.1}) criado"
+        ));
+        true
+    }
+
+    pub fn add_profile_circle(&mut self, radius: f32, segments: usize) -> bool {
+        petunia_module_model::profile_set_circle(&mut self.state, radius, segments);
+        self.state.render.mark_dirty();
+        self.state.set_status(format!(
+            "Perfil circular (raio {radius:.1}, {segments} seg) criado"
+        ));
+        true
     }
 
     pub fn set_paint_layer_active(&mut self, id: &str) -> bool {
@@ -5766,6 +6013,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             CommandId::ResetCamera => self.apply(UiIntent::ResetCamera),
             CommandId::ToggleProjection => self.apply(UiIntent::ToggleProjection),
             CommandId::SaveActiveAsAsset => self.apply(UiIntent::SaveActiveAsAsset),
+            CommandId::ToggleFaceOrientation => self.apply(UiIntent::ToggleFaceOrientation),
+            CommandId::ToggleUvChecker => self.apply(UiIntent::ToggleUvChecker),
+            CommandId::ToggleProportionalEditing => self.apply(UiIntent::ToggleProportionalEditing),
+            CommandId::ToggleSnap => self.apply(UiIntent::ToggleSnapEnabled),
         }
     }
 
@@ -7588,6 +7839,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         petunia_config::UserPreferences::default().selection_rgb
     };
     state.ui.selection_thickness = preferences.selection_thickness.clamp(1.0, 6.0);
+    state.ui.model_quick_actions = preferences.model_quick_actions;
 
     let mut viewport: Box<dyn PetuniaViewport> = if let Some((_, _, device, queue)) = gpu_context {
         println!("Viewport backend: shared WGPU fast path");
@@ -7608,6 +7860,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
         show_triangulation: state.session.show_triangulation,
         textured: state.session.textured,
         show_wireframe_overlay: state.session.show_wireframe_overlay,
+        show_face_orientation: state.session.show_face_orientation,
+        show_uv_checker: state.session.show_uv_checker,
         selection_domain: state.selection_domain(),
         xray_opacity: state.session.xray_opacity,
         selection_rgb: state.ui.selection_rgb,
@@ -7946,6 +8200,13 @@ fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_asset_query(vm.asset_query.as_str().into());
     window.set_asset_sort_by_name(vm.asset_sort_by_name);
     window.set_asset_thumbnail_size(vm.asset_thumbnail_size);
+    window.set_show_face_orientation(vm.show_face_orientation);
+    window.set_show_uv_checker(vm.show_uv_checker);
+    window.set_proportional_editing(vm.proportional_editing);
+    window.set_proportional_radius(vm.proportional_radius);
+    window.set_proportional_falloff(vm.proportional_falloff.as_str().into());
+    window.set_snap_enabled(vm.snap_enabled);
+    window.set_snap_target(vm.snap_target.as_str().into());
 
     sync_overlay_models(window, &vm.selection_overlay, &vm.gizmo);
     window.set_add_menu_open(vm.add_menu_open);
@@ -8317,6 +8578,7 @@ fn persist_user_preferences<V: PetuniaViewport>(bridge: &mut SlintUiBridge<V>) {
         invert_vertical_drag: bridge.state.ui.invert_vertical_drag,
         selection_rgb: bridge.state.ui.selection_rgb,
         selection_thickness: bridge.state.ui.selection_thickness,
+        model_quick_actions: bridge.state.ui.model_quick_actions.clone(),
     };
     if let Err(error) = preferences.save() {
         let message = bridge
@@ -9630,6 +9892,158 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let face_orient_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_face_orientation(move || {
+        if let Ok(mut bridge) = face_orient_bridge.lock() {
+            bridge.toggle_face_orientation();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let uv_checker_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_uv_checker(move || {
+        if let Ok(mut bridge) = uv_checker_bridge.lock() {
+            bridge.toggle_uv_checker();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let prop_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_proportional_editing(move || {
+        if let Ok(mut bridge) = prop_bridge.lock() {
+            bridge.toggle_proportional_editing();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let prop_rad_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_set_proportional_radius(move |radius| {
+        if let Ok(mut bridge) = prop_rad_bridge.lock() {
+            bridge.set_proportional_radius(radius);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let prop_fall_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_set_proportional_falloff(move |falloff| {
+        if let Ok(mut bridge) = prop_fall_bridge.lock() {
+            bridge.set_proportional_falloff(falloff.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let prop_adj_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_adjust_proportional_radius(move |delta| {
+        if let Ok(mut bridge) = prop_adj_bridge.lock() {
+            bridge.adjust_proportional_radius(delta);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let snap_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_snap_enabled(move || {
+        if let Ok(mut bridge) = snap_bridge.lock() {
+            bridge.toggle_snap_enabled();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let snap_target_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_set_snap_target(move |target| {
+        if let Ok(mut bridge) = snap_target_bridge.lock() {
+            bridge.set_snap_target(target.as_str());
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let prof_rect_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_add_profile_rectangle(move |width, height| {
+        if let Ok(mut bridge) = prof_rect_bridge.lock() {
+            bridge.add_profile_rectangle(width, height);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let prof_circle_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_add_profile_circle(move |radius, segments| {
+        if let Ok(mut bridge) = prof_circle_bridge.lock() {
+            bridge.add_profile_circle(radius, segments as usize);
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let decal_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_decal_layer_added(move || {
+        if let Ok(mut bridge) = decal_bridge.lock() {
+            bridge.add_decal_layer();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let view_axis_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_view_axis_clicked(move |axis| {
@@ -10664,6 +11078,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_quick_action_toggled(move |id| {
         if let Ok(mut bridge) = quick_action_bridge.lock() {
             bridge.toggle_quick_action(id.as_str());
+            persist_user_preferences(&mut bridge);
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
             }
@@ -10674,6 +11089,7 @@ fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_quick_actions_reset(move || {
         if let Ok(mut bridge) = quick_reset_bridge.lock() {
             bridge.reset_quick_actions();
+            persist_user_preferences(&mut bridge);
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
             }
@@ -14830,7 +15246,7 @@ mod tests {
         bridge.apply(UiIntent::AssignMaterialSlot(1));
         let mesh = bridge.state.project.active_mesh().unwrap();
         assert_eq!(mesh.faces[0].material_slot, Some(1));
-        assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+        assert_eq!(bridge.state.project.undo.depth(), (2, 0));
 
         // Duplicate material 1 via UiIntent
         bridge.apply(UiIntent::DuplicateMaterial(1));
@@ -15085,5 +15501,241 @@ mod tests {
         let vm = bridge.view_model();
         assert!(vm.tool_options_active);
         assert!(vm.tool_options_title.contains("Scale"));
+    }
+
+    #[test]
+    fn proportional_editing_radius_adjustment_and_falloff() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        // Toggle via UiIntent
+        assert!(!bridge.view_model().proportional_editing);
+        bridge.apply(UiIntent::ToggleProportionalEditing);
+        assert!(bridge.view_model().proportional_editing);
+
+        // Adjust radius (default is 1.5)
+        bridge.adjust_proportional_radius(0.5);
+        assert!((bridge.view_model().proportional_radius - 2.0).abs() < 1e-4);
+
+        // Set falloff
+        bridge.apply(UiIntent::SetProportionalFalloff("linear".into()));
+        assert_eq!(bridge.view_model().proportional_falloff, "linear");
+
+        // Interactive mouse wheel zoom during modal adjusts radius
+        bridge
+            .state
+            .begin_modal(petunia_core::ModalKind::Move)
+            .unwrap();
+        bridge.apply_viewport_gesture(ViewportGesture::Zoom { delta: 1.0 });
+        assert!((bridge.view_model().proportional_radius - 2.25).abs() < 1e-4);
+        bridge.apply_viewport_gesture(ViewportGesture::Zoom { delta: -1.0 });
+        assert!((bridge.view_model().proportional_radius - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn advanced_snap_to_edge_and_face() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::ToggleSnapEnabled);
+        assert!(bridge.view_model().snap_enabled);
+
+        bridge.apply(UiIntent::SetSnapTarget("edge".into()));
+        assert_eq!(bridge.view_model().snap_target, "edge");
+        assert_eq!(
+            bridge.state.session.snap_settings.target,
+            petunia_core::SnapTarget::Edge
+        );
+
+        // Edge snapping query on cube edge [-1, 1, 1] to [1, 1, 1]
+        let mesh = bridge.state.project.active_mesh().unwrap().clone();
+        let query_edge = petunia_core::SnapQuery {
+            point: glam::Vec3::new(0.0, 1.05, 1.0),
+            start_point: Some(glam::Vec3::ZERO),
+            settings: &bridge.state.session.snap_settings,
+            mesh: Some(&mesh),
+        };
+        let res_edge = petunia_core::snap_point(query_edge);
+        assert!(res_edge.snapped);
+        assert_eq!(res_edge.target, petunia_core::SnapTarget::Edge);
+
+        bridge.apply(UiIntent::SetSnapTarget("face".into()));
+        assert_eq!(bridge.view_model().snap_target, "face");
+        assert_eq!(
+            bridge.state.session.snap_settings.target,
+            petunia_core::SnapTarget::Face
+        );
+
+        // Face snapping query near centroid (0, 0, 1)
+        let query_face = petunia_core::SnapQuery {
+            point: glam::Vec3::new(0.05, 0.02, 1.0),
+            start_point: Some(glam::Vec3::ZERO),
+            settings: &bridge.state.session.snap_settings,
+            mesh: Some(&mesh),
+        };
+        let res_face = petunia_core::snap_point(query_face);
+        assert!(res_face.snapped);
+        assert_eq!(res_face.target, petunia_core::SnapTarget::Face);
+    }
+
+    #[test]
+    fn face_orientation_and_uv_checker_overlays() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        assert!(!bridge.view_model().show_face_orientation);
+        assert!(!bridge.view_model().show_uv_checker);
+
+        bridge.apply(UiIntent::ToggleFaceOrientation);
+        assert!(bridge.view_model().show_face_orientation);
+        assert!(bridge.state.session.show_face_orientation);
+
+        bridge.apply(UiIntent::ToggleUvChecker);
+        assert!(bridge.view_model().show_uv_checker);
+        assert!(bridge.state.session.show_uv_checker);
+
+        let flags = petunia_core::FingerprintFlags {
+            show_face_orientation: bridge.state.session.show_face_orientation,
+            show_uv_checker: bridge.state.session.show_uv_checker,
+            ..Default::default()
+        };
+        assert!(flags.show_face_orientation);
+        assert!(flags.show_uv_checker);
+    }
+
+    #[test]
+    fn profile_2d_rectangle_and_circle_primitives() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::AddProfileRectangle {
+            width: 3.0,
+            height: 2.0,
+        });
+        assert_eq!(bridge.state.session.profile.points.len(), 4);
+        assert!(bridge.state.session.profile.closed);
+
+        // Generate mesh from rectangle profile
+        bridge.generate_profile_extrude();
+        let mesh = bridge.state.project.active_mesh().unwrap();
+        assert!(!mesh.verts.is_empty());
+
+        // Add circle profile
+        bridge.apply(UiIntent::AddProfileCircle {
+            radius: 1.5,
+            segments: 12,
+        });
+        assert_eq!(bridge.state.session.profile.points.len(), 12);
+        assert!(bridge.state.session.profile.closed);
+    }
+
+    #[test]
+    fn individual_origins_multi_object_transformation() {
+        let mut state = AppState::default();
+        let mut mesh1 = petunia_core::Mesh::cube(1.0);
+        for v in &mut mesh1.verts {
+            v.pos[0] -= 5.0;
+        }
+        let mut mesh2 = petunia_core::Mesh::cube(1.0);
+        for v in &mut mesh2.verts {
+            v.pos[0] += 5.0;
+        }
+        let mut combined = mesh1;
+        let v_offset = combined.verts.len() as u32;
+        for v in mesh2.verts {
+            combined.verts.push(v);
+        }
+        for mut f in mesh2.faces {
+            for idx in &mut f.verts {
+                *idx += v_offset;
+            }
+            combined.faces.push(f);
+        }
+        combined.select_all();
+        *state.project.active_mesh_mut().unwrap() = combined;
+
+        state.set_selection_domain(petunia_core::SelectionDomain::Vertex);
+        state.session.pivot_point = petunia_core::PivotPoint::IndividualOrigins;
+        state.begin_modal(petunia_core::ModalKind::Scale).unwrap();
+        // Scale by 2.0 around individual origins
+        state.update_modal(glam::Vec3::ZERO, 2.0).unwrap();
+
+        let transformed = state.project.active_mesh().unwrap();
+        // Centroid of cube 1 should remain at -5, centroid of cube 2 at 5
+        let center1_x: f32 = transformed.verts[..8].iter().map(|v| v.pos[0]).sum::<f32>() / 8.0;
+        let center2_x: f32 = transformed.verts[8..].iter().map(|v| v.pos[0]).sum::<f32>() / 8.0;
+
+        assert!((center1_x - (-5.0)).abs() < 1e-3);
+        assert!((center2_x - 5.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn lasso_selection_occlusion_and_xray() {
+        let mut state = AppState::default();
+        // Active cube
+        state.set_selection_domain(petunia_core::SelectionDomain::Face);
+        state.session.camera.proj = petunia_core::Projection::Perspective;
+
+        // Lasso polygon covering center NDC screen
+        let polygon = vec![[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+
+        // Without X-Ray, occluded geometry behind is filtered
+        state.session.show_xray = false;
+        state.select_viewport_lasso(&polygon, false, false);
+        let selected_count_no_xray = state
+            .project
+            .active_mesh()
+            .unwrap()
+            .faces
+            .iter()
+            .filter(|f| f.selected)
+            .count();
+
+        // With X-Ray, through-selection selects both front and back
+        state.session.show_xray = true;
+        state.select_viewport_lasso(&polygon, false, false);
+        let selected_count_xray = state
+            .project
+            .active_mesh()
+            .unwrap()
+            .faces
+            .iter()
+            .filter(|f| f.selected)
+            .count();
+
+        assert!(selected_count_xray >= selected_count_no_xray);
+    }
+
+    #[test]
+    fn uv_island_90_degree_rotation_in_slint() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Uv));
+        bridge.state.session.uv_selected.insert(0);
+
+        let initial_u0 = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][0];
+        let initial_v0 = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][1];
+
+        // Rotate 90 degrees CW (+90)
+        assert!(bridge.uv_rotate_selected(90.0));
+        let rotated_u0 = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][0];
+        let rotated_v0 = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][1];
+
+        assert!((rotated_u0 - initial_u0).abs() > 1e-4 || (rotated_v0 - initial_v0).abs() > 1e-4);
+
+        // Rotate 90 degrees CCW (-90) returns to original position
+        assert!(bridge.uv_rotate_selected(-90.0));
+        let back_u0 = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][0];
+        let back_v0 = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][1];
+        assert!((back_u0 - initial_u0).abs() < 1e-4);
+        assert!((back_v0 - initial_v0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn decal_layer_creation_and_rendering() {
+        let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+        bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+        assert!(bridge.add_decal_layer());
+
+        let active = bridge.state.project.active;
+        let stack = bridge.state.project.assets[active]
+            .paint_stack
+            .as_ref()
+            .unwrap();
+        assert!(stack.layers.iter().any(|layer| matches!(
+            layer.kind,
+            petunia_project::paint_layers::LayerKind::Decal(_)
+        )));
     }
 }

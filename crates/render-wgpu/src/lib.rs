@@ -1223,6 +1223,8 @@ impl Renderer {
         show_triangulation: bool,
         textured: bool,
         show_wireframe_overlay: bool,
+        show_face_orientation: bool,
+        show_uv_checker: bool,
         edit_domain: petunia_core::SelectionDomain,
         hover: petunia_core::HoverTarget,
     ) {
@@ -1296,6 +1298,8 @@ impl Renderer {
                 textured,
                 edit_mode_is_edit: false,
                 show_wireframe_overlay,
+                show_face_orientation,
+                show_uv_checker,
             },
         );
         let mesh_changed = self.last_fingerprint.map(|f| f.mesh) != Some(fp.mesh);
@@ -1360,18 +1364,36 @@ impl Renderer {
                     mesh.to_triangles_smooth(smooth)
                 };
                 for (pos, n, mut col, uv) in tris {
-                    if (col[0] - 0.72).abs() < 0.02
-                        && (col[1] - 0.73).abs() < 0.02
-                        && (col[2] - 0.78).abs() < 0.02
-                    {
-                        col = mat_color;
-                    }
-                    if has_emission {
-                        col = [
-                            (col[0] + emission_color[0]).min(1.0),
-                            (col[1] + emission_color[1]).min(1.0),
-                            (col[2] + emission_color[2]).min(1.0),
-                        ];
+                    if show_face_orientation {
+                        let to_cam = (camera.eye() - glam::Vec3::from(pos)).normalize_or_zero();
+                        let n_vec = glam::Vec3::from(n);
+                        if n_vec.dot(to_cam) >= 0.0 {
+                            col = [0.2, 0.45, 0.95];
+                        } else {
+                            col = [0.95, 0.2, 0.2];
+                        }
+                    } else if show_uv_checker {
+                        let u_cell = (uv[0] * 16.0).floor() as i32;
+                        let v_cell = (uv[1] * 16.0).floor() as i32;
+                        if (u_cell + v_cell).rem_euclid(2) == 0 {
+                            col = [0.85, 0.85, 0.85];
+                        } else {
+                            col = [0.25, 0.25, 0.25];
+                        }
+                    } else {
+                        if (col[0] - 0.72).abs() < 0.02
+                            && (col[1] - 0.73).abs() < 0.02
+                            && (col[2] - 0.78).abs() < 0.02
+                        {
+                            col = mat_color;
+                        }
+                        if has_emission {
+                            col = [
+                                (col[0] + emission_color[0]).min(1.0),
+                                (col[1] + emission_color[1]).min(1.0),
+                                (col[2] + emission_color[2]).min(1.0),
+                            ];
+                        }
                     }
                     mv.push(MeshVertex {
                         pos,

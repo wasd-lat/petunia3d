@@ -710,6 +710,8 @@ pub struct EditorSession {
     pub show_axes: bool,
     pub show_wireframe_overlay: bool,
     pub show_cursor: bool,
+    pub show_face_orientation: bool,
+    pub show_uv_checker: bool,
     pub tools: ToolState,
     /// Criação de primitiva em andamento (Wave 8: cartão Last Operation).
     pub primitive_session: Option<crate::primitive_session::PrimitiveCreationSession>,
@@ -770,6 +772,8 @@ impl EditorSession {
             show_axes: true,
             show_wireframe_overlay: false,
             show_cursor: true,
+            show_face_orientation: false,
+            show_uv_checker: false,
             tools: ToolState::new(),
             primitive_session: None,
             last_primitive: None,

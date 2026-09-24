@@ -37,6 +37,10 @@ pub enum CommandId {
     ResetCamera,
     ToggleProjection,
     SaveActiveAsAsset,
+    ToggleFaceOrientation,
+    ToggleUvChecker,
+    ToggleProportionalEditing,
+    ToggleSnap,
 }
 
 impl CommandId {
@@ -75,6 +79,10 @@ impl CommandId {
             Self::ResetCamera => "view.reset_camera",
             Self::ToggleProjection => "view.toggle_projection",
             Self::SaveActiveAsAsset => "model.save_as_asset",
+            Self::ToggleFaceOrientation => "view.toggle_face_orientation",
+            Self::ToggleUvChecker => "view.toggle_uv_checker",
+            Self::ToggleProportionalEditing => "tools.toggle_proportional",
+            Self::ToggleSnap => "tools.toggle_snap",
         }
     }
 
@@ -113,6 +121,10 @@ impl CommandId {
             "view.reset_camera" => Some(Self::ResetCamera),
             "view.toggle_projection" => Some(Self::ToggleProjection),
             "model.save_as_asset" => Some(Self::SaveActiveAsAsset),
+            "view.toggle_face_orientation" => Some(Self::ToggleFaceOrientation),
+            "view.toggle_uv_checker" => Some(Self::ToggleUvChecker),
+            "tools.toggle_proportional" => Some(Self::ToggleProportionalEditing),
+            "tools.toggle_snap" => Some(Self::ToggleSnap),
             _ => None,
         }
     }
@@ -338,6 +350,30 @@ impl CommandRegistry {
                 id: CommandId::SaveActiveAsAsset,
                 label_key: "commands.save_as_asset",
                 shortcut: None,
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::ToggleFaceOrientation,
+                label_key: "commands.toggle_face_orientation",
+                shortcut: None,
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::ToggleUvChecker,
+                label_key: "commands.toggle_uv_checker",
+                shortcut: None,
+                workspace: None,
+            },
+            CommandDescriptor {
+                id: CommandId::ToggleProportionalEditing,
+                label_key: "commands.toggle_proportional",
+                shortcut: Some("O"),
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::ToggleSnap,
+                label_key: "commands.toggle_snap",
+                shortcut: Some("Shift+Tab"),
                 workspace: Some(Workspace::Model),
             },
         ]

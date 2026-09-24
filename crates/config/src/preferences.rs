@@ -1,11 +1,12 @@
 //! Preferências do usuário independentes do documento e do toolkit.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UserPreferences {
     /// Inverte apenas a resposta vertical das ferramentas de manipulação.
@@ -14,6 +15,8 @@ pub struct UserPreferences {
     pub selection_rgb: [u8; 3],
     /// Espessura visual em pixels lógicos (1..=6).
     pub selection_thickness: f32,
+    /// Ações rápidas preferidas do Inspector MODEL.
+    pub model_quick_actions: Vec<String>,
 }
 
 impl Default for UserPreferences {
@@ -22,6 +25,7 @@ impl Default for UserPreferences {
             invert_vertical_drag: false,
             selection_rgb: [233, 106, 0],
             selection_thickness: 2.0,
+            model_quick_actions: Vec::new(),
         }
     }
 }
@@ -45,6 +49,11 @@ impl UserPreferences {
         {
             preferences.selection_thickness = Self::default().selection_thickness;
         }
+        let mut seen = HashSet::new();
+        preferences
+            .model_quick_actions
+            .retain(|id| !id.is_empty() && id.len() <= 64 && seen.insert(id.clone()));
+        preferences.model_quick_actions.truncate(6);
         Ok(preferences)
     }
 
@@ -92,6 +101,7 @@ mod tests {
             invert_vertical_drag: true,
             selection_rgb: [32, 180, 240],
             selection_thickness: 3.5,
+            model_quick_actions: vec!["model.fuse".to_string()],
         };
         preferences.save_to_path(&path).unwrap();
         assert_eq!(UserPreferences::load_from_path(&path).unwrap(), preferences);
