@@ -67,6 +67,7 @@ pub struct ViewportRenderState {
     pub show_grid: bool,
     /// Componente sob o cursor (preselection).
     pub hover: petunia_core::HoverTarget,
+    pub boolean_operand: Option<uuid::Uuid>,
 }
 
 impl Default for ViewportRenderState {
@@ -85,6 +86,7 @@ impl Default for ViewportRenderState {
             selection_thickness: 2.0,
             show_grid: true,
             hover: petunia_core::HoverTarget::None,
+            boolean_operand: None,
         }
     }
 }
@@ -109,6 +111,9 @@ pub struct GizmoModel {
     pub x_commands: String,
     pub y_commands: String,
     pub z_commands: String,
+    pub x_end: [f32; 2],
+    pub y_end: [f32; 2],
+    pub z_end: [f32; 2],
     /// Setas como triângulos preenchidos (`M .. L .. L .. Z`).
     pub x_arrow_commands: String,
     pub y_arrow_commands: String,
@@ -355,6 +360,9 @@ pub enum UiIntent {
     SetOriginSelection,
     SetGeometryToOrigin,
     ToggleEditPivot,
+    SetColorblindAxes(bool),
+    SetReducedMotion(bool),
+    SetDoubleTapIntervalMs(u64),
 }
 
 // Presentation ViewModels and Data Transfer Objects (DTOs) for the Slint shell.
@@ -528,6 +536,7 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub preferences_path_override: Option<std::path::PathBuf>,
     /// Rastreamento de duplo toque em atalhos de ferramenta: (nome da ferramenta, instante).
     pub last_tool_press: Option<(String, std::time::Instant)>,
+    pub slice_trim: bool,
 }
 
 /// Menu de contexto do Outliner aberto sobre uma linha do painel Parts,
@@ -697,6 +706,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             preferences: petunia_config::UserPreferences::default(),
             preferences_path_override: None,
             last_tool_press: None,
+            slice_trim: false,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -896,9 +906,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             UiIntent::AddPrimitive(kind) => {
                 self.state.begin_primitive(kind, None);
-                self.state.confirm_primitive();
                 self.state
-                    .set_status(format!("Primitiva adicionada: {:?}", kind));
+                    .set_status(format!("Added {}", kind.default_name()));
             }
             UiIntent::DeleteActiveAsset => {
                 // `edit.delete` é contextual: em Object remove o asset ativo; em
@@ -949,6 +958,33 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         }
                     }
                     "draw_profile" => {
+                        let forward = self.state.session.camera.forward();
+                        let preset = if forward.y.abs() > forward.x.abs()
+                            && forward.y.abs() > forward.z.abs()
+                        {
+                            if forward.y < 0.0 {
+                                petunia_core::ViewPreset::Top
+                            } else {
+                                petunia_core::ViewPreset::Bottom
+                            }
+                        } else if forward.x.abs() > forward.z.abs() {
+                            if forward.x > 0.0 {
+                                petunia_core::ViewPreset::Right
+                            } else {
+                                petunia_core::ViewPreset::Left
+                            }
+                        } else {
+                            if forward.z > 0.0 {
+                                petunia_core::ViewPreset::Front
+                            } else {
+                                petunia_core::ViewPreset::Back
+                            }
+                        };
+                        self.state.session.camera.set_preset(preset);
+                        self.state
+                            .session
+                            .camera
+                            .set_projection(petunia_core::Projection::Ortho);
                         petunia_module_model::draw_profile::profile_capture_frame(&mut self.state);
                         self.state.set_status(
                             "Profile: click to add points, click the first point to close",
@@ -1235,6 +1271,15 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             UiIntent::ToggleEditPivot => {
                 self.state.toggle_edit_pivot();
             }
+            UiIntent::SetColorblindAxes(enabled) => {
+                let _ = self.set_colorblind_axes(enabled);
+            }
+            UiIntent::SetReducedMotion(enabled) => {
+                let _ = self.set_reduced_motion(enabled);
+            }
+            UiIntent::SetDoubleTapIntervalMs(interval) => {
+                let _ = self.set_double_tap_interval_ms(interval);
+            }
         }
         self.sync_viewport_context();
     }
@@ -1297,6 +1342,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             selection_thickness: self.state.ui.selection_thickness,
             show_grid: self.state.session.show_grid,
             hover: self.state.session.tools.hover,
+            boolean_operand: self.state.session.tools.boolean_operand,
         };
         self.viewport.render_frame(
             &self.state.project,
@@ -3564,6 +3610,39 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Diferenciação não-cromática de eixos para acessibilidade e daltonismo.
+    pub fn set_colorblind_axes(&mut self, enabled: bool) -> bool {
+        if self.state.ui.colorblind_axes == enabled {
+            return false;
+        }
+        self.state.ui.colorblind_axes = enabled;
+        self.preferences.colorblind_axes = enabled;
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Redução de movimento para usuários com sensibilidade vestibular / labirintite.
+    pub fn set_reduced_motion(&mut self, enabled: bool) -> bool {
+        if self.state.ui.reduced_motion == enabled {
+            return false;
+        }
+        self.state.ui.reduced_motion = enabled;
+        self.preferences.reduced_motion = enabled;
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Intervalo máximo em milissegundos para duplo toque de tecla de ferramenta.
+    pub fn set_double_tap_interval_ms(&mut self, interval_ms: u64) -> bool {
+        let clamped = interval_ms.min(2000);
+        if self.preferences.double_tap_interval_ms == clamped {
+            return false;
+        }
+        self.preferences.double_tap_interval_ms = clamped;
+        self.state.mark_dirty();
+        true
+    }
+
     pub fn set_asset_query(&mut self, query: &str) -> bool {
         if self.asset_query == query {
             return false;
@@ -4292,6 +4371,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     /// pertencem ao próprio cache e ficam intocados aqui).
     pub(crate) fn sync_preferences_from_state(&mut self) {
         self.preferences.invert_vertical_drag = self.state.ui.invert_vertical_drag;
+        self.preferences.colorblind_axes = self.state.ui.colorblind_axes;
+        self.preferences.reduced_motion = self.state.ui.reduced_motion;
         self.preferences.selection_rgb = self.state.ui.selection_rgb;
         self.preferences.selection_thickness = self.state.ui.selection_thickness;
         self.preferences.model_quick_actions = self.state.ui.model_quick_actions.clone();
@@ -4735,6 +4816,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             [0.0, 0.0],
             [self.viewport_size[0], self.viewport_size[1]],
         );
+        if let Some(session) = self.state.session.tools.cut_session.as_mut() {
+            session.fill_cap = self.slice_trim;
+        }
         let Some(session) = self.state.session.tools.cut_session.as_ref() else {
             return false;
         };
@@ -4800,6 +4884,346 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.emit_mesh_changed();
         self.state.set_status("Slice cancelled");
         true
+    }
+
+    pub fn set_slice_trim(&mut self, trim: bool) {
+        self.slice_trim = trim;
+        if let Some(session) = self.state.session.tools.cut_session.as_mut() {
+            session.fill_cap = trim;
+        }
+    }
+
+    pub fn update_primitive_param_float(&mut self, param: &str, value: f32) -> bool {
+        let Some(session) = &self.state.session.primitive_session else {
+            return false;
+        };
+        use petunia_core::PrimitiveDescriptor::*;
+        let new_desc = match session.descriptor {
+            Box {
+                width,
+                height,
+                depth,
+            } => match param {
+                "width" => Box {
+                    width: value.max(0.01),
+                    height,
+                    depth,
+                },
+                "height" => Box {
+                    width,
+                    height: value.max(0.01),
+                    depth,
+                },
+                "depth" => Box {
+                    width,
+                    height,
+                    depth: value.max(0.01),
+                },
+                _ => return false,
+            },
+            Plane { width, height } => match param {
+                "width" => Plane {
+                    width: value.max(0.01),
+                    height,
+                },
+                "height" => Plane {
+                    width,
+                    height: value.max(0.01),
+                },
+                _ => return false,
+            },
+            Wedge {
+                width,
+                height,
+                depth,
+            } => match param {
+                "width" => Wedge {
+                    width: value.max(0.01),
+                    height,
+                    depth,
+                },
+                "height" => Wedge {
+                    width,
+                    height: value.max(0.01),
+                    depth,
+                },
+                "depth" => Wedge {
+                    width,
+                    height,
+                    depth: value.max(0.01),
+                },
+                _ => return false,
+            },
+            Cylinder {
+                radius,
+                height,
+                sides,
+                cap_top,
+                cap_bottom,
+            } => match param {
+                "radius" => Cylinder {
+                    radius: value.max(0.01),
+                    height,
+                    sides,
+                    cap_top,
+                    cap_bottom,
+                },
+                "height" => Cylinder {
+                    radius,
+                    height: value.max(0.01),
+                    sides,
+                    cap_top,
+                    cap_bottom,
+                },
+                "sides" => Cylinder {
+                    radius,
+                    height,
+                    sides: (value.round() as u32).clamp(3, 32),
+                    cap_top,
+                    cap_bottom,
+                },
+                _ => return false,
+            },
+            Cone {
+                bottom_radius,
+                top_radius,
+                height,
+                sides,
+                cap_bottom,
+                cap_top,
+            } => match param {
+                "radius" => Cone {
+                    bottom_radius: value.max(0.0),
+                    top_radius,
+                    height,
+                    sides,
+                    cap_bottom,
+                    cap_top,
+                },
+                "radius_b" => Cone {
+                    bottom_radius,
+                    top_radius: value.max(0.0),
+                    height,
+                    sides,
+                    cap_bottom,
+                    cap_top,
+                },
+                "height" => Cone {
+                    bottom_radius,
+                    top_radius,
+                    height: value.max(0.01),
+                    sides,
+                    cap_bottom,
+                    cap_top,
+                },
+                "sides" => Cone {
+                    bottom_radius,
+                    top_radius,
+                    height,
+                    sides: (value.round() as u32).clamp(3, 32),
+                    cap_bottom,
+                    cap_top,
+                },
+                _ => return false,
+            },
+            Circle {
+                radius,
+                vertices,
+                fill,
+            } => match param {
+                "radius" => Circle {
+                    radius: value.max(0.01),
+                    vertices,
+                    fill,
+                },
+                "sides" => Circle {
+                    radius,
+                    vertices: (value.round() as u32).clamp(3, 64),
+                    fill,
+                },
+                _ => return false,
+            },
+            Torus {
+                major_radius,
+                minor_radius,
+                major_segments,
+                minor_segments,
+            } => match param {
+                "radius" => Torus {
+                    major_radius: value.max(0.01),
+                    minor_radius,
+                    major_segments,
+                    minor_segments,
+                },
+                "radius_b" => Torus {
+                    major_radius,
+                    minor_radius: value.max(0.01),
+                    major_segments,
+                    minor_segments,
+                },
+                "sides" => Torus {
+                    major_radius,
+                    minor_radius,
+                    major_segments: (value.round() as u32).clamp(3, 64),
+                    minor_segments,
+                },
+                "rings" => Torus {
+                    major_radius,
+                    minor_radius,
+                    major_segments,
+                    minor_segments: (value.round() as u32).clamp(3, 32),
+                },
+                _ => return false,
+            },
+            LowSphere {
+                radius,
+                segments,
+                rings,
+            } => match param {
+                "radius" => LowSphere {
+                    radius: value.max(0.01),
+                    segments,
+                    rings,
+                },
+                "sides" => LowSphere {
+                    radius,
+                    segments: (value.round() as u32).clamp(3, 32),
+                    rings,
+                },
+                "rings" => LowSphere {
+                    radius,
+                    segments,
+                    rings: (value.round() as u32).clamp(2, 24),
+                },
+                _ => return false,
+            },
+            Icosphere { radius, subdiv } => match param {
+                "radius" => Icosphere {
+                    radius: value.max(0.01),
+                    subdiv,
+                },
+                "subdiv" => Icosphere {
+                    radius,
+                    subdiv: (value.round() as u32).min(3),
+                },
+                _ => return false,
+            },
+            Capsule {
+                radius,
+                height,
+                radial_segments,
+                cap_segments,
+            } => match param {
+                "radius" => Capsule {
+                    radius: value.max(0.01),
+                    height,
+                    radial_segments,
+                    cap_segments,
+                },
+                "height" => Capsule {
+                    radius,
+                    height: value.max(0.01),
+                    radial_segments,
+                    cap_segments,
+                },
+                "sides" => Capsule {
+                    radius,
+                    height,
+                    radial_segments: (value.round() as u32).clamp(3, 32),
+                    cap_segments,
+                },
+                "rings" => Capsule {
+                    radius,
+                    height,
+                    radial_segments,
+                    cap_segments: (value.round() as u32).clamp(1, 8),
+                },
+                _ => return false,
+            },
+        };
+        self.state.update_primitive(new_desc)
+    }
+
+    pub fn update_primitive_param_bool(&mut self, param: &str, value: bool) -> bool {
+        let Some(session) = &self.state.session.primitive_session else {
+            return false;
+        };
+        use petunia_core::PrimitiveDescriptor::*;
+        let new_desc = match session.descriptor {
+            Cylinder {
+                radius,
+                height,
+                sides,
+                cap_top,
+                cap_bottom,
+            } => match param {
+                "cap_top" => Cylinder {
+                    radius,
+                    height,
+                    sides,
+                    cap_top: value,
+                    cap_bottom,
+                },
+                "cap_bottom" => Cylinder {
+                    radius,
+                    height,
+                    sides,
+                    cap_top,
+                    cap_bottom: value,
+                },
+                _ => return false,
+            },
+            Cone {
+                bottom_radius,
+                top_radius,
+                height,
+                sides,
+                cap_bottom,
+                cap_top,
+            } => match param {
+                "cap_top" => Cone {
+                    bottom_radius,
+                    top_radius,
+                    height,
+                    sides,
+                    cap_bottom,
+                    cap_top: value,
+                },
+                "cap_bottom" => Cone {
+                    bottom_radius,
+                    top_radius,
+                    height,
+                    sides,
+                    cap_bottom: value,
+                    cap_top,
+                },
+                _ => return false,
+            },
+            Circle {
+                radius, vertices, ..
+            } => match param {
+                "fill_disc" => Circle {
+                    radius,
+                    vertices,
+                    fill: if value {
+                        petunia_core::CircleFill::Disc
+                    } else {
+                        petunia_core::CircleFill::None
+                    },
+                },
+                _ => return false,
+            },
+            _ => return false,
+        };
+        self.state.update_primitive(new_desc)
+    }
+
+    pub fn confirm_primitive(&mut self) -> bool {
+        self.state.confirm_primitive()
+    }
+
+    pub fn cancel_primitive(&mut self) -> bool {
+        self.state.cancel_primitive()
     }
 
     /// Um clique de faca na viewport: primeiro ponto ancora, segundo corta.
@@ -5633,6 +6057,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.state.session.tools.active_tool = "select".to_string();
             self.state.mark_dirty();
             self.state.set_status("Profile cancelled");
+            return true;
+        }
+        if self.cancel_primitive() {
             return true;
         }
         if self.cancel_slice() {
@@ -6785,16 +7212,27 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if vm.profile_active {
             vm.profile_preview_commands = self.profile_preview_commands();
         }
+        vm.slice_trim = self.slice_trim;
         if let Some(anchor) = self.slice_anchor {
-            vm.operation_preview_commands = format!(
+            let cmd = format!(
                 "M {:.2} {:.2} L {:.2} {:.2}",
                 anchor[0], anchor[1], self.pointer_position[0], self.pointer_position[1]
             );
+            vm.operation_preview_commands = cmd.clone();
+            vm.slice_preview_visible = true;
+            vm.slice_preview_commands = cmd;
         }
         vm.tool_activation = self.state.session.tools.tool_activation.id().to_string();
         vm.keyboard_tool_modal_active =
             self.keyboard_tool_modal_active && self.tool_modal.is_some();
         vm.invert_vertical_drag = self.state.ui.invert_vertical_drag;
+        vm.colorblind_axes = self.state.ui.colorblind_axes;
+        vm.reduced_motion = self.state.ui.reduced_motion;
+        vm.double_tap_interval_ms = self.preferences.double_tap_interval_ms as i32;
+        vm.label_colorblind_axes = translated(petunia_config::text_id::PREFERENCES_COLORBLIND_AXES);
+        vm.label_reduced_motion = translated(petunia_config::text_id::PREFERENCES_REDUCED_MOTION);
+        vm.label_double_tap_interval =
+            translated(petunia_config::text_id::PREFERENCES_DOUBLE_TAP_INTERVAL);
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
@@ -7062,6 +7500,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
     let mut state = AppState::default();
     let preferences = petunia_config::UserPreferences::load();
     state.ui.invert_vertical_drag = preferences.invert_vertical_drag;
+    state.ui.colorblind_axes = preferences.colorblind_axes;
+    state.ui.reduced_motion = preferences.reduced_motion;
     state.ui.selection_rgb = if selection_color_has_contrast(preferences.selection_rgb) {
         preferences.selection_rgb
     } else {
@@ -7100,6 +7540,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         selection_thickness: state.ui.selection_thickness,
         show_grid: state.session.show_grid,
         hover: state.session.tools.hover,
+        boolean_operand: state.session.tools.boolean_operand,
     };
     if let Some(frame) = viewport.render_frame(&state.project, &state.session.camera, render_state)
     {

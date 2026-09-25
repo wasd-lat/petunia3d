@@ -849,3 +849,8 @@ capture = "capturar…"
 unsupported_key = "Tecla não suportada pelo keymap"
 conflict_title = "Conflito de atalhos detectado"
 conflict_shared = "compartilha o atalho com"
+
+[preferences]
+colorblind_axes = "Diferenciação não-cromática de eixos (Rótulos X, Y, Z)"
+reduced_motion = "Redução de movimento (desativa animações do viewport)"
+double_tap_interval = "Intervalo de duplo toque de atalho (ms)"

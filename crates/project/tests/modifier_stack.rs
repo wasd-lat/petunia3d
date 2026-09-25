@@ -67,3 +67,31 @@ fn modifier_stack_roundtrips_through_project_format() {
     assert_eq!(loaded.assets[0].modifiers[0].id, mirror_id);
     assert_eq!(loaded.assets[0].modifiers, project.assets[0].modifiers);
 }
+
+#[test]
+fn modifier_cache_invalidates_when_properties_change() {
+    use petunia_project::ModifierKind;
+
+    let mut asset = Asset::new("Cube", Mesh::cube(2.0));
+    let mirror = ModifierInstance::mirror(0, 0.0);
+    asset.modifiers.push(mirror);
+
+    let first_eval = asset.evaluated_mesh_cached().clone();
+    assert_eq!(first_eval.verts.len(), 16);
+
+    // Toggle enabled off (modifiers.len() does NOT change!)
+    asset.modifiers[0].enabled = false;
+    let second_eval = asset.evaluated_mesh_cached().clone();
+    assert_eq!(second_eval.verts.len(), 8);
+
+    // Toggle enabled back on
+    asset.modifiers[0].enabled = true;
+    let third_eval = asset.evaluated_mesh_cached().clone();
+    assert_eq!(third_eval.verts.len(), 16);
+
+    // Change axis from 0 to 1
+    asset.modifiers[0].kind = ModifierKind::Mirror { axis: 1, weld: 0.0 };
+    let fourth_eval = asset.evaluated_mesh_cached().clone();
+    assert_eq!(fourth_eval.verts.len(), 16);
+    assert_ne!(first_eval.verts[8].pos, fourth_eval.verts[8].pos);
+}

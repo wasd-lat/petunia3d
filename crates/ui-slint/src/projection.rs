@@ -224,6 +224,19 @@ pub(crate) fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoM
             &mut model.z_rotate_commands,
         ),
     ] {
+        let direction = screen_direction(axis);
+        let end = [
+            origin[0] + direction[0] * ROD_LENGTH,
+            origin[1] + direction[1] * ROD_LENGTH,
+        ];
+        if axis == glam::Vec3::X {
+            model.x_end = end;
+        } else if axis == glam::Vec3::Y {
+            model.y_end = end;
+        } else if axis == glam::Vec3::Z {
+            model.z_end = end;
+        }
+
         if state.session.tools.active_tool == "rotate" {
             let tangent = if axis == glam::Vec3::X {
                 glam::Vec3::Y
@@ -243,11 +256,6 @@ pub(crate) fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoM
             }
             continue;
         }
-        let direction = screen_direction(axis);
-        let end = [
-            origin[0] + direction[0] * ROD_LENGTH,
-            origin[1] + direction[1] * ROD_LENGTH,
-        ];
         *rod = format!(
             "M {:.2} {:.2} L {:.2} {:.2} ",
             origin[0], origin[1], end[0], end[1]

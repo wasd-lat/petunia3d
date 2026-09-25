@@ -277,6 +277,7 @@ mod tests {
                         selection_thickness: 2.0,
                         show_grid: true,
                         hover: petunia_core::HoverTarget::None,
+                        boolean_operand: None,
                     },
                 );
                 assert!(img.is_ok());

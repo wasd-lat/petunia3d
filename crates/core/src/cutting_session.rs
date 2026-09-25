@@ -28,6 +28,8 @@ pub struct CutSession {
     pub segments: usize,
     /// Flag indicando se a sessão está no estágio de deslizamento interativo (slide).
     pub sliding: bool,
+    /// Se verdadeiro, remove a metade negativa do corte e fecha a tampa (Trim).
+    pub fill_cap: bool,
 }
 
 impl CutSession {
@@ -41,6 +43,7 @@ impl CutSession {
             cuts: 1,
             segments: 0,
             sliding: false,
+            fill_cap: false,
         }
     }
 
@@ -92,7 +95,7 @@ impl CutSession {
 
         let point = origin + direction * ((center - origin).dot(forward) / denominator);
         let mut mesh = self.source.clone();
-        mesh.slice_plane(point, normal, false);
+        mesh.slice_plane(point, normal, self.fill_cap);
         Some(mesh)
     }
 

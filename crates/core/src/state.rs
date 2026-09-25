@@ -941,6 +941,10 @@ pub struct UiState {
     /// Preferência de entrada: inverte o arrasto vertical das ferramentas,
     /// sem alterar a navegação da câmera nem os dados do documento.
     pub invert_vertical_drag: bool,
+    /// Diferenciação não-cromática de eixos para acessibilidade e daltonismo.
+    pub colorblind_axes: bool,
+    /// Redução de movimento para usuários com sensibilidade vestibular / labirintite.
+    pub reduced_motion: bool,
     pub selection_rgb: [u8; 3],
     pub selection_thickness: f32,
     pub inspector_detached: bool,
@@ -1027,6 +1031,8 @@ impl UiState {
             active_keymap_id: "petunia-default".to_string(),
             asset_thumbnail_size: 64.0,
             invert_vertical_drag: false,
+            colorblind_axes: false,
+            reduced_motion: false,
             selection_rgb: [233, 106, 0],
             selection_thickness: 2.0,
             inspector_detached: false,

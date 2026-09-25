@@ -5269,3 +5269,148 @@ fn test_magnetic_snap_marker_projection() {
 
     assert!(bridge.end_gizmo_drag());
 }
+
+#[test]
+fn test_accessibility_preferences_and_intents() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // 1. Valores iniciais padrão
+    let vm = bridge.view_model();
+    assert!(!vm.colorblind_axes);
+    assert!(!vm.reduced_motion);
+    assert_eq!(vm.double_tap_interval_ms, 350);
+    assert!(!vm.label_colorblind_axes.is_empty());
+    assert!(!vm.label_reduced_motion.is_empty());
+    assert!(!vm.label_double_tap_interval.is_empty());
+
+    // 2. Modificação via setters dedicados
+    assert!(bridge.set_colorblind_axes(true));
+    assert!(bridge.view_model().colorblind_axes);
+    assert!(bridge.preferences.colorblind_axes);
+
+    assert!(bridge.set_reduced_motion(true));
+    assert!(bridge.view_model().reduced_motion);
+    assert!(bridge.preferences.reduced_motion);
+
+    assert!(bridge.set_double_tap_interval_ms(500));
+    assert_eq!(bridge.view_model().double_tap_interval_ms, 500);
+    assert_eq!(bridge.preferences.double_tap_interval_ms, 500);
+
+    // Clamping do intervalo de duplo toque (máximo 2000 ms)
+    assert!(bridge.set_double_tap_interval_ms(5000));
+    assert_eq!(bridge.view_model().double_tap_interval_ms, 2000);
+
+    // 3. Modificação via UiIntent
+    bridge.apply(UiIntent::SetColorblindAxes(false));
+    assert!(!bridge.view_model().colorblind_axes);
+
+    bridge.apply(UiIntent::SetReducedMotion(false));
+    assert!(!bridge.view_model().reduced_motion);
+
+    bridge.apply(UiIntent::SetDoubleTapIntervalMs(250));
+    assert_eq!(bridge.view_model().double_tap_interval_ms, 250);
+
+    // 4. Sincronização de preferências do estado vivo
+    bridge.state.ui.colorblind_axes = true;
+    bridge.state.ui.reduced_motion = true;
+    bridge.sync_preferences_from_state();
+    assert!(bridge.preferences.colorblind_axes);
+    assert!(bridge.preferences.reduced_motion);
+}
+
+#[test]
+fn test_colorblind_gizmo_axis_endpoints() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+    let gizmo = bridge.view_model().gizmo;
+    assert!(gizmo.visible);
+    assert!(gizmo.origin_x > 0.0 && gizmo.origin_y > 0.0);
+
+    // As coordenadas de ponta dos eixos devem ser válidas e distintas da origem
+    for (label, end) in [("X", gizmo.x_end), ("Y", gizmo.y_end), ("Z", gizmo.z_end)] {
+        assert!(end[0].is_finite(), "Endpoint {label} x is not finite");
+        assert!(end[1].is_finite(), "Endpoint {label} y is not finite");
+        let dist = ((end[0] - gizmo.origin_x).powi(2) + (end[1] - gizmo.origin_y).powi(2)).sqrt();
+        assert!(
+            dist > 10.0,
+            "Endpoint {label} está muito próximo da origem do gizmo (dist={dist})"
+        );
+    }
+}
+
+#[test]
+fn test_primitive_parametric_creation_and_callbacks() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+
+    // 1. Criar cilindro mantém a sessão paramétrica ativa (não auto-confirma)
+    bridge.apply(UiIntent::AddPrimitive(
+        petunia_core::PrimitiveKind::Cylinder,
+    ));
+    let vm = bridge.view_model();
+    assert!(
+        vm.primitive_active,
+        "sessão de primitiva precisa estar ativa"
+    );
+    assert_eq!(vm.primitive_kind, "cylinder");
+    assert_eq!(vm.primitive_sides, 8);
+    assert!((vm.primitive_radius - 1.0).abs() < 1e-4);
+
+    let initial_verts = bridge.state.project.active_mesh().unwrap().verts.len();
+
+    // 2. Atualizar lados para 16 deve reconstruir a geometria com 16 lados imediatamente
+    assert!(bridge.update_primitive_param_float("sides", 16.0));
+    let vm2 = bridge.view_model();
+    assert_eq!(vm2.primitive_sides, 16);
+    let new_verts = bridge.state.project.active_mesh().unwrap().verts.len();
+    assert!(
+        new_verts > initial_verts,
+        "aumentar lados de 8 para 16 precisa aumentar número de vértices: {new_verts} vs {initial_verts}"
+    );
+
+    // 3. Atualizar raio para 2.5
+    assert!(bridge.update_primitive_param_float("radius", 2.5));
+    assert!((bridge.view_model().primitive_radius - 2.5).abs() < 1e-4);
+
+    // 4. Confirmar primitiva encerra a sessão e comita o asset
+    assert!(bridge.confirm_primitive());
+    let vm_final = bridge.view_model();
+    assert!(!vm_final.primitive_active, "confirmar encerra a sessão");
+    assert!(bridge.state.session.primitive_session.is_none());
+}
+
+#[test]
+fn test_primitive_cancellation_reverts_geometry() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    let initial_assets = bridge.state.project.assets.len();
+
+    // Criar icosphere
+    bridge.apply(UiIntent::AddPrimitive(
+        petunia_core::PrimitiveKind::Icosphere,
+    ));
+    assert!(bridge.view_model().primitive_active);
+    assert_eq!(bridge.state.project.assets.len(), initial_assets + 1);
+
+    // Cancelar primitiva remove o asset e encerra a sessão
+    assert!(bridge.cancel_primitive());
+    assert!(!bridge.view_model().primitive_active);
+    assert_eq!(bridge.state.project.assets.len(), initial_assets);
+}
+
+#[test]
+fn test_slice_trim_toggle_and_view_model() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+
+    assert!(!bridge.slice_trim);
+    assert!(!bridge.view_model().slice_trim);
+
+    bridge.slice_trim = true;
+    assert!(bridge.view_model().slice_trim);
+
+    bridge.slice_trim = false;
+    assert!(!bridge.view_model().slice_trim);
+}

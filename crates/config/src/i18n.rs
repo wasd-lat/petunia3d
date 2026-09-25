@@ -356,6 +356,10 @@ pub mod text_id {
     pub const PIVOT_GEOMETRY_TO_ORIGIN: TextId = TextId::new("pivot.geometry_to_origin");
     pub const PIVOT_EDIT_PIVOT: TextId = TextId::new("pivot.edit_pivot");
     pub const PIVOT_EDIT_PIVOT_HINT: TextId = TextId::new("pivot.edit_pivot_hint");
+    pub const PREFERENCES_COLORBLIND_AXES: TextId = TextId::new("preferences.colorblind_axes");
+    pub const PREFERENCES_REDUCED_MOTION: TextId = TextId::new("preferences.reduced_motion");
+    pub const PREFERENCES_DOUBLE_TAP_INTERVAL: TextId =
+        TextId::new("preferences.double_tap_interval");
 
     // Diálogo de recuperação de autosave (P3D-002).
     pub const UI_RECOVERY_TITLE: TextId = TextId::new("ui.recovery_title");
@@ -663,6 +667,9 @@ pub mod text_id {
         MENU_WINDOW,
         MENU_COMMAND_PALETTE,
         MENU_PREFERENCES,
+        PREFERENCES_COLORBLIND_AXES,
+        PREFERENCES_REDUCED_MOTION,
+        PREFERENCES_DOUBLE_TAP_INTERVAL,
         FILE_NEW,
         FILE_OPEN_PROJECT,
         FILE_SAVE,

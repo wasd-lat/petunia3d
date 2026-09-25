@@ -337,6 +337,10 @@ pub unsafe extern "C" fn petunia_select_all(ctx: *mut PetuniaContext) -> i32 {
         return PETUNIA_ERR_NULL_PTR;
     }
     let ctx = &mut *ctx;
+    if ctx.state.selection_domain() == petunia_core::SelectionDomain::Object {
+        ctx.state
+            .set_selection_domain(petunia_core::SelectionDomain::Face);
+    }
     match ctx.state.dispatch(&SelectAllCmd) {
         Ok(_) => PETUNIA_OK,
         Err(e) => {

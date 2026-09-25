@@ -240,13 +240,48 @@ impl Asset {
         self.material_id.and_then(|id| project.get_material(id))
     }
 
+    /// Hash estável do estado completo da pilha de modificadores para invalidação de cache.
+    pub fn modifier_hash(&self) -> u64 {
+        let mut h: u64 = 0xcbf29ce484222325;
+        let mix = |mut h: u64, v: u64| {
+            h ^= v;
+            h = h.wrapping_mul(0x100000001b3);
+            h
+        };
+        h = mix(h, self.modifiers.len() as u64);
+        for m in &self.modifiers {
+            for b in m.id.as_bytes() {
+                h = mix(h, *b as u64);
+            }
+            h = mix(h, m.enabled as u64);
+            match m.kind {
+                ModifierKind::Mirror { axis, weld } => {
+                    h = mix(h, 1);
+                    h = mix(h, axis as u64);
+                    h = mix(h, weld.to_bits() as u64);
+                }
+                ModifierKind::Symmetry {
+                    axis,
+                    positive_to_negative,
+                    weld,
+                } => {
+                    h = mix(h, 2);
+                    h = mix(h, axis as u64);
+                    h = mix(h, positive_to_negative as u64);
+                    h = mix(h, weld.to_bits() as u64);
+                }
+            }
+        }
+        h
+    }
+
     /// Avalia a pilha de modifiers sem alterar a malha-base.
     /// Render, preview e export usam este resultado; edição continua operando
     /// sobre `mesh`, preservando a natureza não destrutiva da pilha.
     pub fn evaluated_mesh(&self) -> Mesh {
         let key = (
             self.mesh.verts.len() as u64 * 1_000_003 + self.mesh.faces.len() as u64,
-            self.modifiers.len() as u64,
+            self.modifier_hash(),
         );
         if let Some((k0, k1, cached)) = &self.eval_cache
             && (*k0, *k1) == key
@@ -276,7 +311,7 @@ impl Asset {
     pub fn evaluated_mesh_cached(&mut self) -> &Mesh {
         let key = (
             self.mesh.verts.len() as u64 * 1_000_003 + self.mesh.faces.len() as u64,
-            self.modifiers.len() as u64,
+            self.modifier_hash(),
         );
         let miss = self
             .eval_cache

@@ -121,6 +121,8 @@ pub struct UserPreferences {
     pub double_tap_interval_ms: u64,
     /// Diferenciação não-cromática de eixos para acessibilidade e daltonismo.
     pub colorblind_axes: bool,
+    /// Redução de movimento para usuários com sensibilidade vestibular / labirintite.
+    pub reduced_motion: bool,
     /// Dock/float/pin por módulo do Inspector, chaveado por `InspectorSectionId::as_str`.
     /// Chaves desconhecidas são descartadas ao carregar; módulos ausentes usam o padrão.
     /// Dock/float/pin per Inspector module, keyed by `InspectorSectionId::as_str`.
@@ -137,6 +139,7 @@ impl Default for UserPreferences {
             model_quick_actions: Vec::new(),
             double_tap_interval_ms: 350,
             colorblind_axes: false,
+            reduced_motion: false,
             section_layouts: BTreeMap::new(),
         }
     }
@@ -244,6 +247,7 @@ mod tests {
             selection_thickness: 3.5,
             model_quick_actions: vec!["model.fuse".to_string()],
             colorblind_axes: false,
+            reduced_motion: false,
             double_tap_interval_ms: 300,
             section_layouts: BTreeMap::from([(
                 InspectorSectionId::Material.as_str().to_string(),

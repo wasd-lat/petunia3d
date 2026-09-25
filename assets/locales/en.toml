@@ -847,3 +847,8 @@ capture = "capture…"
 unsupported_key = "Key not supported by the keymap"
 conflict_title = "Shortcut conflicts detected"
 conflict_shared = "shares the shortcut with"
+
+[preferences]
+colorblind_axes = "Colorblind axes differentiation (X, Y, Z labels)"
+reduced_motion = "Reduced motion (disable viewport animations)"
+double_tap_interval = "Double-tap shortcut interval (ms)"

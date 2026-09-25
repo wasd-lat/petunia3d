@@ -78,6 +78,12 @@ pub(crate) fn sync_overlay_models(
     window.set_gizmo_x_commands(gizmo.x_commands.as_str().into());
     window.set_gizmo_y_commands(gizmo.y_commands.as_str().into());
     window.set_gizmo_z_commands(gizmo.z_commands.as_str().into());
+    window.set_view_gizmo_x_end_x(gizmo.x_end[0]);
+    window.set_view_gizmo_x_end_y(gizmo.x_end[1]);
+    window.set_view_gizmo_y_end_x(gizmo.y_end[0]);
+    window.set_view_gizmo_y_end_y(gizmo.y_end[1]);
+    window.set_view_gizmo_z_end_x(gizmo.z_end[0]);
+    window.set_view_gizmo_z_end_y(gizmo.z_end[1]);
     window.set_gizmo_x_arrow_commands(gizmo.x_arrow_commands.as_str().into());
     window.set_gizmo_y_arrow_commands(gizmo.y_arrow_commands.as_str().into());
     window.set_gizmo_z_arrow_commands(gizmo.z_arrow_commands.as_str().into());
@@ -570,6 +576,12 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_tool_activation(vm.tool_activation.as_str().into());
     window.set_keyboard_tool_modal_active(vm.keyboard_tool_modal_active);
     window.set_invert_vertical_drag(vm.invert_vertical_drag);
+    window.set_colorblind_axes(vm.colorblind_axes);
+    window.set_reduced_motion(vm.reduced_motion);
+    window.set_double_tap_interval_ms(vm.double_tap_interval_ms);
+    window.set_label_colorblind_axes(vm.label_colorblind_axes.as_str().into());
+    window.set_label_reduced_motion(vm.label_reduced_motion.as_str().into());
+    window.set_label_double_tap_interval(vm.label_double_tap_interval.as_str().into());
     window.set_tool_modal_active(vm.tool_modal_active);
     window.set_tool_options_active(vm.tool_options_active);
     window.set_tool_options_title(vm.tool_options_title.as_str().into());
@@ -708,6 +720,22 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     }
     window.set_paint_pixel_grid(vm.paint_pixel_grid);
     window.set_paint_canvas_zoom(vm.paint_canvas_zoom);
+
+    window.set_primitive_active(vm.primitive_active);
+    window.set_primitive_kind(vm.primitive_kind.as_str().into());
+    window.set_primitive_title(vm.primitive_title.as_str().into());
+    window.set_primitive_radius(vm.primitive_radius);
+    window.set_primitive_radius_b(vm.primitive_radius_b);
+    window.set_primitive_height(vm.primitive_height);
+    window.set_primitive_depth(vm.primitive_depth);
+    window.set_primitive_width(vm.primitive_width);
+    window.set_primitive_sides(vm.primitive_sides);
+    window.set_primitive_rings(vm.primitive_rings);
+    window.set_primitive_subdiv(vm.primitive_subdiv);
+    window.set_primitive_cap_top(vm.primitive_cap_top);
+    window.set_primitive_cap_bottom(vm.primitive_cap_bottom);
+    window.set_primitive_fill_disc(vm.primitive_fill_disc);
+    window.set_slice_trim(vm.slice_trim);
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -1568,6 +1596,46 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let colorblind_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_colorblind_axes_set(move |enabled| {
+        if let Ok(mut bridge) = colorblind_bridge.lock() {
+            if bridge.set_colorblind_axes(enabled) {
+                persist_user_preferences(&mut bridge);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+                sync_viewport_overlays(&window, &bridge);
+            }
+        }
+    });
+
+    let reduced_motion_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_reduced_motion_set(move |enabled| {
+        if let Ok(mut bridge) = reduced_motion_bridge.lock() {
+            if bridge.set_reduced_motion(enabled) {
+                persist_user_preferences(&mut bridge);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let double_tap_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_double_tap_interval_set(move |interval| {
+        if let Ok(mut bridge) = double_tap_bridge.lock() {
+            if bridge.set_double_tap_interval_ms(interval.max(0) as u64) {
+                persist_user_preferences(&mut bridge);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
     let selection_color_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_selection_color_set(move |hex| {
@@ -2285,6 +2353,22 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let operand_set_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_boolean_operand_set(move |id| {
+        if let Ok(mut bridge) = operand_set_bridge.lock() {
+            bridge.set_boolean_operand(id.as_str());
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let fill_scope_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_paint_fill_scope_set(move |scope| {
@@ -2764,6 +2848,84 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
                 if let Some(frame) = new_frame {
                     window.set_viewport_image(frame);
                 }
+            }
+        }
+    });
+
+    let prim_float_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_primitive_param_float(move |param, val| {
+        if let Ok(mut bridge) = prim_float_bridge.lock()
+            && bridge.update_primitive_param_float(param.as_str(), val)
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let prim_bool_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_primitive_param_bool(move |param, val| {
+        if let Ok(mut bridge) = prim_bool_bridge.lock()
+            && bridge.update_primitive_param_bool(param.as_str(), val)
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let prim_confirm_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_primitive_confirm(move || {
+        if let Ok(mut bridge) = prim_confirm_bridge.lock() {
+            bridge.confirm_primitive();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let prim_cancel_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_primitive_cancel(move || {
+        if let Ok(mut bridge) = prim_cancel_bridge.lock() {
+            bridge.cancel_primitive();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let slice_trim_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_slice_trim_set(move |trim| {
+        if let Ok(mut bridge) = slice_trim_bridge.lock() {
+            bridge.slice_trim = trim;
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
             }
         }
     });

@@ -371,8 +371,10 @@ impl PetuniaViewport for Software3dViewport {
                 } else {
                     [0.72, 0.74, 0.78]
                 };
-                let lambert = mesh.face_normal(fi).dot(light_dir).max(0.0);
-                let tint = if *asset_index == project.active
+                let is_boolean_operand = state.boolean_operand == Some(asset.id);
+                let tint = if is_boolean_operand {
+                    Some(([0.71, 0.55, 1.0], 0.35))
+                } else if *asset_index == project.active
                     && state.selection_domain == SelectionDomain::Face
                 {
                     if face.selected {
@@ -385,6 +387,7 @@ impl PetuniaViewport for Software3dViewport {
                 } else {
                     None
                 };
+                let lambert = mesh.face_normal(fi).dot(light_dir).max(0.0);
                 for tri in mesh.face_triangle_corners(fi) {
                     let positions = tri.map(|i| mesh.verts[face.verts[i] as usize].vec());
                     let [Some(a), Some(b), Some(c)] = positions.map(|p| self.project_point(p, &vp))
@@ -445,12 +448,14 @@ impl PetuniaViewport for Software3dViewport {
         }
 
         // All opaque surfaces must be in the depth buffer before components.
-        for (asset_index, _asset, mesh) in &meshes {
+        for (asset_index, asset, mesh) in &meshes {
             let active = *asset_index == project.active;
+            let is_boolean_operand = state.boolean_operand == Some(asset.id);
             if state.show_wireframe_overlay
                 || state.show_triangulation
                 || state.shading == Shading::Wireframe
                 || active && state.selection_domain == SelectionDomain::Edge
+                || is_boolean_operand
             {
                 for (a, b) in mesh.edges_unique() {
                     let selected = active
@@ -459,7 +464,9 @@ impl PetuniaViewport for Software3dViewport {
                     let is_seam = active
                         && (mesh.uv_seams.contains(&(a, b)) || mesh.uv_seams.contains(&(b, a)));
                     let hover = active && state.hover == HoverTarget::Edge(a, b);
-                    let color = if selected {
+                    let color = if is_boolean_operand {
+                        [0.71, 0.55, 1.0]
+                    } else if selected {
                         state.selection_rgb.map(|value| value as f32 / 255.0)
                     } else if is_seam {
                         [0.96, 0.48, 0.12]
@@ -468,14 +475,16 @@ impl PetuniaViewport for Software3dViewport {
                     } else {
                         [0.32, 0.35, 0.40]
                     };
-                    if selected || hover || is_seam {
+                    if selected || hover || is_seam || is_boolean_operand {
                         self.world_line_width(
                             mesh.verts[a as usize].vec(),
                             mesh.verts[b as usize].vec(),
                             &vp,
                             color,
                             through,
-                            if hover || is_seam {
+                            if is_boolean_operand {
+                                1.8
+                            } else if hover || is_seam {
                                 state.selection_thickness * 1.35
                             } else {
                                 state.selection_thickness
