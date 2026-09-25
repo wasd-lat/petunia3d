@@ -689,6 +689,12 @@ fn shortcut_transform_accepts_drag_in_the_same_mouse_gesture() {
     bridge.pointer_position = [400.0, 300.0];
     let before = bridge.state.project.active_mesh().unwrap().verts.clone();
 
+    // Primeiro toque ativa a ferramenta Move (Gizmo).
+    assert!(bridge.route_shortcut("G", false, false, false));
+    assert_eq!(bridge.state.session.tools.active_tool, "move");
+    assert!(!bridge.view_model().transform_instant_active);
+
+    // Segundo toque rápido (Double-tap) dispara o modo modal livre (Modo Blender).
     assert!(bridge.route_shortcut("G", false, false, false));
     assert!(bridge.view_model().transform_instant_active);
     // O TouchArea entrega estes updates com LMB pressionado, antes do
@@ -3307,7 +3313,9 @@ fn viewport_menu_select_all_clear_and_escape() {
 fn keyboard_modal_axis_numeric_confirm_flow() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     bridge.resize_viewport(1024, 768);
-    // G abre o modal Move instantâneo, como no Blender.
+    // 1º toque ativa a ferramenta Move no Gizmo; 2º toque (double-tap) ativa o modal livre.
+    assert!(bridge.route_shortcut("G", false, false, false));
+    assert_eq!(bridge.state.session.tools.active_tool, "move");
     assert!(bridge.route_shortcut("G", false, false, false));
     assert!(
         bridge
@@ -3317,7 +3325,7 @@ fn keyboard_modal_axis_numeric_confirm_flow() {
             .modal
             .as_ref()
             .is_some_and(|m| m.kind == petunia_core::ModalKind::Move),
-        "G precisa abrir o modal de Move"
+        "Double-tap de G precisa abrir o modal de Move"
     );
     // HUD acompanha com título e valores ao vivo.
     let vm = bridge.view_model();
@@ -4835,4 +4843,67 @@ fn cursor_screen_projection_in_gizmo_model() {
     // Origin projected with default camera should be near center of screen
     assert!((gizmo.cursor_screen[0] - 400.0).abs() < 50.0);
     assert!((gizmo.cursor_screen[1] - 300.0).abs() < 50.0);
+}
+
+#[test]
+fn single_tap_and_double_tap_tool_interaction_flow() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(1024, 768);
+    bridge.preferences.double_tap_interval_ms = 350;
+
+    // 1º toque em 'G': Apenas seleciona a ferramenta Move, NÃO inicia modal nem captura mouse.
+    assert!(bridge.route_shortcut("G", false, false, false));
+    assert_eq!(bridge.state.session.tools.active_tool, "move");
+    assert!(!bridge.view_model().transform_instant_active);
+    assert!(bridge.state.session.tools.modal.is_none());
+
+    // 2º toque em 'G' rápido (double-tap): Dispara o modo modal livre (Modo Blender).
+    assert!(bridge.route_shortcut("G", false, false, false));
+    assert!(bridge.view_model().transform_instant_active);
+    assert!(bridge.state.session.tools.modal.is_some());
+
+    // Tecla Escape cancela e restaura a viewport
+    assert!(bridge.route_shortcut("Escape", false, false, false));
+    assert!(!bridge.view_model().transform_instant_active);
+    assert!(bridge.state.session.tools.modal.is_none());
+}
+
+#[test]
+fn tool_shortcut_with_double_tap_timer_disabled() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(1024, 768);
+    // Temporizador desativado (0ms): apertar com ferramenta já selecionada aciona o modal direto.
+    bridge.preferences.double_tap_interval_ms = 0;
+
+    // 1º toque em 'R' com ferramenta diferente: apenas ativa a ferramenta Rotate
+    bridge.state.session.tools.active_tool = "select".to_string();
+    assert!(bridge.route_shortcut("R", false, false, false));
+    assert_eq!(bridge.state.session.tools.active_tool, "rotate");
+    assert!(!bridge.view_model().transform_instant_active);
+
+    // 2º toque em 'R' com a ferramenta já ativa: entra no modo modal contínuo
+    assert!(bridge.route_shortcut("R", false, false, false));
+    assert!(bridge.view_model().transform_instant_active);
+    assert!(bridge.state.session.tools.modal.is_some());
+
+    // Confirmação com Enter encerra o modal
+    assert!(bridge.route_shortcut("Enter", false, false, false));
+    assert!(!bridge.view_model().transform_instant_active);
+}
+
+#[test]
+fn wheel_scrubbing_adjusts_active_tool_modal() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+    bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+    bridge.state.sync_selection();
+
+    assert!(bridge.begin_tool_modal(ToolModalKind::Extrude));
+    assert_eq!(bridge.tool_modal, Some(ToolModalKind::Extrude));
+    let initial_value = bridge.tool_modal_value;
+
+    // Rolar a rodinha do mouse (Zoom gesture) ajusta o valor da ferramenta
+    bridge.apply_viewport_gesture(ViewportGesture::Zoom { delta: -1.0 });
+    assert!(bridge.tool_modal_value != initial_value);
 }

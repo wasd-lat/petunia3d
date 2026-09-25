@@ -514,6 +514,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     /// Override de teste do caminho do arquivo de preferências (testes herméticos).
     /// Produção mantém `None` e usa o caminho da plataforma.
     pub preferences_path_override: Option<std::path::PathBuf>,
+    /// Rastreamento de duplo toque em atalhos de ferramenta: (nome da ferramenta, instante).
+    pub last_tool_press: Option<(String, std::time::Instant)>,
 }
 
 /// Menu de contexto do Outliner aberto sobre uma linha do painel Parts,
@@ -679,6 +681,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             section_layouts: section_layout::default_section_layouts(),
             preferences: petunia_config::UserPreferences::default(),
             preferences_path_override: None,
+            last_tool_press: None,
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -1205,6 +1208,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     pub fn apply_viewport_gesture(&mut self, gesture: ViewportGesture) {
         if self.mouse_navigation_suspended() {
+            if let ViewportGesture::Zoom { delta } = gesture
+                && self.tool_modal.is_some()
+            {
+                let step = if delta > 0.0 { -40.0 } else { 40.0 };
+                self.scrub_tool_modal(step, false);
+                self.state.mark_dirty();
+            }
             return;
         }
         match gesture {
@@ -1228,6 +1238,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                             false,
                         );
                     }
+                } else if self.tool_modal.is_some() {
+                    let step = if delta > 0.0 { -40.0 } else { 40.0 };
+                    self.scrub_tool_modal(step, false);
                 } else {
                     self.state.session.camera.zoom(delta);
                 }
@@ -5606,6 +5619,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn route_shortcut(&mut self, text: &str, ctrl: bool, shift: bool, alt: bool) -> bool {
+        if (text == "Escape" || text == "Esc") && !ctrl && !alt && !shift {
+            return self.handle_escape();
+        }
         if text == "Enter" && !ctrl && !alt {
             return self.confirm_active_operation();
         }
@@ -5781,10 +5797,49 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             TransformKind::Rotation => "rotate",
             TransformKind::Scale => "scale",
         };
-        self.apply(UiIntent::SetActiveTool(tool.into()));
-        let [x, y] = self.pointer_position;
-        if self.begin_viewport_transform(kind, x, y) {
-            self.instant_transform = true;
+        let now = std::time::Instant::now();
+        let interval_ms = self.preferences.double_tap_interval_ms;
+
+        let is_double_tap = if interval_ms > 0 {
+            if let Some((ref last_tool, last_time)) = self.last_tool_press {
+                last_tool == tool
+                    && now.duration_since(last_time).as_millis() <= interval_ms as u128
+            } else {
+                false
+            }
+        } else {
+            self.state.session.tools.active_tool == tool
+        };
+
+        if is_double_tap {
+            self.last_tool_press = None;
+            self.apply(UiIntent::SetActiveTool(tool.into()));
+            let [x, y] = self.pointer_position;
+            if self.begin_viewport_transform(kind, x, y) {
+                self.instant_transform = true;
+                let label = match kind {
+                    TransformKind::Position => "Mover",
+                    TransformKind::Rotation => "Rotacionar",
+                    TransformKind::Scale => "Escalar",
+                };
+                self.state.set_status(format!(
+                    "{} (Modo Livre) · Mova o mouse, LMB/Enter para confirmar, RMB/Esc para cancelar",
+                    label
+                ));
+            }
+        } else {
+            self.last_tool_press = Some((tool.to_string(), now));
+            self.apply(UiIntent::SetActiveTool(tool.into()));
+            self.instant_transform = false;
+            let label = match kind {
+                TransformKind::Position => "Mover",
+                TransformKind::Rotation => "Rotacionar",
+                TransformKind::Scale => "Escalar",
+            };
+            self.state.set_status(format!(
+                "Ferramenta {} ativa · Arraste o gizmo, digite o valor ou aperte novamente para Modo Livre",
+                label
+            ));
         }
     }
 

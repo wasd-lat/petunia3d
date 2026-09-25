@@ -117,6 +117,10 @@ pub struct UserPreferences {
     pub selection_thickness: f32,
     /// Ações rápidas preferidas do Inspector MODEL.
     pub model_quick_actions: Vec<String>,
+    /// Intervalo máximo em milissegundos para duplo toque de tecla de ferramenta entrar em modo modal (0 desativa o temporizador).
+    pub double_tap_interval_ms: u64,
+    /// Diferenciação não-cromática de eixos para acessibilidade e daltonismo.
+    pub colorblind_axes: bool,
     /// Dock/float/pin por módulo do Inspector, chaveado por `InspectorSectionId::as_str`.
     /// Chaves desconhecidas são descartadas ao carregar; módulos ausentes usam o padrão.
     /// Dock/float/pin per Inspector module, keyed by `InspectorSectionId::as_str`.
@@ -131,6 +135,8 @@ impl Default for UserPreferences {
             selection_rgb: [233, 106, 0],
             selection_thickness: 2.0,
             model_quick_actions: Vec::new(),
+            double_tap_interval_ms: 350,
+            colorblind_axes: false,
             section_layouts: BTreeMap::new(),
         }
     }
@@ -154,6 +160,9 @@ impl UserPreferences {
             || !(1.0..=6.0).contains(&preferences.selection_thickness)
         {
             preferences.selection_thickness = Self::default().selection_thickness;
+        }
+        if preferences.double_tap_interval_ms > 2000 {
+            preferences.double_tap_interval_ms = 2000;
         }
         let mut seen = HashSet::new();
         preferences

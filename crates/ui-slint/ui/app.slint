@@ -198,6 +198,7 @@ component ViewportSvgButton inherits Rectangle {
     in property <string> label;
     in property <string> description: "";
     in property <bool> active;
+    in property <bool> live-mode: false;
     callback clicked;
 
     accessible-role: button;
@@ -207,9 +208,9 @@ component ViewportSvgButton inherits Rectangle {
     width: 32px;
     height: 28px;
     border-radius: 5px;
-    background: root.active ? DesignTokens.accent : (touch.has-hover ? DesignTokens.surface-hover : transparent);
-    border-width: svg-focus.has-focus ? 2px : (root.active ? 1px : 0px);
-    border-color: DesignTokens.focus-ring;
+    background: root.live-mode ? #e68a00 : (root.active ? DesignTokens.accent : (touch.has-hover ? DesignTokens.surface-hover : transparent));
+    border-width: svg-focus.has-focus ? 2px : ((root.active || root.live-mode) ? 1px : 0px);
+    border-color: root.live-mode ? #ffd54f : DesignTokens.focus-ring;
     Image {
         source: root.glyph;
         width: 20px;
@@ -3147,6 +3148,7 @@ export component PetuniaSlintShell inherits Window {
                                 label: root.label-model-position;
                                 description: root.hint-model-position;
                                 active: active-tool == "move";
+                                live-mode: active-tool == "move" && root.transform-instant-active;
                                 clicked => { root.active-tool-changed("move"); }
                             }
                             ViewportSvgButton {
@@ -3154,6 +3156,7 @@ export component PetuniaSlintShell inherits Window {
                                 label: root.label-model-rotate;
                                 description: root.hint-model-rotate;
                                 active: active-tool == "rotate";
+                                live-mode: active-tool == "rotate" && root.transform-instant-active;
                                 clicked => { root.active-tool-changed("rotate"); }
                             }
                             ViewportSvgButton {
@@ -3161,6 +3164,7 @@ export component PetuniaSlintShell inherits Window {
                                 label: root.label-model-scale;
                                 description: root.hint-model-scale;
                                 active: active-tool == "scale";
+                                live-mode: active-tool == "scale" && root.transform-instant-active;
                                 clicked => { root.command-executed("model.scale_selection"); }
                             }
                             ViewportSvgButton {
@@ -3168,6 +3172,7 @@ export component PetuniaSlintShell inherits Window {
                                 label: root.label-model-transform;
                                 description: root.hint-model-transform;
                                 active: active-tool == "transform";
+                                live-mode: active-tool == "transform" && root.transform-instant-active;
                                 clicked => { root.command-executed("model.tool_transform"); }
                             }
 
