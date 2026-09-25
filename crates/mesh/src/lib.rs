@@ -222,6 +222,7 @@ pub mod obj;
 pub mod ops;
 pub mod primitives;
 pub mod profile_geo;
+pub mod sweep;
 pub mod topology;
 pub mod triangulate;
 pub mod uv;
@@ -232,10 +233,21 @@ pub use curve::{BezierNode, BezierNodeKind, BezierPath, create_hollow_profile, o
 pub use half_edge::{
     EdgeId, FaceId, HalfEdge, HalfEdgeId, HalfEdgeMesh, TopologyDefect, TopologyReport, VertexId,
 };
+pub use sweep::{SweepFrame, SweepOptions, compute_rmf_frames, generate_sweep};
 pub use topology::{DirtyDomains, ElementRemap, TopologyResult};
 pub use uv_tools::{UvDiagnostics, UvIsland};
 
 impl Mesh {
+    /// Executa varredura 3D (Sweep) de um perfil 2D ao longo de um caminho tridimensional
+    /// usando Rotation Minimizing Frames (RMF) e mitering em cantos vivos.
+    pub fn from_sweep(
+        profile: &[[f32; 2]],
+        path: &[glam::Vec3],
+        options: sweep::SweepOptions,
+    ) -> Result<Self, String> {
+        sweep::generate_sweep(profile, path, options)
+    }
+
     // ---------------- saída p/ render/export ----------------
 
     /// Triangles expressed as face-corner indices, preserving UV seams and

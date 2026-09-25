@@ -2935,6 +2935,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-profile-close: "";
     in-out property <string> label-profile-generate: "";
     in-out property <string> label-profile-revolve: "";
+    in-out property <string> label-profile-sweep: "";
     in-out property <string> label-profile-cuts: "";
     in-out property <string> label-profile-presets: "";
     in-out property <string> label-profile-add-rect: "";
@@ -3186,6 +3187,7 @@ export component PetuniaSlintShell inherits Window {
     callback profile-close;
     callback profile-generate;
     callback profile-revolve;
+    callback profile-sweep;
     callback profile-depth-set(string) -> bool;
     callback profile-wall-thickness-set(string) -> bool;
     callback profile-smoothness-set(string) -> bool;
@@ -3931,6 +3933,12 @@ export component PetuniaSlintShell inherits Window {
                     }
 
                     viewport-touch := TouchArea {
+                        mouse-cursor: self.is-orbit || self.is-pan || self.is-gizmo-drag ? grabbing
+                            : (self.is-transform || self.is-keyboard-transform-drag) ? (root.active-tool == "scale" ? nesw-resize : (root.active-tool == "rotate" ? grabbing : move))
+                            : (root.active-workspace == "PAINT") ? crosshair
+                            : (root.active-tool == "slice" || root.active-tool == "knife" || root.active-tool == "loop_cut" || root.active-tool == "measure" || root.active-tool == "draw_profile" || root.active-tool == "cursor" || root.active-tool == "cursor_3d" || self.is-box-select || self.is-lasso-select) ? crosshair
+                            : root.gizmo-has-hover ? grab
+                            : default;
                         property <length> last-x;
                         property <length> last-y;
                         property <bool> is-box-select: false;
@@ -4492,16 +4500,16 @@ export component PetuniaSlintShell inherits Window {
 
                     // HUD Flutuante no Cursor (Fase 4: HUD Numérico em Tempo Real)
                     if root.hud-pill-visible && active-workspace == "MODEL": Rectangle {
-                        x: root.hud-pill-x;
-                        y: root.hud-pill-y;
+                        x: min(max(8px, root.hud-pill-x), parent.width - self.width - 8px);
+                        y: min(max(8px, root.hud-pill-y), parent.height - self.height - 8px);
                         width: hud-pill-layout.preferred-width + 20px;
                         height: hud-pill-layout.preferred-height + 12px;
                         border-radius: 8px;
-                        background: DesignTokens.surface-raised.transparentize(0.12);
-                        border-width: 1.5px;
-                        border-color: DesignTokens.accent;
-                        drop-shadow-blur: 14px;
-                        drop-shadow-color: #00000099;
+                        background: #14141ef2;
+                        border-width: 1px;
+                        border-color: DesignTokens.accent.transparentize(0.3);
+                        drop-shadow-blur: 12px;
+                        drop-shadow-color: #00000088;
 
                         hud-pill-layout := VerticalLayout {
                             padding-left: 10px;
@@ -4519,14 +4527,37 @@ export component PetuniaSlintShell inherits Window {
                                     font-size: 11px;
                                     font-weight: 700;
                                 }
-                                if root.hud-pill-badge != "": Rectangle {
-                                    border-radius: 3px;
-                                    background: DesignTokens.accent.transparentize(0.8);
-                                    border-width: 1px;
-                                    border-color: DesignTokens.accent;
-                                    HorizontalLayout {
-                                        padding-left: 4px; padding-right: 4px;
-                                        Text { text: root.hud-pill-badge; color: DesignTokens.accent; font-size: 9px; font-weight: 700; }
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    if root.hud-pill-badge != "": Rectangle {
+                                        border-radius: 3px;
+                                        background: DesignTokens.accent.transparentize(0.8);
+                                        border-width: 1px;
+                                        border-color: DesignTokens.accent;
+                                        HorizontalLayout {
+                                            padding-left: 4px; padding-right: 4px;
+                                            Text { text: root.hud-pill-badge; color: DesignTokens.accent; font-size: 9px; font-weight: 700; }
+                                        }
+                                    }
+                                    if root.precision-mode: Rectangle {
+                                        border-radius: 3px;
+                                        background: #3e63dd33;
+                                        border-width: 1px;
+                                        border-color: #3e63dd;
+                                        HorizontalLayout {
+                                            padding-left: 4px; padding-right: 4px;
+                                            Text { text: "PRECISION 0.1×"; color: #3e63dd; font-size: 8px; font-weight: 700; font-family: "monospace"; }
+                                        }
+                                    }
+                                    if root.snap-mode: Rectangle {
+                                        border-radius: 3px;
+                                        background: #46a75833;
+                                        border-width: 1px;
+                                        border-color: #46a758;
+                                        HorizontalLayout {
+                                            padding-left: 4px; padding-right: 4px;
+                                            Text { text: "SNAP"; color: #46a758; font-size: 8px; font-weight: 700; font-family: "monospace"; }
+                                        }
                                     }
                                 }
                             }
@@ -5003,10 +5034,11 @@ export component PetuniaSlintShell inherits Window {
                                 scrubbed(delta, fine) => { root.profile-smoothness-set("\{root.profile-smoothness + delta * (fine ? 0.002 : 0.01)}"); }
                             }
                         }
-                        if root.profile-closed: HorizontalLayout {
+                        if root.profile-point-count >= 2: HorizontalLayout {
                             spacing: 5px; height: 28px;
                             Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface; border-width: 1px; border-color: DesignTokens.border; Text { text: root.label-profile-revolve; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-revolve(); } } }
-                            Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.accent; Text { text: root.label-profile-generate; color: DesignTokens.canvas; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-generate(); } } }
+                            Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.surface; border-width: 1px; border-color: DesignTokens.border; Text { text: root.label-profile-sweep; color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-sweep(); } } }
+                            if root.profile-closed: Rectangle { horizontal-stretch: 1; border-radius: 4px; background: DesignTokens.accent; Text { text: root.label-profile-generate; color: DesignTokens.canvas; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.profile-generate(); } } }
                         }
                         HorizontalLayout {
                             spacing: 5px; height: 26px;
@@ -5634,6 +5666,7 @@ export component PetuniaSlintShell inherits Window {
                         background: transparent;
 
                         TouchArea {
+                            mouse-cursor: self.pressed ? grabbing : grab;
                             property <length> last-x;
                             property <length> last-y;
                             pointer-event(event) => {
@@ -5689,6 +5722,7 @@ export component PetuniaSlintShell inherits Window {
                             accessible-label: axis.label;
                             Text { text: axis.label; color: axis.tint; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                             TouchArea {
+                                mouse-cursor: self.pressed ? grabbing : pointer;
                                 property <length> last-x;
                                 property <length> last-y;
                                 property <bool> dragged: false;
@@ -7917,6 +7951,27 @@ export component PetuniaSlintShell inherits Window {
 
                     Text { text: root.status-message; color: DesignTokens.text-primary; font-size: 11px; font-weight: 600; vertical-alignment: center; overflow: elide; max-width: 340px; }
                     Text { text: root.context-hint != "" ? root.context-hint : root.label-status-hint; color: DesignTokens.text-muted; font-size: 11px; vertical-alignment: center; overflow: elide; max-width: 320px; }
+
+                    if root.precision-mode: Rectangle {
+                        border-radius: 3px;
+                        background: #3e63dd33;
+                        border-width: 1px;
+                        border-color: #3e63dd;
+                        HorizontalLayout {
+                            padding-left: 5px; padding-right: 5px;
+                            Text { text: "Shift: Precision 0.1×"; color: #3e63dd; font-size: 10px; font-weight: 700; font-family: "monospace"; }
+                        }
+                    }
+                    if root.snap-mode: Rectangle {
+                        border-radius: 3px;
+                        background: #46a75833;
+                        border-width: 1px;
+                        border-color: #46a758;
+                        HorizontalLayout {
+                            padding-left: 5px; padding-right: 5px;
+                            Text { text: "Ctrl: Snap"; color: #46a758; font-size: 10px; font-weight: 700; font-family: "monospace"; }
+                        }
+                    }
 
                     Rectangle { horizontal-stretch: 1; }
 

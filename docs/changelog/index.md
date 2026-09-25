@@ -5,6 +5,22 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Sprint B: Simple Sweep Completo com Rotation Minimizing Frames (RMF) (25/09/2026)
+- **Varredura 3D com Rotation Minimizing Frames (`petunia_mesh::sweep`)**:
+  - Implementação de algoritmo de varredura (*Sweep*) baseado na técnica de *Double Reflection RMF* (Wang et al., 2008), garantindo transporte paralelo de 4ª ordem e eliminando singularidades ou torções anômalas (*flipping/gimbal lock*) ao longo de caminhos 3D curvos arbitrários.
+  - Compensação contínua de torção angular residual em caminhos guia fechados (*twist compensation*), distribuindo suavemente o ângulo de fechamento ao longo de toda a espinha.
+  - Alinhamento de seções transversais ao plano bissetor em cantos vivos (*mitering*) com contenção de esquadria (*miter limit clamping*), prevenindo autointerseções e picos infinitos em quinas agudas.
+  - Geração de tampas trianguladas (*end caps*) automáticas em caminhos abertos com perfil fechado via algoritmo de *ear clipping*.
+  - Suporte completo a perfis 2D abertos (fitas/superfícies) e fechados (tubos/dutos), incluindo compatibilidade total com perfis ocos (*Wall Thickness*).
+- **Extração Flexível de Caminhos Guia & Integração de Modelagem (`petunia_module_model::draw_profile`)**:
+  - Reconhecimento automático de cadeias de arestas selecionadas (`selected_edges`) ou vértices selecionados na malha ativa para guiar a extrusão 3D.
+  - Fallback automático para curva 3D suave padrão calculada em relação ao plano de visão/câmera ativo quando não houver seleção.
+  - Integração da operação `generate_sweep` com histórico transacional de undo/redo e notificações de status localizadas.
+- **Integração na Interface Slint & Internacionalização**:
+  - Botão de ação *Sweep* integrado no ToolCard da ferramenta Draw Profile na interface Slint.
+  - Novas propriedades reativas, callbacks e `TextId::UI_PROFILE_SWEEP` com traduções completas para português brasileiro e inglês (`assets/locales/`).
+  - Testes unitários e de integração abrangentes em `petunia_mesh` e `petunia_ui_slint`.
+
 ### Sprint A: Draw Profile com Sistema Bézier Completo e Perfis Ocos (25/09/2026)
 - **Sistema Bézier Cúbico 2D (`BezierNode`, `BezierPath`)**:
   - Implementação de nós de controle com tipos de curvatura canônicos (`BezierNodeKind::Sharp`, `Smooth`, `Symmetric`, `Free`), suportando alças independentes ou tangentes contínuas ($G^1/C^1$).

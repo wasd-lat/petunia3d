@@ -142,6 +142,125 @@ pub fn generate_revolve(state: &mut AppState) {
     }
 }
 
+/// Extrai caminho guia 3D a partir da malha ativa (arestas selecionadas em cadeia ou vértices selecionados).
+pub fn extract_sweep_path_from_mesh(mesh: &Mesh) -> Option<(Vec<glam::Vec3>, bool)> {
+    if !mesh.selected_edges.is_empty() {
+        use std::collections::HashMap;
+        let mut adj: HashMap<u32, Vec<u32>> = HashMap::new();
+        for &(a, b) in &mesh.selected_edges {
+            adj.entry(a).or_default().push(b);
+            adj.entry(b).or_default().push(a);
+        }
+
+        let start = adj
+            .iter()
+            .find(|(_, neighbors)| neighbors.len() == 1)
+            .map(|(&v, _)| v)
+            .or_else(|| adj.keys().copied().next())?;
+
+        let mut chain = vec![start];
+        let mut visited_edges = std::collections::HashSet::new();
+        let mut curr = start;
+
+        loop {
+            let next_opt = adj.get(&curr).and_then(|neighbors| {
+                neighbors.iter().copied().find(|&n| {
+                    let key = petunia_mesh::edge_key(curr, n);
+                    !visited_edges.contains(&key)
+                })
+            });
+
+            if let Some(next) = next_opt {
+                visited_edges.insert(petunia_mesh::edge_key(curr, next));
+                chain.push(next);
+                curr = next;
+                if curr == start {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if chain.len() >= 2 {
+            let is_closed = chain.len() > 2 && chain.first() == chain.last();
+            let pts: Vec<glam::Vec3> = chain
+                .into_iter()
+                .filter_map(|idx| mesh.verts.get(idx as usize).map(|v| v.vec()))
+                .collect();
+            if pts.len() >= 2 {
+                return Some((pts, is_closed));
+            }
+        }
+    }
+
+    let selected_verts: Vec<glam::Vec3> = mesh
+        .verts
+        .iter()
+        .filter(|v| v.selected)
+        .map(|v| v.vec())
+        .collect();
+
+    if selected_verts.len() >= 2 {
+        Some((selected_verts, false))
+    } else {
+        None
+    }
+}
+
+/// Gera uma malha por varredura 3D (Sweep) do perfil 2D ao longo de um caminho guia 3D.
+pub fn generate_sweep(state: &mut AppState) {
+    let p = state.profile.clone();
+    let effective = p.effective_points();
+    if effective.len() < 2 {
+        state.set_status(state.t("profile.need_points"));
+        return;
+    }
+
+    let extracted = state
+        .project
+        .active_mesh()
+        .and_then(extract_sweep_path_from_mesh);
+
+    let (path, closed_path) = if let Some((path_pts, is_closed)) = extracted {
+        (path_pts, is_closed)
+    } else {
+        let r = glam::Vec3::from(p.right).normalize_or_zero();
+        let u = glam::Vec3::from(p.up).normalize_or_zero();
+        let n = glam::Vec3::from(p.normal).normalize_or_zero();
+        let o = glam::Vec3::from(p.origin);
+        let l = p.depth.max(1.0);
+        let default_path = vec![
+            o,
+            o + n * (l * 0.3) + u * (l * 0.15),
+            o + n * (l * 0.7) + u * (l * 0.2) + r * (l * 0.15),
+            o + n * l + r * (l * 0.3),
+        ];
+        (default_path, false)
+    };
+
+    let options = petunia_mesh::sweep::SweepOptions {
+        closed_path,
+        closed_profile: p.closed,
+        cap_start: true,
+        cap_end: true,
+        miter: true,
+        miter_limit: 3.0,
+    };
+
+    match Mesh::from_sweep(&effective, &path, options) {
+        Ok(m) => {
+            state.checkpoint("sweep profile");
+            state.project.add("Sweep", m);
+            state.profile.clear();
+            state.sync_selection();
+            state.emit_mesh_changed();
+            state.set_status(state.t("profile.generated"));
+        }
+        Err(e) => state.set_status(format!("sweep: {e}")),
+    }
+}
+
 /// Define um perfil 2D retangular centralizado no plano ativo.
 pub fn profile_set_rectangle(state: &mut AppState, width: f32, height: f32) {
     profile_capture_frame(state);

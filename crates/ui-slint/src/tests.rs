@@ -5942,6 +5942,48 @@ fn test_profile_bezier_smoothing_and_wall_thickness() {
 }
 
 #[test]
+fn test_profile_sweep_generation() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetActiveTool("draw_profile".to_string()));
+
+    // 1. Sweep com caminho padrão
+    bridge.add_profile_circle(0.5, 8);
+    let initial_count = bridge.state.project.assets.len();
+    assert!(bridge.generate_profile_sweep());
+    assert_eq!(bridge.state.project.assets.len(), initial_count + 1);
+
+    let sweep_mesh = bridge.state.project.active_mesh().unwrap();
+    assert!(!sweep_mesh.verts.is_empty());
+    assert!(!sweep_mesh.faces.is_empty());
+
+    // 2. Sweep com caminho extraído de arestas selecionadas
+    bridge.apply(UiIntent::SetActiveTool("draw_profile".to_string()));
+    bridge.add_profile_rectangle(0.4, 0.4);
+
+    let mut guide_mesh = petunia_mesh::Mesh::default();
+    guide_mesh
+        .verts
+        .push(petunia_mesh::Vertex::new(0.0, 0.0, 0.0));
+    guide_mesh
+        .verts
+        .push(petunia_mesh::Vertex::new(0.0, 1.0, 0.0));
+    guide_mesh
+        .verts
+        .push(petunia_mesh::Vertex::new(1.0, 2.0, 0.0));
+    guide_mesh.selected_edges.insert((0, 1));
+    guide_mesh.selected_edges.insert((1, 2));
+    bridge.state.project.add("Guide", guide_mesh);
+
+    let count_before = bridge.state.project.assets.len();
+    assert!(bridge.generate_profile_sweep());
+    assert_eq!(bridge.state.project.assets.len(), count_before + 1);
+
+    let result_mesh = bridge.state.project.active_mesh().unwrap();
+    assert!(result_mesh.verts.len() >= 8);
+    assert!(!result_mesh.faces.is_empty());
+}
+
+#[test]
 fn test_boolean_op_auto_operand_with_two_objects() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     // Initial scene has 1 cube

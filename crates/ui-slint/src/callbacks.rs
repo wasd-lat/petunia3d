@@ -551,6 +551,7 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_label_profile_close(vm.label_profile_close.as_str().into());
     window.set_label_profile_generate(vm.label_profile_generate.as_str().into());
     window.set_label_profile_revolve(vm.label_profile_revolve.as_str().into());
+    window.set_label_profile_sweep(vm.label_profile_sweep.as_str().into());
     window.set_label_profile_cuts(vm.label_profile_cuts.as_str().into());
     window.set_label_profile_presets(vm.label_profile_presets.as_str().into());
     window.set_label_profile_add_rect(vm.label_profile_add_rect.as_str().into());
@@ -3080,6 +3081,20 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_profile_revolve(move || {
         if let Ok(mut bridge) = profile_revolve_bridge.lock() {
             bridge.generate_profile_revolve();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+                if let Some(frame) = bridge.render_viewport() {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let profile_sweep_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_profile_sweep(move || {
+        if let Ok(mut bridge) = profile_sweep_bridge.lock() {
+            bridge.generate_profile_sweep();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
                 if let Some(frame) = bridge.render_viewport() {

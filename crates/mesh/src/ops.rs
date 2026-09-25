@@ -2017,104 +2017,19 @@ impl Mesh {
         path: &[Vec3],
         cap_ends: bool,
     ) -> Result<(), String> {
-        if profile.len() < 3 {
-            return Err("Perfil deve conter pelo menos 3 pontos".into());
-        }
-        if path.len() < 2 {
-            return Err("Caminho deve conter pelo menos 2 nós".into());
-        }
-
-        let m = profile.len();
-        let num_sections = path.len();
-        let mut section_vert_indices: Vec<Vec<u32>> = Vec::with_capacity(num_sections);
-
-        // Frame inicial
-        let t0 = (path[1] - path[0]).normalize_or_zero();
-        let up = if t0.dot(Vec3::Y).abs() < 0.99 {
-            Vec3::Y
-        } else {
-            Vec3::Z
-        };
-        let mut n_curr = t0.cross(up).normalize_or_zero();
-        let mut b_curr = t0.cross(n_curr).normalize_or_zero();
-
-        for i in 0..num_sections {
-            let p_curr = path[i];
-            let t_curr = if i + 1 < num_sections {
-                (path[i + 1] - path[i]).normalize_or_zero()
-            } else {
-                (path[i] - path[i - 1]).normalize_or_zero()
-            };
-
-            // Transporte paralelo simples
-            if i > 0 {
-                let t_prev = (path[i] - path[i - 1]).normalize_or_zero();
-                let axis = t_prev.cross(t_curr);
-                let angle = t_prev.dot(t_curr).clamp(-1.0, 1.0).acos();
-                if axis.length_squared() > 1e-6 && angle.abs() > 1e-5 {
-                    let rot = glam::Quat::from_axis_angle(axis.normalize(), angle);
-                    n_curr = rot.mul_vec3(n_curr).normalize_or_zero();
-                    b_curr = rot.mul_vec3(b_curr).normalize_or_zero();
-                }
-            }
-
-            let mut ring = Vec::with_capacity(m);
-            for (k, pt) in profile.iter().enumerate() {
-                let pos = p_curr + n_curr * pt[0] + b_curr * pt[1];
-                let color = [0.75, 0.75, 0.78];
-                self.verts.push(Vertex {
-                    pos: pos.to_array(),
-                    color,
-                    selected: true,
-                });
-                ring.push((self.verts.len() - 1) as u32);
-                let _ = k;
-            }
-            section_vert_indices.push(ring);
-        }
-
-        // Conecta seções consecutivas em anéis de quads
-        for i in 0..(num_sections - 1) {
-            let r1 = &section_vert_indices[i];
-            let r2 = &section_vert_indices[i + 1];
-            let u_start = i as f32 / (num_sections - 1) as f32;
-            let u_end = (i + 1) as f32 / (num_sections - 1) as f32;
-
-            for k in 0..m {
-                let k2 = (k + 1) % m;
-                let v0 = r1[k];
-                let v1 = r1[k2];
-                let v2 = r2[k2];
-                let v3 = r2[k];
-
-                let v_start = k as f32 / m as f32;
-                let v_end = (k + 1) as f32 / m as f32;
-
-                let quad = Face::with_uv(
-                    vec![v0, v1, v2, v3],
-                    vec![
-                        [u_start, v_start],
-                        [u_start, v_end],
-                        [u_end, v_end],
-                        [u_end, v_start],
-                    ],
-                );
-                self.push_face(quad);
-            }
-        }
-
-        // Tampas inicial e final
-        if cap_ends {
-            let start_ring = section_vert_indices[0].clone();
-            let mut start_rev = start_ring;
-            start_rev.reverse();
-            let start_cap = Face::new(start_rev);
-            self.push_face(start_cap);
-
-            let end_cap = Face::new(section_vert_indices[num_sections - 1].clone());
-            self.push_face(end_cap);
-        }
-
+        let swept = Self::from_sweep(
+            profile,
+            path,
+            crate::sweep::SweepOptions {
+                closed_path: false,
+                closed_profile: true,
+                cap_start: cap_ends,
+                cap_end: cap_ends,
+                miter: true,
+                miter_limit: 3.0,
+            },
+        )?;
+        self.join(&swept);
         Ok(())
     }
 

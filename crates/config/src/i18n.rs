@@ -316,6 +316,7 @@ pub mod text_id {
     pub const UI_PROFILE_SMOOTH_CURVES: TextId = TextId::new("ui.profile_smooth_curves");
     pub const UI_PROFILE_SHARP_CORNERS: TextId = TextId::new("ui.profile_sharp_corners");
     pub const UI_PROFILE_SMOOTHNESS: TextId = TextId::new("ui.profile_smoothness");
+    pub const UI_PROFILE_SWEEP: TextId = TextId::new("ui.profile_sweep");
     pub const UI_MODEL_SELECT_HINT: TextId = TextId::new("ui.model_select_hint");
     pub const UI_MODEL_POSITION_HINT: TextId = TextId::new("ui.model_position_hint");
     pub const UI_MODEL_ROTATE_HINT: TextId = TextId::new("ui.model_rotate_hint");
@@ -635,6 +636,7 @@ pub mod text_id {
         UI_PROFILE_SMOOTH_CURVES,
         UI_PROFILE_SHARP_CORNERS,
         UI_PROFILE_SMOOTHNESS,
+        UI_PROFILE_SWEEP,
         UI_MODEL_SELECT_HINT,
         UI_MODEL_POSITION_HINT,
         UI_MODEL_ROTATE_HINT,

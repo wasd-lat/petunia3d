@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **769**.
+Total de chaves de localização cadastradas: **770**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -693,6 +693,7 @@ Total de chaves de localização cadastradas: **769**.
 | `ui.profile_sharp_corners` | Sharp Corners | Cantos Retos |
 | `ui.profile_smooth_curves` | Smooth Curves | Suavizar Curvas |
 | `ui.profile_smoothness` | Smoothness | Suavização |
+| `ui.profile_sweep` | Sweep | Sweep |
 | `ui.profile_wall_thickness` | Wall Thickness | Espessura de Parede |
 | `ui.project_asset_library` | Project Asset Library | Biblioteca de Assets do Projeto |
 | `ui.properties` | Properties | Propriedades |

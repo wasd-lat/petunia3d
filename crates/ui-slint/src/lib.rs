@@ -2775,6 +2775,21 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         generated
     }
 
+    pub fn generate_profile_sweep(&mut self) -> bool {
+        if self.state.session.tools.active_tool != "draw_profile"
+            || self.state.profile.points.len() < 2
+        {
+            return false;
+        }
+        let asset_count = self.state.project.assets.len();
+        petunia_module_model::draw_profile::generate_sweep(&mut self.state);
+        let generated = self.state.project.assets.len() > asset_count;
+        if generated {
+            self.state.session.tools.active_tool = "select".to_string();
+        }
+        generated
+    }
+
     pub fn adjust_loop_cut_hover_count(&mut self, delta: i32) -> bool {
         if self.state.session.tools.active_tool != "loop_cut"
             || self.loop_cut.is_some()
@@ -7717,6 +7732,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_profile_close = translated(petunia_config::text_id::UI_PROFILE_CLOSE);
         vm.label_profile_generate = translated(petunia_config::text_id::UI_PROFILE_GENERATE);
         vm.label_profile_revolve = translated(petunia_config::text_id::UI_PROFILE_REVOLVE);
+        vm.label_profile_sweep = translated(petunia_config::text_id::UI_PROFILE_SWEEP);
         vm.label_profile_cuts = translated(petunia_config::text_id::UI_PROFILE_CUTS);
         vm.label_profile_presets = translated(petunia_config::text_id::UI_PROFILE_PRESETS);
         vm.label_profile_add_rect = translated(petunia_config::text_id::UI_PROFILE_ADD_RECT);
