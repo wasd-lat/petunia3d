@@ -4923,7 +4923,7 @@ fn transform_fine_precision_and_snap_modifiers_effect() {
     // Com snap: true (Ctrl pressionado), a rotação em torno de Z é quantizada em passos de 15 graus
     assert!(bridge.update_viewport_transform_modified(450.0, 300.0, false, true));
     let angle_snapped = bridge.rotation[2].value();
-    assert_eq!((angle_snapped % 15.0).abs() < 1e-4, true);
+    assert!((angle_snapped % 15.0).abs() < 1e-4);
 
     assert!(bridge.cancel_transform());
 
@@ -4940,3 +4940,105 @@ fn transform_fine_precision_and_snap_modifiers_effect() {
     assert!(bridge.cancel_transform());
 }
 
+#[test]
+fn gizmo_center_and_plane_hit_testing() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+    let gizmo = bridge.view_model().gizmo;
+    assert!(gizmo.visible);
+    let ox = gizmo.origin_x;
+    let oy = gizmo.origin_y;
+
+    // Teste de hit-testing comprovando seleção correta do Center a até 12px de distância da origem
+    assert_eq!(bridge.gizmo_handle_at(ox, oy), Some(GizmoHandle::Center));
+    assert_eq!(
+        bridge.gizmo_handle_at(ox + 8.0, oy + 8.0),
+        Some(GizmoHandle::Center)
+    );
+
+    // Na ferramenta Scale, o centro também é Center (para escala uniforme)
+    bridge.apply(UiIntent::SetActiveTool("scale".to_string()));
+    assert_eq!(bridge.gizmo_handle_at(ox, oy), Some(GizmoHandle::Center));
+
+    // Teste dos quadrantes de plano: na ferramenta Move, os comandos de plano existem
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+    let gizmo = bridge.view_model().gizmo;
+    assert!(!gizmo.plane_yz_commands.is_empty());
+    assert!(!gizmo.plane_xz_commands.is_empty());
+    assert!(!gizmo.plane_xy_commands.is_empty());
+
+    // Hit-testing no centro do quad do plano YZ (normal X, índice 0)
+    let numbers: Vec<f32> = gizmo
+        .plane_yz_commands
+        .split_whitespace()
+        .filter_map(|t| t.parse::<f32>().ok())
+        .collect();
+    assert!(numbers.len() >= 8);
+    let cx = (numbers[0] + numbers[2] + numbers[4] + numbers[6]) * 0.25;
+    let cy = (numbers[1] + numbers[3] + numbers[5] + numbers[7]) * 0.25;
+    assert_eq!(bridge.gizmo_handle_at(cx, cy), Some(GizmoHandle::Plane(0)));
+
+    // Na ferramenta Rotate, o anel externo de View Roll é detectado
+    bridge.apply(UiIntent::SetActiveTool("rotate".to_string()));
+    let gizmo = bridge.view_model().gizmo;
+    assert!(!gizmo.view_roll_commands.is_empty());
+    let roll_r = 96.0 * 1.18;
+    assert_eq!(
+        bridge.gizmo_handle_at(ox + roll_r, oy),
+        Some(GizmoHandle::Center)
+    );
+}
+
+#[test]
+fn gizmo_center_screen_translation_and_uniform_scale() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+    let gizmo = bridge.view_model().gizmo;
+    let ox = gizmo.origin_x;
+    let oy = gizmo.origin_y;
+    let before_verts = bridge.state.project.active_mesh().unwrap().verts.clone();
+
+    // Arrasto pelo centro do Move inicia translação no plano de tela
+    assert!(bridge.begin_gizmo_drag(ox, oy));
+    assert_eq!(bridge.gizmo_drag, Some(GizmoHandle::Center));
+    assert!(bridge.update_viewport_transform(ox + 40.0, oy + 30.0));
+    assert!(bridge.end_gizmo_drag());
+    assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+    // Vértices foram transladados
+    let after_verts = &bridge.state.project.active_mesh().unwrap().verts;
+    assert!(
+        after_verts
+            .iter()
+            .zip(&before_verts)
+            .any(|(a, b)| a.pos != b.pos)
+    );
+
+    // Agora testa Escala Uniforme pelo centro do Scale
+    bridge.apply(UiIntent::SetActiveTool("scale".to_string()));
+    let gizmo_scale = bridge.view_model().gizmo;
+    let (sox, soy) = (gizmo_scale.origin_x, gizmo_scale.origin_y);
+    let initial_mesh = bridge.state.project.active_mesh().unwrap().clone();
+    assert!(bridge.begin_gizmo_drag(sox, soy));
+    assert_eq!(bridge.gizmo_drag, Some(GizmoHandle::Center));
+    // Arrastar para longe aumenta o fator de escala uniforme
+    assert!(bridge.update_viewport_transform(sox + 60.0, soy));
+    assert!(bridge.end_gizmo_drag());
+
+    let scaled_mesh = bridge.state.project.active_mesh().unwrap();
+    // Verifica que a escala foi uniforme nos 3 eixos (razão idêntica)
+    let p0_init = initial_mesh.verts[0].vec();
+    let p0_scaled = scaled_mesh.verts[0].vec();
+    let pivot = bridge
+        .state
+        .calculate_pivot(bridge.state.session.pivot_point);
+    let ratio_x = (p0_scaled.x - pivot.x) / (p0_init.x - pivot.x);
+    let ratio_y = (p0_scaled.y - pivot.y) / (p0_init.y - pivot.y);
+    let ratio_z = (p0_scaled.z - pivot.z) / (p0_init.z - pivot.z);
+    assert!((ratio_x - ratio_y).abs() < 1e-4);
+    assert!((ratio_y - ratio_z).abs() < 1e-4);
+}

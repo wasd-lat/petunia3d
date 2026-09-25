@@ -120,6 +120,12 @@ pub struct GizmoModel {
     pub x_rotate_commands: String,
     pub y_rotate_commands: String,
     pub z_rotate_commands: String,
+    /// Comandos dos planos (0: YZ normal X, 1: XZ normal Y, 2: XY normal Z).
+    pub plane_yz_commands: String,
+    pub plane_xz_commands: String,
+    pub plane_xy_commands: String,
+    /// Anel perimetral de rotação da visão (View Roll) para Rotate.
+    pub view_roll_commands: String,
     /// Tripé de navegação no canto inferior esquerdo, em comandos prontos.
     pub view_x_commands: String,
     pub view_y_commands: String,
@@ -603,15 +609,18 @@ pub enum GizmoHandle {
     X,
     Y,
     Z,
+    Center,
+    Plane(u8), // 0: YZ (normal X), 1: XZ (normal Y), 2: XY (normal Z)
 }
 
 impl GizmoHandle {
-    /// Índice do eixo para `ModalConstraint::Axis`.
-    pub const fn axis(self) -> usize {
+    /// Índice do eixo para `ModalConstraint::Axis`, se for um eixo individual.
+    pub const fn axis(self) -> Option<usize> {
         match self {
-            Self::X => 0,
-            Self::Y => 1,
-            Self::Z => 2,
+            Self::X => Some(0),
+            Self::Y => Some(1),
+            Self::Z => Some(2),
+            Self::Center | Self::Plane(_) => None,
         }
     }
 }
@@ -2664,6 +2673,58 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if active == "transform" && dist_from_origin < 12.0 {
             return None;
         }
+
+        // Centro (Screen-space translation para Move, Uniform Scale para Scale, Trackball para Rotate)
+        if dist_from_origin <= 12.0 {
+            let kind = match active {
+                "scale" => TransformKind::Scale,
+                "rotate" => TransformKind::Rotation,
+                _ => TransformKind::Position,
+            };
+            return Some(GizmoTarget {
+                handle: GizmoHandle::Center,
+                kind,
+            });
+        }
+
+        // View Roll para a ferramenta Rotate (anel perimetral externo a ~113px)
+        if active == "rotate" && (dist_from_origin - 96.0 * 1.18).abs() <= 8.0 {
+            return Some(GizmoTarget {
+                handle: GizmoHandle::Center,
+                kind: TransformKind::Rotation,
+            });
+        }
+
+        // Quadrantes de planos (Move e Scale): YZ (normal 0), XZ (normal 1), XY (normal 2)
+        if matches!(active, "move" | "scale") {
+            let plane_commands = [
+                (0u8, &gizmo.plane_yz_commands),
+                (1u8, &gizmo.plane_xz_commands),
+                (2u8, &gizmo.plane_xy_commands),
+            ];
+            for (normal, cmd) in plane_commands {
+                let numbers: Vec<f32> = cmd
+                    .split_whitespace()
+                    .filter_map(|token| token.parse::<f32>().ok())
+                    .collect();
+                if numbers.len() >= 8 {
+                    let cx = (numbers[0] + numbers[2] + numbers[4] + numbers[6]) * 0.25;
+                    let cy = (numbers[1] + numbers[3] + numbers[5] + numbers[7]) * 0.25;
+                    if (x - cx).hypot(y - cy) <= 10.0 {
+                        let kind = if active == "scale" {
+                            TransformKind::Scale
+                        } else {
+                            TransformKind::Position
+                        };
+                        return Some(GizmoTarget {
+                            handle: GizmoHandle::Plane(normal),
+                            kind,
+                        });
+                    }
+                }
+            }
+        }
+
         let families = [
             (
                 TransformKind::Scale,
@@ -2735,7 +2796,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
-    /// Inicia o arrasto no handle do gizmo, restringindo a transformação ao eixo.
+    /// Inicia o arrasto no handle do gizmo, restringindo a transformação ao eixo ou plano.
     pub fn begin_gizmo_drag(&mut self, x: f32, y: f32) -> bool {
         let Some(target) = self.gizmo_target_at(x, y) else {
             return false;
@@ -2745,22 +2806,36 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if !self.begin_viewport_transform(kind, x, y) {
             return false;
         }
-        // A restrição de eixo é do domínio: o preview já sai no eixo certo.
-        let _ = self
-            .state
-            .set_modal_constraint(petunia_core::ModalConstraint::Axis(handle.axis()));
+        // A restrição é do domínio: o preview já sai no eixo/plano certo.
+        let constraint = match handle {
+            GizmoHandle::X => petunia_core::ModalConstraint::Axis(0),
+            GizmoHandle::Y => petunia_core::ModalConstraint::Axis(1),
+            GizmoHandle::Z => petunia_core::ModalConstraint::Axis(2),
+            GizmoHandle::Center => petunia_core::ModalConstraint::Free,
+            GizmoHandle::Plane(normal) => petunia_core::ModalConstraint::Plane(normal as usize),
+        };
+        let _ = self.state.set_modal_constraint(constraint);
         self.gizmo_drag = Some(handle);
         self.state.set_status(format!(
-            "{} · {} axis",
+            "{} · {}",
             match kind {
                 TransformKind::Position => "Move",
                 TransformKind::Rotation => "Rotate",
                 TransformKind::Scale => "Scale",
             },
             match handle {
-                GizmoHandle::X => "X",
-                GizmoHandle::Y => "Y",
-                GizmoHandle::Z => "Z",
+                GizmoHandle::X => "X axis",
+                GizmoHandle::Y => "Y axis",
+                GizmoHandle::Z => "Z axis",
+                GizmoHandle::Center => match kind {
+                    TransformKind::Position => "Screen plane",
+                    TransformKind::Scale => "Uniform",
+                    TransformKind::Rotation => "View roll",
+                },
+                GizmoHandle::Plane(0) => "YZ plane",
+                GizmoHandle::Plane(1) => "XZ plane",
+                GizmoHandle::Plane(2) => "XY plane",
+                GizmoHandle::Plane(_) => "Plane",
             }
         ));
         true
@@ -6096,8 +6171,17 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.section_states = self.section_state_models();
         vm.transform_instant_active =
             self.instant_transform && self.state.session.tools.modal.is_some();
-        vm.gizmo_hover_axis = self.gizmo_hover.map_or(-1, |h| h.axis() as i32);
-        vm.gizmo_active_axis = self.gizmo_drag.map_or(-1, |h| h.axis() as i32);
+        vm.gizmo_hover_axis = self
+            .gizmo_hover
+            .and_then(|h| h.axis())
+            .map_or(-1, |a| a as i32);
+        vm.gizmo_active_axis = self
+            .gizmo_drag
+            .and_then(|h| h.axis())
+            .map_or(-1, |a| a as i32);
+        vm.gizmo_has_hover = self.gizmo_hover.is_some();
+        vm.gizmo_center_active = matches!(self.gizmo_drag, Some(GizmoHandle::Center));
+        vm.gizmo_center_hover = matches!(self.gizmo_hover, Some(GizmoHandle::Center));
         vm.gizmo_constraint_axes = match self
             .state
             .session

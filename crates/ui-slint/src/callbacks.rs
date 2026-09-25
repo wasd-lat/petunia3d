@@ -87,6 +87,10 @@ pub(crate) fn sync_overlay_models(
     window.set_gizmo_x_rotate_commands(gizmo.x_rotate_commands.as_str().into());
     window.set_gizmo_y_rotate_commands(gizmo.y_rotate_commands.as_str().into());
     window.set_gizmo_z_rotate_commands(gizmo.z_rotate_commands.as_str().into());
+    window.set_gizmo_plane_yz_commands(gizmo.plane_yz_commands.as_str().into());
+    window.set_gizmo_plane_xz_commands(gizmo.plane_xz_commands.as_str().into());
+    window.set_gizmo_plane_xy_commands(gizmo.plane_xy_commands.as_str().into());
+    window.set_gizmo_view_roll_commands(gizmo.view_roll_commands.as_str().into());
     window.set_view_gizmo_x_commands(gizmo.view_x_commands.as_str().into());
     window.set_view_gizmo_y_commands(gizmo.view_y_commands.as_str().into());
     window.set_view_gizmo_z_commands(gizmo.view_z_commands.as_str().into());
@@ -155,6 +159,9 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_gizmo_active_axis(vm.gizmo_active_axis);
     window.set_gizmo_constraint_axis_a(vm.gizmo_constraint_axes[0]);
     window.set_gizmo_constraint_axis_b(vm.gizmo_constraint_axes[1]);
+    window.set_gizmo_has_hover(vm.gizmo_has_hover);
+    window.set_gizmo_center_active(vm.gizmo_center_active);
+    window.set_gizmo_center_hover(vm.gizmo_center_hover);
     window.set_operation_preview_commands(vm.operation_preview_commands.as_str().into());
     window.set_drag_link_commands(vm.drag_link_commands.as_str().into());
     window.set_operation_hud_active(vm.operation_hud_active);

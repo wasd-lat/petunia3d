@@ -2448,6 +2448,13 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> gizmo-x-rotate-commands: "";
     in-out property <string> gizmo-y-rotate-commands: "";
     in-out property <string> gizmo-z-rotate-commands: "";
+    in-out property <string> gizmo-plane-yz-commands: "";
+    in-out property <string> gizmo-plane-xz-commands: "";
+    in-out property <string> gizmo-plane-xy-commands: "";
+    in-out property <string> gizmo-view-roll-commands: "";
+    in-out property <bool> gizmo-has-hover: false;
+    in-out property <bool> gizmo-center-active: false;
+    in-out property <bool> gizmo-center-hover: false;
     in-out property <string> view-gizmo-x-commands: "";
     in-out property <string> view-gizmo-y-commands: "";
     in-out property <string> view-gizmo-z-commands: "";
@@ -3517,8 +3524,8 @@ export component PetuniaSlintShell inherits Window {
                                 } else if event.button == PointerEventButton.left
                                     && !event.modifiers.alt {
                                     // O gizmo tem picking próprio: clicar num
-                                    // handle restringe a transformação ao eixo.
-                                    if root.gizmo-hover-axis >= 0 {
+                                    // handle restringe a transformação ao eixo/plano.
+                                    if root.gizmo-has-hover {
                                         is-gizmo-drag = true;
                                         root.gizmo-drag-begin(self.mouse-x / 1px, self.mouse-y / 1px);
                                     } else if root.transform-instant-active {
@@ -3550,7 +3557,7 @@ export component PetuniaSlintShell inherits Window {
                                             pending-transform = true;
                                         } else if (root.active-tool == "select" || root.active-tool == "box_select")
                                             && root.active-workspace == "MODEL"
-                                            && root.gizmo-hover-axis < 0
+                                            && !root.gizmo-has-hover
                                             && !root.transform-instant-active
                                             && !root.tool-modal-active
                                             && !root.loop-cut-active {
@@ -3568,7 +3575,7 @@ export component PetuniaSlintShell inherits Window {
                                     // pointer-event Move também cobre hover livre,
                                     // necessário para operações iniciadas por atalho.
                                     root.gizmo-hover(self.mouse-x / 1px, self.mouse-y / 1px);
-                                    if root.gizmo-hover-axis < 0 {
+                                    if !root.gizmo-has-hover {
                                         root.viewport-hover(self.mouse-x / self.width, self.mouse-y / self.height);
                                     } else {
                                         root.viewport-hover-clear();
@@ -4496,14 +4503,18 @@ export component PetuniaSlintShell inherits Window {
                         Path { commands: root.gizmo-x-rotate-commands; fit: ImageFit.preserve; stroke: root.gizmo-handle-color(0, DesignTokens.axis-x).transparentize(0.32); stroke-width: 1.5px; fill: transparent; }
                         Path { commands: root.gizmo-y-rotate-commands; fit: ImageFit.preserve; stroke: root.gizmo-handle-color(1, DesignTokens.axis-y).transparentize(0.32); stroke-width: 1.5px; fill: transparent; }
                         Path { commands: root.gizmo-z-rotate-commands; fit: ImageFit.preserve; stroke: root.gizmo-handle-color(2, DesignTokens.axis-z).transparentize(0.32); stroke-width: 1.5px; fill: transparent; }
+                        Path { commands: root.gizmo-plane-yz-commands; fit: ImageFit.preserve; stroke: root.gizmo-handle-color(0, DesignTokens.axis-x); stroke-width: 1px; fill: root.gizmo-handle-color(0, DesignTokens.axis-x).transparentize(0.65); }
+                        Path { commands: root.gizmo-plane-xz-commands; fit: ImageFit.preserve; stroke: root.gizmo-handle-color(1, DesignTokens.axis-y); stroke-width: 1px; fill: root.gizmo-handle-color(1, DesignTokens.axis-y).transparentize(0.65); }
+                        Path { commands: root.gizmo-plane-xy-commands; fit: ImageFit.preserve; stroke: root.gizmo-handle-color(2, DesignTokens.axis-z); stroke-width: 1px; fill: root.gizmo-handle-color(2, DesignTokens.axis-z).transparentize(0.65); }
+                        Path { commands: root.gizmo-view-roll-commands; fit: ImageFit.preserve; stroke: root.gizmo-center-active || root.gizmo-center-hover ? DesignTokens.accent : DesignTokens.text-secondary.transparentize(0.4); stroke-width: 1.5px; fill: transparent; }
                         Rectangle {
-                            x: gizmo-origin-x - 4px;
-                            y: gizmo-origin-y - 4px;
-                            width: 8px;
-                            height: 8px;
-                            border-radius: 4px;
-                            background: DesignTokens.text-primary;
-                            border-width: 1px;
+                            x: gizmo-origin-x - 6px;
+                            y: gizmo-origin-y - 6px;
+                            width: 12px;
+                            height: 12px;
+                            border-radius: 6px;
+                            background: root.gizmo-center-active ? DesignTokens.accent : (root.gizmo-center-hover ? DesignTokens.accent.transparentize(0.2) : DesignTokens.text-primary);
+                            border-width: 1.5px;
                             border-color: DesignTokens.canvas;
                         }
                     }

@@ -321,6 +321,98 @@ pub(crate) fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoM
             end[0], end[1], left[0], left[1], right[0], right[1]
         );
     }
+
+    // Quadrantes dos planos (Plane Handles) para Move e Scale
+    if matches!(state.session.tools.active_tool.as_str(), "move" | "scale") {
+        let dir_x = screen_direction(glam::Vec3::X);
+        let dir_y = screen_direction(glam::Vec3::Y);
+        let dir_z = screen_direction(glam::Vec3::Z);
+
+        // Plane 0: YZ (normal X)
+        let p1 = [
+            origin[0] + (dir_y[0] + dir_z[0]) * 18.0,
+            origin[1] + (dir_y[1] + dir_z[1]) * 18.0,
+        ];
+        let p2 = [
+            origin[0] + dir_y[0] * 32.0 + dir_z[0] * 18.0,
+            origin[1] + dir_y[1] * 32.0 + dir_z[1] * 18.0,
+        ];
+        let p3 = [
+            origin[0] + (dir_y[0] + dir_z[0]) * 32.0,
+            origin[1] + (dir_y[1] + dir_z[1]) * 32.0,
+        ];
+        let p4 = [
+            origin[0] + dir_y[0] * 18.0 + dir_z[0] * 32.0,
+            origin[1] + dir_y[1] * 18.0 + dir_z[1] * 32.0,
+        ];
+        model.plane_yz_commands = format!(
+            "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+            p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1]
+        );
+
+        // Plane 1: XZ (normal Y)
+        let p1 = [
+            origin[0] + (dir_x[0] + dir_z[0]) * 18.0,
+            origin[1] + (dir_x[1] + dir_z[1]) * 18.0,
+        ];
+        let p2 = [
+            origin[0] + dir_x[0] * 32.0 + dir_z[0] * 18.0,
+            origin[1] + dir_x[1] * 32.0 + dir_z[1] * 18.0,
+        ];
+        let p3 = [
+            origin[0] + (dir_x[0] + dir_z[0]) * 32.0,
+            origin[1] + (dir_x[1] + dir_z[1]) * 32.0,
+        ];
+        let p4 = [
+            origin[0] + dir_x[0] * 18.0 + dir_z[0] * 32.0,
+            origin[1] + dir_x[1] * 18.0 + dir_z[1] * 32.0,
+        ];
+        model.plane_xz_commands = format!(
+            "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+            p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1]
+        );
+
+        // Plane 2: XY (normal Z)
+        let p1 = [
+            origin[0] + (dir_x[0] + dir_y[0]) * 18.0,
+            origin[1] + (dir_x[1] + dir_y[1]) * 18.0,
+        ];
+        let p2 = [
+            origin[0] + dir_x[0] * 32.0 + dir_y[0] * 18.0,
+            origin[1] + dir_x[1] * 32.0 + dir_y[1] * 18.0,
+        ];
+        let p3 = [
+            origin[0] + (dir_x[0] + dir_y[0]) * 32.0,
+            origin[1] + (dir_x[1] + dir_y[1]) * 32.0,
+        ];
+        let p4 = [
+            origin[0] + dir_x[0] * 18.0 + dir_y[0] * 32.0,
+            origin[1] + dir_x[1] * 18.0 + dir_y[1] * 32.0,
+        ];
+        model.plane_xy_commands = format!(
+            "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+            p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1]
+        );
+    }
+
+    // Anel externo de rotação da visão (View Roll) para Rotate
+    if state.session.tools.active_tool == "rotate" {
+        let roll_r = ROD_LENGTH * 1.18;
+        let mut roll = String::new();
+        for segment in 0..=64 {
+            let angle = segment as f32 * std::f32::consts::TAU / 64.0;
+            let px = origin[0] + roll_r * angle.cos();
+            let py = origin[1] + roll_r * angle.sin();
+            roll.push_str(&format!(
+                "{} {:.2} {:.2} ",
+                if segment == 0 { "M" } else { "L" },
+                px,
+                py
+            ));
+        }
+        model.view_roll_commands = roll;
+    }
+
     model
 }
 
