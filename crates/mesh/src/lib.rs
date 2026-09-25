@@ -521,6 +521,34 @@ mod tests {
     }
 
     #[test]
+    fn multi_edge_and_multi_vertex_bevel_batch() {
+        // 1. Multi-edge: seleciona 4 arestas paralelas verticais do cubo
+        let mut m_edges = Mesh::cube(2.0);
+        m_edges
+            .selected_edges
+            .extend([(0, 3), (1, 2), (4, 7), (5, 6)]);
+        let (ok_edges, skip_edges) = m_edges.bevel_selected_full(0.2, 1, true);
+        assert_eq!(ok_edges, 4);
+        assert_eq!(skip_edges, 0);
+        let rep_edges = m_edges.validate_topology();
+        assert!(rep_edges.is_manifold && rep_edges.is_closed);
+        assert_eq!((m_edges.verts.len(), m_edges.faces.len()), (16, 10));
+
+        // 2. Multi-vertex: seleciona todos os 8 cantos do cubo
+        let mut m_verts = Mesh::cube(2.0);
+        m_verts.selected_edges.clear();
+        for v in &mut m_verts.verts {
+            v.selected = true;
+        }
+        let (ok_verts, skip_verts) = m_verts.bevel_selected_full(0.2, 1, true);
+        assert_eq!(ok_verts, 8);
+        assert_eq!(skip_verts, 0);
+        let rep_verts = m_verts.validate_topology();
+        assert!(rep_verts.is_manifold && rep_verts.is_closed);
+        assert_eq!((m_verts.verts.len(), m_verts.faces.len()), (24, 14));
+    }
+
+    #[test]
     fn extrude_keeps_uv_invariant() {
         let mut m = Mesh::cube(2.0);
         m.select_all();

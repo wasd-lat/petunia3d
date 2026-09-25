@@ -223,7 +223,7 @@ impl AppState {
         }
         if kind == ModalKind::Bevel && source.selected_edges.is_empty() {
             let sel_verts = source.verts.iter().filter(|v| v.selected).count();
-            if sel_verts != 1 {
+            if sel_verts == 0 {
                 source.sync_edge_selection_from_verts();
                 if source.selected_edges.is_empty() {
                     return Err(ModalError::EdgesRequired);
@@ -918,6 +918,28 @@ mod tests {
         let report = result.validate_topology();
         assert!(report.is_manifold && report.is_closed);
         assert_eq!((result.verts.len(), result.faces.len()), (10, 7));
+    }
+
+    #[test]
+    fn modal_bevel_supports_multiple_vertices_batch() {
+        let mut state = AppState::default();
+        let mesh = state.project.active_mesh_mut().unwrap();
+        mesh.selected_edges.clear();
+        for f in &mut mesh.faces {
+            f.selected = false;
+        }
+        for v in &mut mesh.verts {
+            v.selected = true; // todos os 8 vértices
+        }
+
+        assert!(state.begin_modal(ModalKind::Bevel).is_ok());
+        assert!(state.update_modal(Vec3::ZERO, 0.2).is_ok());
+        assert!(state.commit_modal());
+
+        let result = state.project.active_mesh().unwrap();
+        let report = result.validate_topology();
+        assert!(report.is_manifold && report.is_closed);
+        assert_eq!((result.verts.len(), result.faces.len()), (24, 14));
     }
 
     #[test]

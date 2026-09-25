@@ -554,4 +554,110 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn sequential_multiple_vertices_bevel() {
+        let cube = Mesh::cube(2.0);
+        let orig_positions: Vec<[f32; 3]> = cube.verts.iter().map(|v| v.pos).collect();
+        let mut mesh = cube;
+        for (i, orig_pos) in orig_positions.iter().enumerate() {
+            let vi = mesh.verts.iter().position(|v| {
+                let d = (v.pos[0] - orig_pos[0])
+                    .hypot(v.pos[1] - orig_pos[1])
+                    .hypot(v.pos[2] - orig_pos[2]);
+                d < 1e-4
+            });
+            assert!(vi.is_some(), "could not find vertex {i}");
+            let next = bevel_vertex(&mesh, vi.unwrap() as u32, 0.2, true);
+            assert!(next.is_some(), "bevel_vertex failed on vertex {i}");
+            mesh = next.unwrap();
+        }
+        let report = mesh.validate_topology();
+        assert!(report.is_manifold && report.is_closed);
+        // Truncated cube has 8 triangles (1 for each beveled corner) + 6 octagons = 14 faces!
+        assert_eq!(mesh.faces.len(), 14);
+        // 8 corners * 3 vertices per corner = 24 vertices!
+        assert_eq!(mesh.verts.len(), 24);
+    }
+
+    #[test]
+    fn opposite_disjoint_edges_bevel() {
+        let cube = Mesh::cube(2.0);
+        let pos_5 = cube.verts[5].pos;
+        let pos_6 = cube.verts[6].pos;
+
+        let m1 = bevel_edge_segments_clamped(&cube, 0, 3, 0.2, 1, true);
+        assert!(m1.is_some(), "bevel edge (0, 3) failed");
+        let m1 = m1.unwrap();
+        assert!(m1.validate_topology().is_manifold);
+
+        // Find edge with positions matching pos_5 and pos_6
+        let v5 = m1
+            .verts
+            .iter()
+            .position(|v| {
+                (v.pos[0] - pos_5[0])
+                    .hypot(v.pos[1] - pos_5[1])
+                    .hypot(v.pos[2] - pos_5[2])
+                    < 1e-4
+            })
+            .unwrap() as u32;
+        let v6 = m1
+            .verts
+            .iter()
+            .position(|v| {
+                (v.pos[0] - pos_6[0])
+                    .hypot(v.pos[1] - pos_6[1])
+                    .hypot(v.pos[2] - pos_6[2])
+                    < 1e-4
+            })
+            .unwrap() as u32;
+
+        let m2 = bevel_edge_segments_clamped(&m1, v5, v6, 0.2, 1, true);
+        assert!(m2.is_some(), "bevel edge (v5, v6) failed");
+        let m2 = m2.unwrap();
+        let report = m2.validate_topology();
+        assert!(report.is_manifold && report.is_closed);
+        assert_eq!((m2.verts.len(), m2.faces.len()), (12, 8));
+    }
+
+    #[test]
+    fn four_parallel_edges_bevel_cylinder_pillar() {
+        let cube = Mesh::cube(2.0);
+        let vertical_edges = [(0, 3), (1, 2), (4, 7), (5, 6)];
+        let target_edge_positions: Vec<([f32; 3], [f32; 3])> = vertical_edges
+            .iter()
+            .map(|&(a, b)| (cube.verts[a].pos, cube.verts[b].pos))
+            .collect();
+
+        let mut mesh = cube;
+        for (pos_a, pos_b) in target_edge_positions {
+            let va = mesh
+                .verts
+                .iter()
+                .position(|v| {
+                    (v.pos[0] - pos_a[0])
+                        .hypot(v.pos[1] - pos_a[1])
+                        .hypot(v.pos[2] - pos_a[2])
+                        < 1e-4
+                })
+                .unwrap() as u32;
+            let vb = mesh
+                .verts
+                .iter()
+                .position(|v| {
+                    (v.pos[0] - pos_b[0])
+                        .hypot(v.pos[1] - pos_b[1])
+                        .hypot(v.pos[2] - pos_b[2])
+                        < 1e-4
+                })
+                .unwrap() as u32;
+            let next = bevel_edge_segments_clamped(&mesh, va, vb, 0.2, 1, true);
+            assert!(next.is_some());
+            mesh = next.unwrap();
+        }
+        let report = mesh.validate_topology();
+        assert!(report.is_manifold && report.is_closed);
+        assert_eq!((mesh.verts.len(), mesh.faces.len()), (16, 10));
+    }
 }

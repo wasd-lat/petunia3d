@@ -909,7 +909,7 @@ impl Mesh {
         self.bevel_selected_full(amount, segments, true)
     }
 
-    /// Chanfra uma aresta ou vértice manifold com multi-segmentos e clamp de overlap opcional (P3D-044).
+    /// Chanfra arestas ou vértices manifold selecionados com multi-segmentos e clamp de overlap opcional (P3D-044).
     pub fn bevel_selected_full(
         &mut self,
         amount: f32,
@@ -920,30 +920,78 @@ impl Mesh {
         if count == 0 {
             self.bevel_selected_vertex(amount, clamp_overlap)
         } else {
-            if count != 1 || !amount.is_finite() || amount <= 0.0 {
+            if !amount.is_finite() || amount <= 0.0 {
                 return (0, count);
             }
-            let Some(&(a, b)) = self.selected_edges.iter().next() else {
-                return (0, 0);
-            };
-            match crate::bevel::bevel_edge_segments_clamped(
-                self,
-                a,
-                b,
-                amount,
-                segments,
-                clamp_overlap,
-            ) {
-                Some(mesh) => {
-                    *self = mesh;
-                    (1, 0)
+            if count == 1 {
+                let Some(&(a, b)) = self.selected_edges.iter().next() else {
+                    return (0, 0);
+                };
+                match crate::bevel::bevel_edge_segments_clamped(
+                    self,
+                    a,
+                    b,
+                    amount,
+                    segments,
+                    clamp_overlap,
+                ) {
+                    Some(mesh) => {
+                        *self = mesh;
+                        (1, 0)
+                    }
+                    None => (0, 1),
                 }
-                None => (0, count),
+            } else {
+                let target_edge_positions: Vec<([f32; 3], [f32; 3])> = self
+                    .selected_edges
+                    .iter()
+                    .map(|&(a, b)| (self.verts[a as usize].pos, self.verts[b as usize].pos))
+                    .collect();
+
+                let mut working = self.clone();
+                let mut applied = 0;
+
+                for (pos_a, pos_b) in target_edge_positions {
+                    let va = working.verts.iter().position(|v| {
+                        (v.pos[0] - pos_a[0])
+                            .hypot(v.pos[1] - pos_a[1])
+                            .hypot(v.pos[2] - pos_a[2])
+                            < 1e-4
+                    });
+                    let vb = working.verts.iter().position(|v| {
+                        (v.pos[0] - pos_b[0])
+                            .hypot(v.pos[1] - pos_b[1])
+                            .hypot(v.pos[2] - pos_b[2])
+                            < 1e-4
+                    });
+                    let (Some(va), Some(vb)) = (va, vb) else {
+                        return (0, count);
+                    };
+                    match crate::bevel::bevel_edge_segments_clamped(
+                        &working,
+                        va as u32,
+                        vb as u32,
+                        amount,
+                        segments,
+                        clamp_overlap,
+                    ) {
+                        Some(next) => {
+                            working = next;
+                            applied += 1;
+                        }
+                        None => {
+                            return (0, count);
+                        }
+                    }
+                }
+
+                *self = working;
+                (applied, 0)
             }
         }
     }
 
-    /// Chanfra um vértice manifold selecionado com clamp de overlap opcional (P3D-044).
+    /// Chanfra vértices manifold selecionados com clamp de overlap opcional (P3D-044).
     pub fn bevel_selected_vertex(&mut self, amount: f32, clamp_overlap: bool) -> (usize, usize) {
         let sel_verts: Vec<u32> = self
             .verts
@@ -952,17 +1000,42 @@ impl Mesh {
             .filter(|(_, v)| v.selected)
             .map(|(i, _)| i as u32)
             .collect();
-        if sel_verts.len() != 1 || !amount.is_finite() || amount <= 0.0 {
-            return (0, sel_verts.len());
+        let total = sel_verts.len();
+        if total == 0 || !amount.is_finite() || amount <= 0.0 {
+            return (0, total);
         }
-        let v = sel_verts[0];
-        match crate::bevel::bevel_vertex(self, v, amount, clamp_overlap) {
-            Some(mesh) => {
-                *self = mesh;
-                (1, 0)
+
+        let target_positions: Vec<[f32; 3]> = sel_verts
+            .iter()
+            .map(|&vi| self.verts[vi as usize].pos)
+            .collect();
+
+        let mut working = self.clone();
+        let mut applied = 0;
+
+        for target_pos in target_positions {
+            let found = working.verts.iter().position(|v| {
+                (v.pos[0] - target_pos[0])
+                    .hypot(v.pos[1] - target_pos[1])
+                    .hypot(v.pos[2] - target_pos[2])
+                    < 1e-4
+            });
+            let Some(vi) = found else {
+                return (0, total);
+            };
+            match crate::bevel::bevel_vertex(&working, vi as u32, amount, clamp_overlap) {
+                Some(next) => {
+                    working = next;
+                    applied += 1;
+                }
+                None => {
+                    return (0, total);
+                }
             }
-            None => (0, 1),
         }
+
+        *self = working;
+        (applied, 0)
     }
 
     /// Inverte a diagonal de triangulação interna de quads selecionados (rotacionando o fan de corte),
