@@ -258,6 +258,7 @@ mod tests {
                 favorite: false,
                 tags: vec![],
                 modifiers: vec![],
+                origin: None,
                 paint_stack: None,
                 eval_cache: None,
             }],

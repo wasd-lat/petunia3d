@@ -349,6 +349,13 @@ pub mod text_id {
     pub const PIVOT_BOUNDS: TextId = TextId::new("pivot.bounds");
     pub const PIVOT_CURSOR: TextId = TextId::new("pivot.cursor");
     pub const PIVOT_INDIVIDUAL: TextId = TextId::new("pivot.individual");
+    pub const PIVOT_ORIGIN_TO_GEOMETRY: TextId = TextId::new("pivot.origin_to_geometry");
+    pub const PIVOT_ORIGIN_TO_BOTTOM: TextId = TextId::new("pivot.origin_to_bottom");
+    pub const PIVOT_ORIGIN_TO_CURSOR: TextId = TextId::new("pivot.origin_to_cursor");
+    pub const PIVOT_ORIGIN_TO_SELECTION: TextId = TextId::new("pivot.origin_to_selection");
+    pub const PIVOT_GEOMETRY_TO_ORIGIN: TextId = TextId::new("pivot.geometry_to_origin");
+    pub const PIVOT_EDIT_PIVOT: TextId = TextId::new("pivot.edit_pivot");
+    pub const PIVOT_EDIT_PIVOT_HINT: TextId = TextId::new("pivot.edit_pivot_hint");
 
     // Diálogo de recuperação de autosave (P3D-002).
     pub const UI_RECOVERY_TITLE: TextId = TextId::new("ui.recovery_title");
@@ -765,6 +772,13 @@ pub mod text_id {
         PIVOT_BOUNDS,
         PIVOT_CURSOR,
         PIVOT_INDIVIDUAL,
+        PIVOT_ORIGIN_TO_GEOMETRY,
+        PIVOT_ORIGIN_TO_BOTTOM,
+        PIVOT_ORIGIN_TO_CURSOR,
+        PIVOT_ORIGIN_TO_SELECTION,
+        PIVOT_GEOMETRY_TO_ORIGIN,
+        PIVOT_EDIT_PIVOT,
+        PIVOT_EDIT_PIVOT_HINT,
     ];
 }
 

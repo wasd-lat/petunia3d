@@ -243,6 +243,8 @@ mod tests {
             selection_rgb: [32, 180, 240],
             selection_thickness: 3.5,
             model_quick_actions: vec!["model.fuse".to_string()],
+            colorblind_axes: false,
+            double_tap_interval_ms: 300,
             section_layouts: BTreeMap::from([(
                 InspectorSectionId::Material.as_str().to_string(),
                 SectionLayout {

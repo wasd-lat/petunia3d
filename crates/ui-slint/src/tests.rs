@@ -5042,3 +5042,118 @@ fn gizmo_center_screen_translation_and_uniform_scale() {
     assert!((ratio_x - ratio_y).abs() < 1e-4);
     assert!((ratio_y - ratio_z).abs() < 1e-4);
 }
+
+#[test]
+fn test_set_origin_operations_and_undo() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    let active_id = bridge.state.project.active().unwrap().id.to_string();
+
+    // Início: asset.origin é None
+    assert!(bridge.state.project.active().unwrap().origin.is_none());
+
+    // 1. Origin to Bottom
+    assert!(bridge.set_origin_bottom());
+    let origin_bottom = bridge.state.project.active().unwrap().origin.unwrap();
+    // Para cubo unitário centrado em (0,0,0) de -1 a 1: Y mínimo é -1.0
+    assert!((origin_bottom[1] - (-1.0)).abs() < 1e-4);
+
+    // 2. Origin to 3D Cursor
+    bridge.state.session.cursor_3d = [5.0, 10.0, 15.0];
+    assert!(bridge.set_origin_cursor());
+    let origin_cursor = bridge.state.project.active().unwrap().origin.unwrap();
+    assert_eq!(origin_cursor, [5.0, 10.0, 15.0]);
+
+    // 3. Origin to Geometry
+    assert!(bridge.set_origin_geometry());
+    let origin_geom = bridge.state.project.active().unwrap().origin.unwrap();
+    assert!((origin_geom[0]).abs() < 1e-4);
+    assert!((origin_geom[1]).abs() < 1e-4);
+    assert!((origin_geom[2]).abs() < 1e-4);
+
+    // 4. Undo reverte para Cursor, depois Bottom, depois None
+    bridge.apply(UiIntent::Undo);
+    assert_eq!(
+        bridge.state.project.active().unwrap().origin.unwrap(),
+        [5.0, 10.0, 15.0]
+    );
+
+    bridge.apply(UiIntent::Undo);
+    assert!((bridge.state.project.active().unwrap().origin.unwrap()[1] - (-1.0)).abs() < 1e-4);
+
+    bridge.apply(UiIntent::Undo);
+    assert!(bridge.state.project.active().unwrap().origin.is_none());
+
+    // 5. Redo funciona
+    bridge.apply(UiIntent::Redo);
+    assert!(bridge.state.project.active().unwrap().origin.is_some());
+
+    // 6. Geometry to Origin
+    // Define origin em (2.0, 0.0, 0.0) e move geometria para lá
+    bridge.state.project.active_mut().unwrap().origin = Some([2.0, 0.0, 0.0]);
+    let before_center = bridge
+        .state
+        .project
+        .active_mesh()
+        .unwrap()
+        .selection_center();
+    assert!(bridge.set_geometry_to_origin());
+    let after_center = bridge
+        .state
+        .project
+        .active_mesh()
+        .unwrap()
+        .selection_center();
+    assert!((after_center[0] - 2.0).abs() < 1e-4);
+    assert!((after_center[0] - before_center[0] - 2.0).abs() < 1e-4);
+
+    // 7. Context menu action aciona as operações
+    bridge.open_context_menu(&active_id, 10.0, 10.0);
+    assert!(bridge.context_menu_action("origin_to_bottom"));
+    assert!((bridge.state.project.active().unwrap().origin.unwrap()[1] - (-1.0)).abs() < 1e-4);
+}
+
+#[test]
+fn test_edit_pivot_mode_and_shortcut() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // Inicialmente edit_pivot é falso
+    assert!(!bridge.state.session.edit_pivot);
+    assert!(!bridge.view_model().edit_pivot);
+
+    // Tecla Insert alterna Edit Pivot
+    assert!(bridge.route_shortcut("Insert", false, false, false));
+    assert!(bridge.state.session.edit_pivot);
+    assert!(bridge.view_model().edit_pivot);
+
+    // Inicia Move transform enquanto em Edit Pivot
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+    let initial_verts = bridge.state.project.active_mesh().unwrap().verts.clone();
+    let gizmo = bridge.view_model().gizmo;
+
+    // Arrasta gizmo pelo centro
+    assert!(bridge.begin_gizmo_drag(gizmo.origin_x, gizmo.origin_y));
+    assert!(bridge.update_viewport_transform(gizmo.origin_x + 50.0, gizmo.origin_y + 50.0));
+    assert!(bridge.end_gizmo_drag());
+
+    // Geometria NÃO deve ter mudado
+    let current_verts = &bridge.state.project.active_mesh().unwrap().verts;
+    for (init, curr) in initial_verts.iter().zip(current_verts.iter()) {
+        assert_eq!(init.pos, curr.pos);
+    }
+
+    // Mas asset.origin deve ter sido definido e alterado!
+    let custom_origin = bridge.state.project.active().unwrap().origin;
+    assert!(custom_origin.is_some());
+
+    // Sai do modo Edit Pivot
+    assert!(bridge.route_shortcut("Insert", false, false, false));
+    assert!(!bridge.state.session.edit_pivot);
+    assert!(!bridge.view_model().edit_pivot);
+
+    // Agora o pivô calculado do asset reflete a nova origem
+    let pivot = bridge
+        .state
+        .calculate_pivot(bridge.state.session.pivot_point);
+    let orig = custom_origin.unwrap();
+    assert_eq!([pivot.x, pivot.y, pivot.z], orig);
+}

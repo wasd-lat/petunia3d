@@ -350,7 +350,9 @@ impl AppState {
                     ModalConstraint::Plane(i) => translation - axis(i) * translation[i],
                 };
                 components = delta;
-                if use_proportional {
+                if self.session.edit_pivot {
+                    // In Edit Pivot mode, geometry stays stationary; only origin moves.
+                } else if use_proportional {
                     for vertex in &mut mesh.verts {
                         if vertex.selected {
                             vertex.pos = (vertex.vec() + delta).to_array();
@@ -480,7 +482,13 @@ impl AppState {
                 .as_ref()
                 .map_or(modal.pivot, |pivots| pivots[index]);
             vertex.pos = match modal.kind {
-                ModalKind::Move => vertex.vec() + components,
+                ModalKind::Move => {
+                    if self.session.edit_pivot {
+                        vertex.vec()
+                    } else {
+                        vertex.vec() + components
+                    }
+                }
                 ModalKind::Rotate => pivot + rotation * (vertex.vec() - pivot),
                 ModalKind::Scale => pivot + components * (vertex.vec() - pivot),
                 _ => return Err(ModalError::InvalidInput),
@@ -508,88 +516,148 @@ impl AppState {
         if !valid_mesh(&mesh) {
             return Err(ModalError::InvalidMesh);
         }
-        let modal = self.modal.as_ref().ok_or(ModalError::NoActiveOperation)?;
-        let mut changed = !same_geometry(&mesh, &modal.source);
-        // Preserve selection flags for object transforms and identity previews.
-        if (!changed
-            || (self.edit_mode() == EditMode::Object
-                && matches!(
-                    modal.kind,
-                    ModalKind::Move | ModalKind::Rotate | ModalKind::Scale
-                )))
-            && let Some(original) = modal.original.active_mesh()
-        {
-            for (vertex, source) in mesh.verts.iter_mut().zip(&original.verts) {
-                vertex.selected = source.selected;
-            }
-            for (face, source) in mesh.faces.iter_mut().zip(&original.faces) {
-                face.selected = source.selected;
-            }
-            mesh.selected_edges = original.selected_edges.clone();
-        }
-        let others: Vec<_> = if self.edit_mode() == EditMode::Object
-            && matches!(
-                modal.kind,
-                ModalKind::Move | ModalKind::Rotate | ModalKind::Scale
-            ) {
+        let (
+            modal_kind,
+            modal_pivot,
+            is_edit_pivot,
+            is_object_mode,
+            active_orig,
+            others,
+            mut changed,
+        ) = {
+            let modal = self.modal.as_ref().ok_or(ModalError::NoActiveOperation)?;
+            let changed = !same_geometry(&mesh, &modal.source);
+            let modal_kind = modal.kind;
+            let modal_pivot = modal.pivot;
+            let is_edit_pivot = self.session.edit_pivot;
+            let is_object_mode = self.edit_mode() == EditMode::Object;
             let active_id = modal.original.active().map(|asset| asset.id);
-            let rotation = Quat::from_euler(
-                EulerRot::XYZ,
-                components.x.to_radians(),
-                components.y.to_radians(),
-                components.z.to_radians(),
-            );
-            modal
-                .original
-                .assets
-                .iter()
-                .filter(|asset| {
-                    !asset.locked
-                        && Some(asset.id) != active_id
-                        && modal.selection.assets.contains(&asset.id)
-                })
-                .map(|asset| {
-                    let mut other = asset.mesh.clone();
-                    let pivot = if modal.individual_origins {
-                        other.verts.iter().map(|v| v.vec()).sum::<Vec3>()
-                            / other.verts.len().max(1) as f32
-                    } else {
-                        modal.pivot
-                    };
-                    for vertex in &mut other.verts {
-                        vertex.pos = match modal.kind {
-                            ModalKind::Move => vertex.vec() + components,
-                            ModalKind::Rotate => pivot + rotation * (vertex.vec() - pivot),
-                            ModalKind::Scale => pivot + components * (vertex.vec() - pivot),
-                            _ => vertex.vec(),
+            let active_orig = modal.original.active().and_then(|a| a.origin);
+            let selection_assets = &modal.selection.assets;
+            let individual_origins = modal.individual_origins;
+
+            let others: Vec<_> = if is_object_mode
+                && matches!(
+                    modal_kind,
+                    ModalKind::Move | ModalKind::Rotate | ModalKind::Scale
+                ) {
+                let rotation = Quat::from_euler(
+                    EulerRot::XYZ,
+                    components.x.to_radians(),
+                    components.y.to_radians(),
+                    components.z.to_radians(),
+                );
+                modal
+                    .original
+                    .assets
+                    .iter()
+                    .filter(|asset| {
+                        !asset.locked
+                            && Some(asset.id) != active_id
+                            && selection_assets.contains(&asset.id)
+                    })
+                    .map(|asset| {
+                        let mut other = asset.mesh.clone();
+                        let pivot = if individual_origins {
+                            other.verts.iter().map(|v| v.vec()).sum::<Vec3>()
+                                / other.verts.len().max(1) as f32
+                        } else {
+                            modal_pivot
+                        };
+                        for vertex in &mut other.verts {
+                            vertex.pos = match modal_kind {
+                                ModalKind::Move => vertex.vec() + components,
+                                ModalKind::Rotate => pivot + rotation * (vertex.vec() - pivot),
+                                ModalKind::Scale => pivot + components * (vertex.vec() - pivot),
+                                _ => vertex.vec(),
+                            }
+                            .to_array();
                         }
-                        .to_array();
-                    }
-                    (asset.id, other)
-                })
-                .collect()
-        } else {
-            Vec::new()
+                        let other_orig = asset.origin.map(|orig| {
+                            let orig_vec = Vec3::from(orig);
+                            match modal_kind {
+                                ModalKind::Move => (orig_vec + components).to_array(),
+                                ModalKind::Rotate => {
+                                    (modal_pivot + rotation * (orig_vec - modal_pivot)).to_array()
+                                }
+                                ModalKind::Scale => {
+                                    (modal_pivot + components * (orig_vec - modal_pivot)).to_array()
+                                }
+                                _ => orig,
+                            }
+                        });
+                        let is_changed = !same_geometry(&other, &asset.mesh);
+                        (asset.id, other, is_changed, other_orig)
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            // Preserve selection flags for object transforms and identity previews.
+            if (!changed
+                || (is_object_mode
+                    && matches!(
+                        modal_kind,
+                        ModalKind::Move | ModalKind::Rotate | ModalKind::Scale
+                    )))
+                && let Some(original) = modal.original.active_mesh()
+            {
+                for (vertex, source) in mesh.verts.iter_mut().zip(&original.verts) {
+                    vertex.selected = source.selected;
+                }
+                for (face, source) in mesh.faces.iter_mut().zip(&original.faces) {
+                    face.selected = source.selected;
+                }
+                mesh.selected_edges = original.selected_edges.clone();
+            }
+
+            (
+                modal_kind,
+                modal_pivot,
+                is_edit_pivot,
+                is_object_mode,
+                active_orig,
+                others,
+                changed,
+            )
         };
-        if others.iter().any(|(_, mesh)| !valid_mesh(mesh)) {
+
+        if others.iter().any(|(_, mesh, _, _)| !valid_mesh(mesh)) {
             return Err(ModalError::InvalidMesh);
         }
-        changed |= others.iter().any(|(id, mesh)| {
-            modal
-                .original
-                .assets
-                .iter()
-                .find(|asset| asset.id == *id)
-                .is_some_and(|asset| !same_geometry(mesh, &asset.mesh))
-        });
-        let active = self
-            .project
-            .active_mesh_mut()
-            .ok_or(ModalError::NoActiveMesh)?;
-        *active = mesh;
-        for (id, mesh) in others {
+        changed |= others.iter().any(|(_, _, is_changed, _)| *is_changed);
+
+        let active = self.project.active_mut().ok_or(ModalError::NoActiveMesh)?;
+        active.mesh = mesh;
+        if is_edit_pivot && modal_kind == ModalKind::Move {
+            active.origin = Some((modal_pivot + components).to_array());
+            changed = true;
+        } else if is_object_mode && let Some(orig) = active_orig {
+            let orig_vec = Vec3::from(orig);
+            active.origin = Some(match modal_kind {
+                ModalKind::Move => (orig_vec + components).to_array(),
+                ModalKind::Rotate => {
+                    let rotation = Quat::from_euler(
+                        EulerRot::XYZ,
+                        components.x.to_radians(),
+                        components.y.to_radians(),
+                        components.z.to_radians(),
+                    );
+                    (modal_pivot + rotation * (orig_vec - modal_pivot)).to_array()
+                }
+                ModalKind::Scale => {
+                    (modal_pivot + components * (orig_vec - modal_pivot)).to_array()
+                }
+                _ => orig,
+            });
+        }
+        for (id, other_mesh, _, other_orig) in others {
             if let Some(asset) = self.project.assets.iter_mut().find(|asset| asset.id == id) {
-                asset.mesh = mesh;
+                asset.mesh = other_mesh;
+                if is_object_mode && other_orig.is_some() {
+                    asset.origin = other_orig;
+                }
             }
         }
         if let Some(modal) = self.modal.as_mut() {

@@ -195,6 +195,13 @@ median = "Median Point"
 bounds = "Bounding Box Center"
 cursor = "3D Cursor"
 individual = "Individual Origins"
+origin_to_geometry = "Origin to Geometry"
+origin_to_bottom = "Origin to Bottom"
+origin_to_cursor = "Origin to 3D Cursor"
+origin_to_selection = "Origin to Selection"
+geometry_to_origin = "Geometry to Origin"
+edit_pivot = "Edit Pivot Mode"
+edit_pivot_hint = "Transform only the object's origin/pivot"
 
 [animate]
 humanoid = "Humanoid"

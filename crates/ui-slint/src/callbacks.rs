@@ -533,6 +533,14 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_pivot_bounds_label(vm.pivot_bounds_label.as_str().into());
     window.set_pivot_cursor_label(vm.pivot_cursor_label.as_str().into());
     window.set_pivot_individual_label(vm.pivot_individual_label.as_str().into());
+    window.set_edit_pivot(vm.edit_pivot);
+    window.set_label_origin_to_geometry(vm.label_origin_to_geometry.as_str().into());
+    window.set_label_origin_to_bottom(vm.label_origin_to_bottom.as_str().into());
+    window.set_label_origin_to_cursor(vm.label_origin_to_cursor.as_str().into());
+    window.set_label_origin_to_selection(vm.label_origin_to_selection.as_str().into());
+    window.set_label_geometry_to_origin(vm.label_geometry_to_origin.as_str().into());
+    window.set_label_edit_pivot(vm.label_edit_pivot.as_str().into());
+    window.set_hint_edit_pivot(vm.hint_edit_pivot.as_str().into());
     window.set_profile_active(vm.profile_active);
     window.set_profile_point_count(vm.profile_point_count);
     window.set_profile_closed(vm.profile_closed);

@@ -699,6 +699,7 @@ pub struct EditorSession {
     pub proportional_settings: crate::proportional::ProportionalSettings,
     pub transform_orientation: TransformOrientation,
     pub pivot_point: PivotPoint,
+    pub edit_pivot: bool,
     pub show_overlays: bool,
     pub show_xray: bool,
     /// Opacidade da geometria em X-Ray (0.1..=0.9). Ajustável pelo popover.
@@ -762,6 +763,7 @@ impl EditorSession {
             proportional_settings: crate::proportional::ProportionalSettings::default(),
             transform_orientation: TransformOrientation::Global,
             pivot_point: PivotPoint::MedianPoint,
+            edit_pivot: false,
             show_overlays: true,
             show_xray: false,
             xray_opacity: 0.42,
@@ -2008,6 +2010,12 @@ impl AppState {
     /// Calcula a posição no espaço de mundo do pivô selecionado (P3D-027).
     pub fn calculate_pivot(&self, pivot: PivotPoint) -> glam::Vec3 {
         if self.selection_domain() == SelectionDomain::Object && pivot != PivotPoint::Cursor3D {
+            if let Some(active) = self.project.active()
+                && let Some(origin) = active.origin
+                && self.session.selection.assets.len() <= 1
+            {
+                return glam::Vec3::from(origin);
+            }
             let points: Vec<_> = self
                 .project
                 .assets
@@ -2040,7 +2048,12 @@ impl AppState {
         match pivot {
             PivotPoint::Cursor3D => glam::Vec3::from(self.cursor_3d),
             PivotPoint::BoundingBoxCenter => {
-                if let Some(mesh) = self.project.active_mesh() {
+                if self.selection_domain() == SelectionDomain::Object
+                    && let Some(active) = self.project.active()
+                    && let Some(origin) = active.origin
+                {
+                    glam::Vec3::from(origin)
+                } else if let Some(mesh) = self.project.active_mesh() {
                     let mut min = glam::Vec3::splat(f32::MAX);
                     let mut max = glam::Vec3::splat(f32::MIN);
                     let mut count = 0;
@@ -2062,13 +2075,188 @@ impl AppState {
                 }
             }
             PivotPoint::MedianPoint | PivotPoint::IndividualOrigins => {
-                if let Some(mesh) = self.project.active_mesh() {
+                if self.selection_domain() == SelectionDomain::Object
+                    && let Some(active) = self.project.active()
+                    && let Some(origin) = active.origin
+                {
+                    glam::Vec3::from(origin)
+                } else if let Some(mesh) = self.project.active_mesh() {
                     glam::Vec3::from(mesh.selection_center())
                 } else {
                     glam::Vec3::from(self.cursor_3d)
                 }
             }
         }
+    }
+
+    /// Define a origem do objeto ativo para o centro da sua geometria.
+    pub fn set_origin_geometry(&mut self) -> Result<(), &'static str> {
+        let center = {
+            let active = self.project.active().ok_or("No active asset")?;
+            if active.locked {
+                self.set_status("Asset is locked");
+                return Err("Asset is locked");
+            }
+            if active.mesh.verts.is_empty() {
+                self.set_status("Asset mesh is empty");
+                return Err("Asset mesh is empty");
+            }
+            active.mesh.selection_center()
+        };
+        let prev = self.project.project.clone();
+        if let Some(active) = self.project.active_mut() {
+            active.origin = Some(center);
+        }
+        self.project
+            .undo
+            .checkpoint_sized("Set Origin to Geometry", &prev, prev.estimated_bytes());
+        self.mark_document_dirty();
+        self.emit_mesh_changed();
+        self.set_status("Origin set to geometry center.");
+        Ok(())
+    }
+
+    /// Define a origem do objeto ativo para a base mais baixa (Y mínimo) da geometria.
+    pub fn set_origin_bottom(&mut self) -> Result<(), &'static str> {
+        let bottom_origin = {
+            let active = self.project.active().ok_or("No active asset")?;
+            if active.locked {
+                self.set_status("Asset is locked");
+                return Err("Asset is locked");
+            }
+            if active.mesh.verts.is_empty() {
+                self.set_status("Asset mesh is empty");
+                return Err("Asset mesh is empty");
+            }
+            let mut min = glam::Vec3::splat(f32::MAX);
+            let mut max = glam::Vec3::splat(f32::MIN);
+            for v in &active.mesh.verts {
+                let p = v.vec();
+                min = min.min(p);
+                max = max.max(p);
+            }
+            if !min.is_finite() || !max.is_finite() {
+                self.set_status("Mesh vertices are non-finite");
+                return Err("Mesh vertices are non-finite");
+            }
+            [(min.x + max.x) * 0.5, min.y, (min.z + max.z) * 0.5]
+        };
+        let prev = self.project.project.clone();
+        if let Some(active) = self.project.active_mut() {
+            active.origin = Some(bottom_origin);
+        }
+        self.project
+            .undo
+            .checkpoint_sized("Set Origin to Bottom", &prev, prev.estimated_bytes());
+        self.mark_document_dirty();
+        self.emit_mesh_changed();
+        self.set_status("Origin set to bottom.");
+        Ok(())
+    }
+
+    /// Define a origem do objeto ativo para a posição atual do 3D Cursor.
+    pub fn set_origin_cursor(&mut self) -> Result<(), &'static str> {
+        let cursor = self.session.cursor_3d;
+        {
+            let active = self.project.active().ok_or("No active asset")?;
+            if active.locked {
+                self.set_status("Asset is locked");
+                return Err("Asset is locked");
+            }
+        }
+        let prev = self.project.project.clone();
+        if let Some(active) = self.project.active_mut() {
+            active.origin = Some(cursor);
+        }
+        self.project.undo.checkpoint_sized(
+            "Set Origin to 3D Cursor",
+            &prev,
+            prev.estimated_bytes(),
+        );
+        self.mark_document_dirty();
+        self.emit_mesh_changed();
+        self.set_status("Origin set to 3D Cursor.");
+        Ok(())
+    }
+
+    /// Define a origem do objeto ativo para a média da seleção atual.
+    pub fn set_origin_selection(&mut self) -> Result<(), &'static str> {
+        let center = {
+            let active = self.project.active().ok_or("No active asset")?;
+            if active.locked {
+                self.set_status("Asset is locked");
+                return Err("Asset is locked");
+            }
+            if active.mesh.verts.is_empty() {
+                self.set_status("Asset mesh is empty");
+                return Err("Asset mesh is empty");
+            }
+            active.mesh.selection_center()
+        };
+        let prev = self.project.project.clone();
+        if let Some(active) = self.project.active_mut() {
+            active.origin = Some(center);
+        }
+        self.project.undo.checkpoint_sized(
+            "Set Origin to Selection",
+            &prev,
+            prev.estimated_bytes(),
+        );
+        self.mark_document_dirty();
+        self.emit_mesh_changed();
+        self.set_status("Origin set to selection.");
+        Ok(())
+    }
+
+    /// Translada a geometria para que seu centro coincida com o ponto de origem (0, 0, 0)
+    /// ou a origem definida do objeto.
+    pub fn set_geometry_to_origin(&mut self) -> Result<(), &'static str> {
+        let (delta, target_origin) = {
+            let active = self.project.active().ok_or("No active asset")?;
+            if active.locked {
+                self.set_status("Asset is locked");
+                return Err("Asset is locked");
+            }
+            if active.mesh.verts.is_empty() {
+                self.set_status("Asset mesh is empty");
+                return Err("Asset mesh is empty");
+            }
+            let center = active.mesh.selection_center();
+            let target_origin = active.origin.unwrap_or([0.0, 0.0, 0.0]);
+            let delta = [
+                target_origin[0] - center[0],
+                target_origin[1] - center[1],
+                target_origin[2] - center[2],
+            ];
+            (delta, target_origin)
+        };
+        let prev = self.project.project.clone();
+        if let Some(active) = self.project.active_mut() {
+            for v in &mut active.mesh.verts {
+                v.pos[0] += delta[0];
+                v.pos[1] += delta[1];
+                v.pos[2] += delta[2];
+            }
+            active.origin = Some(target_origin);
+        }
+        self.project
+            .undo
+            .checkpoint_sized("Geometry to Origin", &prev, prev.estimated_bytes());
+        self.mark_document_dirty();
+        self.emit_mesh_changed();
+        self.set_status("Geometry centered at origin.");
+        Ok(())
+    }
+
+    /// Alterna o modo de edição de pivô (Ajustar Pivô).
+    pub fn toggle_edit_pivot(&mut self) -> bool {
+        self.session.edit_pivot = !self.session.edit_pivot;
+        if self.session.edit_pivot {
+            self.set_status("Edit Pivot Mode enabled (Move translates origin only).");
+        } else {
+            self.set_status("Edit Pivot Mode disabled.");
+        }
+        self.session.edit_pivot
     }
 
     /// Constrói o descritor de feedback da ferramenta modal ativa para renderização (P3D-131).

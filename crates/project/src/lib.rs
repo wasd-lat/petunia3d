@@ -206,6 +206,8 @@ pub struct Asset {
     pub tags: Vec<String>,
     #[serde(default)]
     pub modifiers: Vec<ModifierInstance>,
+    #[serde(default)]
+    pub origin: Option<[f32; 3]>,
     #[serde(skip)]
     eval_cache: Option<(u64, u64, Mesh)>,
 }
@@ -227,6 +229,7 @@ impl Asset {
             favorite: false,
             tags: Vec::new(),
             modifiers: Vec::new(),
+            origin: None,
             paint_stack: None,
             eval_cache: None,
         }

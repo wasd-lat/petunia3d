@@ -349,6 +349,12 @@ pub enum UiIntent {
         section: petunia_config::InspectorSectionId,
         asset: Option<String>,
     },
+    SetOriginGeometry,
+    SetOriginBottom,
+    SetOriginCursor,
+    SetOriginSelection,
+    SetGeometryToOrigin,
+    ToggleEditPivot,
 }
 
 // Presentation ViewModels and Data Transfer Objects (DTOs) for the Slint shell.
@@ -1211,6 +1217,24 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             UiIntent::SetSectionPinnedAsset { section, asset } => {
                 self.set_section_pinned_asset(section, asset);
             }
+            UiIntent::SetOriginGeometry => {
+                let _ = self.state.set_origin_geometry();
+            }
+            UiIntent::SetOriginBottom => {
+                let _ = self.state.set_origin_bottom();
+            }
+            UiIntent::SetOriginCursor => {
+                let _ = self.state.set_origin_cursor();
+            }
+            UiIntent::SetOriginSelection => {
+                let _ = self.state.set_origin_selection();
+            }
+            UiIntent::SetGeometryToOrigin => {
+                let _ = self.state.set_geometry_to_origin();
+            }
+            UiIntent::ToggleEditPivot => {
+                self.state.toggle_edit_pivot();
+            }
         }
         self.sync_viewport_context();
     }
@@ -1722,6 +1746,36 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.set_status("Câmera centralizada no 3D Cursor.");
         self.state.mark_dirty();
         true
+    }
+
+    /// Define a origem do objeto ativo para a geometria central.
+    pub fn set_origin_geometry(&mut self) -> bool {
+        self.state.set_origin_geometry().is_ok()
+    }
+
+    /// Define a origem do objeto ativo para o piso / base inferior em Y.
+    pub fn set_origin_bottom(&mut self) -> bool {
+        self.state.set_origin_bottom().is_ok()
+    }
+
+    /// Define a origem do objeto ativo para a coordenada do 3D Cursor.
+    pub fn set_origin_cursor(&mut self) -> bool {
+        self.state.set_origin_cursor().is_ok()
+    }
+
+    /// Define a origem do objeto ativo para o centro dos elementos selecionados.
+    pub fn set_origin_selection(&mut self) -> bool {
+        self.state.set_origin_selection().is_ok()
+    }
+
+    /// Centraliza a geometria do objeto na origem (0, 0, 0) ou origem atual.
+    pub fn set_geometry_to_origin(&mut self) -> bool {
+        self.state.set_geometry_to_origin().is_ok()
+    }
+
+    /// Alterna o modo Ajustar Pivô (Edit Pivot).
+    pub fn toggle_edit_pivot(&mut self) -> bool {
+        self.state.toggle_edit_pivot()
     }
 
     /// Distância em mundo que um arrasto de tela representa ao longo de um eixo.
@@ -5045,6 +5099,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     self.apply(UiIntent::DeleteActiveAsset);
                     true
                 }
+                "origin_to_geometry" => self.set_origin_geometry(),
+                "origin_to_bottom" => self.set_origin_bottom(),
+                "origin_to_cursor" => self.set_origin_cursor(),
+                "origin_to_selection" => self.set_origin_selection(),
+                "geometry_to_origin" => self.set_geometry_to_origin(),
+                "toggle_edit_pivot" => self.toggle_edit_pivot(),
                 _ => false,
             };
         }
@@ -5103,6 +5163,30 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 true
             }
             "boolean_operand" => self.set_boolean_operand(&id),
+            "origin_to_geometry" => {
+                self.select_asset_by_id(menu.asset);
+                self.set_origin_geometry()
+            }
+            "origin_to_bottom" => {
+                self.select_asset_by_id(menu.asset);
+                self.set_origin_bottom()
+            }
+            "origin_to_cursor" => {
+                self.select_asset_by_id(menu.asset);
+                self.set_origin_cursor()
+            }
+            "origin_to_selection" => {
+                self.select_asset_by_id(menu.asset);
+                self.set_origin_selection()
+            }
+            "geometry_to_origin" => {
+                self.select_asset_by_id(menu.asset);
+                self.set_geometry_to_origin()
+            }
+            "toggle_edit_pivot" => {
+                self.select_asset_by_id(menu.asset);
+                self.toggle_edit_pivot()
+            }
             "delete" => {
                 self.select_asset_by_id(menu.asset);
                 self.apply(UiIntent::DeleteActiveAsset);
@@ -5658,6 +5742,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             CommandId::ToggleUvChecker => self.apply(UiIntent::ToggleUvChecker),
             CommandId::ToggleProportionalEditing => self.apply(UiIntent::ToggleProportionalEditing),
             CommandId::ToggleSnap => self.apply(UiIntent::ToggleSnapEnabled),
+            CommandId::OriginToGeometry => self.apply(UiIntent::SetOriginGeometry),
+            CommandId::OriginToBottom => self.apply(UiIntent::SetOriginBottom),
+            CommandId::OriginToCursor => self.apply(UiIntent::SetOriginCursor),
+            CommandId::OriginToSelection => self.apply(UiIntent::SetOriginSelection),
+            CommandId::GeometryToOrigin => self.apply(UiIntent::SetGeometryToOrigin),
+            CommandId::ToggleEditPivot => self.apply(UiIntent::ToggleEditPivot),
         }
     }
 
@@ -5699,6 +5789,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         if text == "Enter" && !ctrl && !alt {
             return self.confirm_active_operation();
+        }
+        if text == "Insert" && !ctrl && !alt && !shift {
+            self.apply(UiIntent::ToggleEditPivot);
+            return true;
         }
         if self.state.session.tools.modal.is_some() && !ctrl && !alt {
             if let Some(axis) = ["x", "y", "z"]

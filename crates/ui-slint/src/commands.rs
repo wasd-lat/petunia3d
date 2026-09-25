@@ -43,6 +43,12 @@ pub enum CommandId {
     ToggleSnap,
     ToolCursor,
     FrameCursor,
+    OriginToGeometry,
+    OriginToBottom,
+    OriginToCursor,
+    OriginToSelection,
+    GeometryToOrigin,
+    ToggleEditPivot,
 }
 
 impl CommandId {
@@ -87,6 +93,12 @@ impl CommandId {
             Self::ToggleSnap => "tools.toggle_snap",
             Self::ToolCursor => "model.tool_cursor",
             Self::FrameCursor => "view.frame_cursor",
+            Self::OriginToGeometry => "object.origin_to_geometry",
+            Self::OriginToBottom => "object.origin_to_bottom",
+            Self::OriginToCursor => "object.origin_to_cursor",
+            Self::OriginToSelection => "object.origin_to_selection",
+            Self::GeometryToOrigin => "object.geometry_to_origin",
+            Self::ToggleEditPivot => "object.toggle_edit_pivot",
         }
     }
 
@@ -131,6 +143,12 @@ impl CommandId {
             "tools.toggle_snap" => Some(Self::ToggleSnap),
             "model.tool_cursor" => Some(Self::ToolCursor),
             "view.frame_cursor" => Some(Self::FrameCursor),
+            "object.origin_to_geometry" => Some(Self::OriginToGeometry),
+            "object.origin_to_bottom" => Some(Self::OriginToBottom),
+            "object.origin_to_cursor" => Some(Self::OriginToCursor),
+            "object.origin_to_selection" => Some(Self::OriginToSelection),
+            "object.geometry_to_origin" => Some(Self::GeometryToOrigin),
+            "object.toggle_edit_pivot" => Some(Self::ToggleEditPivot),
             _ => None,
         }
     }
@@ -380,6 +398,42 @@ impl CommandRegistry {
                 id: CommandId::ToggleSnap,
                 label_key: "commands.toggle_snap",
                 shortcut: Some("Shift+Tab"),
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::OriginToGeometry,
+                label_key: "pivot.origin_to_geometry",
+                shortcut: None,
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::OriginToBottom,
+                label_key: "pivot.origin_to_bottom",
+                shortcut: None,
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::OriginToCursor,
+                label_key: "pivot.origin_to_cursor",
+                shortcut: None,
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::OriginToSelection,
+                label_key: "pivot.origin_to_selection",
+                shortcut: None,
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::GeometryToOrigin,
+                label_key: "pivot.geometry_to_origin",
+                shortcut: None,
+                workspace: Some(Workspace::Model),
+            },
+            CommandDescriptor {
+                id: CommandId::ToggleEditPivot,
+                label_key: "pivot.edit_pivot",
+                shortcut: Some("Insert"),
                 workspace: Some(Workspace::Model),
             },
         ]

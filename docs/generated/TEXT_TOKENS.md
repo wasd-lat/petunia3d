@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **755**.
+Total de chaves de localização cadastradas: **762**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -334,8 +334,15 @@ Total de chaves de localização cadastradas: **755**.
 | `paint.vertex` | Paint on model | Pintura no modelo |
 | `pivot.bounds` | Bounding Box Center | Centro da caixa |
 | `pivot.cursor` | 3D Cursor | Cursor 3D |
+| `pivot.edit_pivot` | Edit Pivot Mode | Modo Ajustar Pivô |
+| `pivot.edit_pivot_hint` | Transform only the object's origin/pivot | Transforma apenas a origem/pivô do objeto |
+| `pivot.geometry_to_origin` | Geometry to Origin | Geometria para a Origem |
 | `pivot.individual` | Individual Origins | Origens individuais |
 | `pivot.median` | Median Point | Ponto mediano |
+| `pivot.origin_to_bottom` | Origin to Bottom | Origem para a Base |
+| `pivot.origin_to_cursor` | Origin to 3D Cursor | Origem para o Cursor 3D |
+| `pivot.origin_to_geometry` | Origin to Geometry | Origem para a Geometria |
+| `pivot.origin_to_selection` | Origin to Selection | Origem para a Seleção |
 | `prims.body_length` | Body Length | Comprimento do Corpo |
 | `prims.bottom_radius` | Bottom Radius | Raio da Base |
 | `prims.cancel` | Cancel | Cancelar |
