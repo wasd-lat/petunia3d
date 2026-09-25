@@ -2399,6 +2399,25 @@ export component PetuniaSlintShell inherits Window {
     // Cordão pontilhado pivô→mouse da ferramenta de manipulação ativa.
     // Só existe durante a sessão (arrasto/modal); fora dela é "" e some.
     in-out property <string> drag-link-commands: "";
+    // Phase 4: Feedback Visual em Tempo Real
+    in-out property <bool> hud-pill-visible: false;
+    in-out property <length> hud-pill-x: 0px;
+    in-out property <length> hud-pill-y: 0px;
+    in-out property <string> hud-pill-title: "";
+    in-out property <string> hud-pill-value: "";
+    in-out property <string> hud-pill-badge: "";
+    in-out property <string> hud-pill-hint: "";
+    in-out property <bool> axis-guide-visible: false;
+    in-out property <string> axis-guide-commands: "";
+    in-out property <color> axis-guide-color: #e54d42;
+    in-out property <bool> dimension-visible: false;
+    in-out property <string> dimension-commands: "";
+    in-out property <string> dimension-text: "";
+    in-out property <length> dimension-x: 0px;
+    in-out property <length> dimension-y: 0px;
+    in-out property <bool> snap-marker-visible: false;
+    in-out property <length> snap-marker-x: 0px;
+    in-out property <length> snap-marker-y: 0px;
     in-out property <bool> operation-hud-active: false;
     in-out property <bool> transform-instant-active: false;
     property <bool> precision-mode: false;
@@ -3405,6 +3424,24 @@ export component PetuniaSlintShell inherits Window {
                         stroke-width: 1.5px;
                     }
 
+                    // Infinite Axis Guide Line (Fase 4: Linhas de Guia Infinitas)
+                    if root.axis-guide-visible && root.axis-guide-commands != "": Path {
+                        fit: ImageFit.preserve;
+                        commands: root.axis-guide-commands;
+                        fill: transparent;
+                        stroke: root.axis-guide-color;
+                        stroke-width: 1.5px;
+                    }
+
+                    // Dimension Line (Fase 4: Cotas Blueprint)
+                    if root.dimension-visible && root.dimension-commands != "": Path {
+                        fit: ImageFit.preserve;
+                        commands: root.dimension-commands;
+                        fill: transparent;
+                        stroke: #3e63dd;
+                        stroke-width: 1.5px;
+                    }
+
                     viewport-touch := TouchArea {
                         property <length> last-x;
                         property <length> last-y;
@@ -3831,6 +3868,106 @@ export component PetuniaSlintShell inherits Window {
                                 color: #ffaaaa;
                                 font-size: 10px;
                                 vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Marcador magnético de snap (Fase 4: Feedback Magnético)
+                    if root.snap-marker-visible && active-workspace == "MODEL": Rectangle {
+                        x: root.snap-marker-x - 8px;
+                        y: root.snap-marker-y - 8px;
+                        width: 16px;
+                        height: 16px;
+                        Rectangle {
+                            x: 2px; y: 2px; width: 12px; height: 12px;
+                            border-radius: 2px;
+                            background: transparent;
+                            border-width: 2px;
+                            border-color: #f59e0b;
+                            drop-shadow-blur: 6px;
+                            drop-shadow-color: #f59e0bcc;
+                        }
+                        Rectangle {
+                            x: 6px; y: 6px; width: 4px; height: 4px;
+                            border-radius: 2px;
+                            background: #f59e0b;
+                        }
+                    }
+
+                    // Rótulo da cota blueprint (Fase 4: Cotas Blueprint)
+                    if root.dimension-visible && root.dimension-text != "" && active-workspace == "MODEL": Rectangle {
+                        x: root.dimension-x - self.width / 2;
+                        y: root.dimension-y - self.height / 2;
+                        width: dim-label.preferred-width + 12px;
+                        height: 20px;
+                        border-radius: 4px;
+                        background: #1e1e24ee;
+                        border-width: 1px;
+                        border-color: #3e63dd;
+                        drop-shadow-blur: 6px;
+                        drop-shadow-color: #00000088;
+                        dim-label := Text {
+                            text: root.dimension-text;
+                            color: #ffffff;
+                            font-size: 10px;
+                            font-weight: 700;
+                            font-family: "monospace";
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // HUD Flutuante no Cursor (Fase 4: HUD Numérico em Tempo Real)
+                    if root.hud-pill-visible && active-workspace == "MODEL": Rectangle {
+                        x: root.hud-pill-x;
+                        y: root.hud-pill-y;
+                        width: hud-pill-layout.preferred-width + 20px;
+                        height: hud-pill-layout.preferred-height + 12px;
+                        border-radius: 8px;
+                        background: DesignTokens.surface-raised.transparentize(0.12);
+                        border-width: 1.5px;
+                        border-color: DesignTokens.accent;
+                        drop-shadow-blur: 14px;
+                        drop-shadow-color: #00000099;
+
+                        hud-pill-layout := VerticalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            padding-top: 6px;
+                            padding-bottom: 6px;
+                            spacing: 3px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: space-between;
+                                Text {
+                                    text: root.hud-pill-title;
+                                    color: DesignTokens.accent;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                }
+                                if root.hud-pill-badge != "": Rectangle {
+                                    border-radius: 3px;
+                                    background: DesignTokens.accent.transparentize(0.8);
+                                    border-width: 1px;
+                                    border-color: DesignTokens.accent;
+                                    HorizontalLayout {
+                                        padding-left: 4px; padding-right: 4px;
+                                        Text { text: root.hud-pill-badge; color: DesignTokens.accent; font-size: 9px; font-weight: 700; }
+                                    }
+                                }
+                            }
+                            Text {
+                                text: root.hud-pill-value;
+                                color: DesignTokens.text-primary;
+                                font-size: 12px;
+                                font-weight: 600;
+                                font-family: "monospace";
+                            }
+                            if root.hud-pill-hint != "": Text {
+                                text: root.hud-pill-hint;
+                                color: DesignTokens.text-muted;
+                                font-size: 9px;
                             }
                         }
                     }

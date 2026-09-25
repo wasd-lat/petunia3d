@@ -6315,6 +6315,44 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         vm.hover_label = self.state.session.tools.hover.label();
         self.fill_operation_hud(&mut vm);
+
+        if vm.operation_hud_active {
+            vm.hud_pill_visible = true;
+            vm.hud_pill_title = vm.operation_hud_title.clone();
+            vm.hud_pill_badge = vm.operation_hud_subject.clone();
+            vm.hud_pill_value = vm.operation_hud_lines.join("   ");
+            vm.hud_pill_hint = vm.operation_hud_hint.clone();
+            if self.pointer_position[0] > 0.0 && self.pointer_position[1] > 0.0 {
+                vm.hud_pill_x = (self.pointer_position[0] + 16.0)
+                    .clamp(16.0, (self.viewport_size[0] - 260.0).max(16.0));
+                vm.hud_pill_y = (self.pointer_position[1] + 16.0)
+                    .clamp(16.0, (self.viewport_size[1] - 90.0).max(16.0));
+            } else {
+                vm.hud_pill_x = 24.0;
+                vm.hud_pill_y = 64.0;
+            }
+        }
+
+        let axis_guide =
+            compute_axis_guide(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.axis_guide_visible = axis_guide.visible;
+        vm.axis_guide_commands = axis_guide.commands;
+        vm.axis_guide_color = axis_guide.color;
+
+        let dimension =
+            compute_dimension_annotation(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.dimension_visible = dimension.visible;
+        vm.dimension_commands = dimension.commands;
+        vm.dimension_text = dimension.text;
+        vm.dimension_x = dimension.label_x;
+        vm.dimension_y = dimension.label_y;
+
+        let snap_marker =
+            compute_snap_marker(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.snap_marker_visible = snap_marker.visible;
+        vm.snap_marker_x = snap_marker.x;
+        vm.snap_marker_y = snap_marker.y;
+
         if let Some(menu) = self.context_menu {
             vm.context_menu_open = true;
             vm.context_menu_x = menu.x;

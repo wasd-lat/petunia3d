@@ -422,9 +422,12 @@ pub(crate) fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoM
 /// O Path do Slint não tem dash nativo, então o padrão nasce aqui em Rust:
 /// pontos de 2px com 4px de intervalo ao longo do segmento base→mouse.
 /// A linha cresce/encolhe sozinha conforme o mouse se afasta/aproxima.
-pub(crate) fn dotted_link_commands(from: [f32; 2], to: [f32; 2]) -> String {
-    const DASH: f32 = 2.0;
-    const GAP: f32 = 4.0;
+pub(crate) fn dotted_line_with_spacing(
+    from: [f32; 2],
+    to: [f32; 2],
+    dash: f32,
+    gap: f32,
+) -> String {
     let dx = to[0] - from[0];
     let dy = to[1] - from[1];
     let length = dx.hypot(dy);
@@ -435,17 +438,23 @@ pub(crate) fn dotted_link_commands(from: [f32; 2], to: [f32; 2]) -> String {
     let mut commands = String::new();
     let mut cursor = 0.0;
     while cursor < length {
-        let end = (cursor + DASH).min(length);
-        commands.push_str(&format!(
+        let end = (cursor + dash).min(length);
+        use std::fmt::Write as _;
+        let _ = write!(
+            commands,
             "M {:.2} {:.2} L {:.2} {:.2} ",
             from[0] + ux * cursor,
             from[1] + uy * cursor,
             from[0] + ux * end,
             from[1] + uy * end,
-        ));
-        cursor = end + GAP;
+        );
+        cursor = end + gap;
     }
     commands
+}
+
+pub(crate) fn dotted_link_commands(from: [f32; 2], to: [f32; 2]) -> String {
+    dotted_line_with_spacing(from, to, 2.0, 4.0)
 }
 
 /// Active tool pivot-to-pointer or guide-line feedback cord (P3D-131).
@@ -497,6 +506,220 @@ pub(crate) fn compute_drag_link(
     };
 
     dotted_link_commands(base, target)
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AxisGuideModel {
+    pub visible: bool,
+    pub commands: String,
+    pub color: [u8; 3],
+}
+
+pub(crate) fn compute_axis_guide(state: &AppState, width: f32, height: f32) -> AxisGuideModel {
+    if width <= 1.0 || height <= 1.0 {
+        return AxisGuideModel::default();
+    }
+    let Some(modal) = state.modal.as_ref() else {
+        return AxisGuideModel::default();
+    };
+    let axis_idx = match modal.constraint {
+        petunia_core::ModalConstraint::Axis(i) => i.min(2),
+        _ => return AxisGuideModel::default(),
+    };
+
+    let dir = match axis_idx {
+        0 => glam::Vec3::X,
+        1 => glam::Vec3::Y,
+        _ => glam::Vec3::Z,
+    };
+    let color = match axis_idx {
+        0 => [229, 77, 66], // Red
+        1 => [70, 167, 88], // Green
+        _ => [62, 99, 221], // Blue
+    };
+
+    let camera = &state.session.camera;
+    let view_proj = camera.view_proj();
+    let pivot = modal.pivot;
+
+    // Project pivot to screen
+    let clip_p = view_proj * pivot.extend(1.0);
+    if clip_p.w <= 0.05 {
+        return AxisGuideModel::default();
+    }
+    let p_screen = [
+        (clip_p.x / clip_p.w * 0.5 + 0.5) * width,
+        (1.0 - (clip_p.y / clip_p.w * 0.5 + 0.5)) * height,
+    ];
+
+    // Project a point along the axis to find screen direction
+    let p_axis = pivot + dir * 5.0;
+    let clip_a = view_proj * p_axis.extend(1.0);
+    if clip_a.w <= 0.05 {
+        return AxisGuideModel::default();
+    }
+    let a_screen = [
+        (clip_a.x / clip_a.w * 0.5 + 0.5) * width,
+        (1.0 - (clip_a.y / clip_a.w * 0.5 + 0.5)) * height,
+    ];
+
+    let dx = a_screen[0] - p_screen[0];
+    let dy = a_screen[1] - p_screen[1];
+    let len = dx.hypot(dy);
+    if len < 0.5 {
+        return AxisGuideModel::default();
+    }
+    let (ux, uy) = (dx / len, dy / len);
+
+    // Compute infinite line spanning across the viewport
+    let max_dim = width.max(height) * 2.0;
+    let start = [p_screen[0] - ux * max_dim, p_screen[1] - uy * max_dim];
+    let end = [p_screen[0] + ux * max_dim, p_screen[1] + uy * max_dim];
+
+    let commands = dotted_line_with_spacing(start, end, 6.0, 4.0);
+
+    AxisGuideModel {
+        visible: true,
+        commands,
+        color,
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DimensionAnnotationModel {
+    pub visible: bool,
+    pub commands: String,
+    pub text: String,
+    pub label_x: f32,
+    pub label_y: f32,
+}
+
+pub(crate) fn compute_dimension_annotation(
+    state: &AppState,
+    width: f32,
+    height: f32,
+) -> DimensionAnnotationModel {
+    if width <= 1.0 || height <= 1.0 {
+        return DimensionAnnotationModel::default();
+    }
+    let Some(modal) = state.modal.as_ref() else {
+        return DimensionAnnotationModel::default();
+    };
+
+    let delta_val = match modal.kind {
+        petunia_core::ModalKind::Move => modal.components.length(),
+        petunia_core::ModalKind::Scale => (modal.value - 1.0).abs(),
+        petunia_core::ModalKind::Rotate => modal.value.abs(),
+        _ => modal.value.abs(),
+    };
+
+    if delta_val < 0.005 {
+        return DimensionAnnotationModel::default();
+    }
+
+    let view_proj = state.session.camera.view_proj();
+    let p_start = modal.pivot;
+    let p_end = modal.pivot + modal.components;
+
+    let clip_start = view_proj * p_start.extend(1.0);
+    let clip_end = view_proj * p_end.extend(1.0);
+    if clip_start.w <= 0.05 || clip_end.w <= 0.05 {
+        return DimensionAnnotationModel::default();
+    }
+
+    let a = [
+        (clip_start.x / clip_start.w * 0.5 + 0.5) * width,
+        (1.0 - (clip_start.y / clip_start.w * 0.5 + 0.5)) * height,
+    ];
+    let b = [
+        (clip_end.x / clip_end.w * 0.5 + 0.5) * width,
+        (1.0 - (clip_end.y / clip_end.w * 0.5 + 0.5)) * height,
+    ];
+
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    let screen_dist = dx.hypot(dy);
+    if screen_dist < 10.0 {
+        return DimensionAnnotationModel::default();
+    }
+
+    let (ux, uy) = (dx / screen_dist, dy / screen_dist);
+    let (nx, ny) = (-uy, ux);
+
+    let mut commands = String::new();
+    use std::fmt::Write as _;
+    let _ = write!(
+        commands,
+        "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} ",
+        a[0] - nx * 6.0,
+        a[1] - ny * 6.0,
+        a[0] + nx * 6.0,
+        a[1] + ny * 6.0,
+        b[0] - nx * 6.0,
+        b[1] - ny * 6.0,
+        b[0] + nx * 6.0,
+        b[1] + ny * 6.0,
+        a[0],
+        a[1],
+        b[0],
+        b[1],
+    );
+
+    let text = match modal.kind {
+        petunia_core::ModalKind::Move => format!("{:.2} m", delta_val),
+        petunia_core::ModalKind::Rotate => format!("{:.1}°", delta_val),
+        petunia_core::ModalKind::Scale => format!("{:.2}×", modal.value),
+        _ => format!("{:.2}", delta_val),
+    };
+
+    let label_x = (a[0] + b[0]) * 0.5 + nx * 14.0;
+    let label_y = (a[1] + b[1]) * 0.5 + ny * 14.0;
+
+    DimensionAnnotationModel {
+        visible: true,
+        commands,
+        text,
+        label_x,
+        label_y,
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SnapMarkerModel {
+    pub visible: bool,
+    pub x: f32,
+    pub y: f32,
+}
+
+pub(crate) fn compute_snap_marker(state: &AppState, width: f32, height: f32) -> SnapMarkerModel {
+    if width <= 1.0 || height <= 1.0 {
+        return SnapMarkerModel::default();
+    }
+    let Some(fb) = state.current_tool_feedback() else {
+        return SnapMarkerModel::default();
+    };
+    if !fb.is_snapped {
+        return SnapMarkerModel::default();
+    }
+
+    let view_proj = state.session.camera.view_proj();
+    let clip = view_proj * fb.current.extend(1.0);
+    if clip.w <= 0.05 {
+        return SnapMarkerModel::default();
+    }
+
+    let x = (clip.x / clip.w * 0.5 + 0.5) * width;
+    let y = (1.0 - (clip.y / clip.w * 0.5 + 0.5)) * height;
+
+    if x >= -20.0 && x <= width + 20.0 && y >= -20.0 && y <= height + 20.0 {
+        SnapMarkerModel {
+            visible: true,
+            x,
+            y,
+        }
+    } else {
+        SnapMarkerModel::default()
+    }
 }
 
 /// Resumo legível da seleção (Object Info do Blender): o que está

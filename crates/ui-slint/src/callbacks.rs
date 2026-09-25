@@ -133,6 +133,27 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
         link_active,
     );
     window.set_drag_link_commands(drag_link.as_str().into());
+
+    let axis_guide = compute_axis_guide(&bridge.state, width, height);
+    window.set_axis_guide_visible(axis_guide.visible);
+    window.set_axis_guide_commands(axis_guide.commands.as_str().into());
+    window.set_axis_guide_color(slint::Color::from_rgb_u8(
+        axis_guide.color[0],
+        axis_guide.color[1],
+        axis_guide.color[2],
+    ));
+
+    let dimension = compute_dimension_annotation(&bridge.state, width, height);
+    window.set_dimension_visible(dimension.visible);
+    window.set_dimension_commands(dimension.commands.as_str().into());
+    window.set_dimension_text(dimension.text.as_str().into());
+    window.set_dimension_x(dimension.label_x);
+    window.set_dimension_y(dimension.label_y);
+
+    let snap_marker = compute_snap_marker(&bridge.state, width, height);
+    window.set_snap_marker_visible(snap_marker.visible);
+    window.set_snap_marker_x(snap_marker.x);
+    window.set_snap_marker_y(snap_marker.y);
 }
 
 pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
@@ -559,6 +580,28 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_tool_modal_step(vm.tool_modal_step);
     window.set_tool_modal_min(vm.tool_modal_min);
     window.set_tool_modal_max(vm.tool_modal_max);
+    window.set_hud_pill_visible(vm.hud_pill_visible);
+    window.set_hud_pill_x(vm.hud_pill_x);
+    window.set_hud_pill_y(vm.hud_pill_y);
+    window.set_hud_pill_title(vm.hud_pill_title.as_str().into());
+    window.set_hud_pill_value(vm.hud_pill_value.as_str().into());
+    window.set_hud_pill_badge(vm.hud_pill_badge.as_str().into());
+    window.set_hud_pill_hint(vm.hud_pill_hint.as_str().into());
+    window.set_axis_guide_visible(vm.axis_guide_visible);
+    window.set_axis_guide_commands(vm.axis_guide_commands.as_str().into());
+    window.set_axis_guide_color(slint::Color::from_rgb_u8(
+        vm.axis_guide_color[0],
+        vm.axis_guide_color[1],
+        vm.axis_guide_color[2],
+    ));
+    window.set_dimension_visible(vm.dimension_visible);
+    window.set_dimension_commands(vm.dimension_commands.as_str().into());
+    window.set_dimension_text(vm.dimension_text.as_str().into());
+    window.set_dimension_x(vm.dimension_x);
+    window.set_dimension_y(vm.dimension_y);
+    window.set_snap_marker_visible(vm.snap_marker_visible);
+    window.set_snap_marker_x(vm.snap_marker_x);
+    window.set_snap_marker_y(vm.snap_marker_y);
 
     let material_slots: Vec<slint::SharedString> = vm
         .material_slots

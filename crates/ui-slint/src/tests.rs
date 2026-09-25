@@ -5157,3 +5157,115 @@ fn test_edit_pivot_mode_and_shortcut() {
     let orig = custom_origin.unwrap();
     assert_eq!([pivot.x, pivot.y, pivot.z], orig);
 }
+
+#[test]
+fn test_axis_guide_projection_and_colors() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    let parse_tip = |commands: &str| -> [f32; 2] {
+        let numbers: Vec<f32> = commands
+            .split(|c: char| !c.is_numeric() && c != '.' && c != '-')
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        [numbers[2], numbers[3]]
+    };
+
+    // Sem modal ativo: guia invisível
+    let guide_idle = compute_axis_guide(&bridge.state, 800.0, 600.0);
+    assert!(!guide_idle.visible);
+    assert!(guide_idle.commands.is_empty());
+
+    // Inicia Move modal no eixo X
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+    let gizmo = bridge.view_model().gizmo;
+    let x_tip = parse_tip(&gizmo.x_commands);
+    assert!(bridge.begin_gizmo_drag(x_tip[0], x_tip[1]));
+
+    // Com modal ativo no eixo X (índice 0): guia vermelha e com comandos SVG
+    let guide_x = compute_axis_guide(&bridge.state, 800.0, 600.0);
+    assert!(guide_x.visible);
+    assert_eq!(guide_x.color, [229, 77, 66]); // Vermelho do eixo X
+    assert!(guide_x.commands.starts_with("M "));
+    assert!(guide_x.commands.contains(" L "));
+
+    assert!(bridge.end_gizmo_drag());
+
+    // Inicia Move modal no eixo Y
+    let y_tip = parse_tip(&gizmo.y_commands);
+    assert!(bridge.begin_gizmo_drag(y_tip[0], y_tip[1]));
+    let guide_y = compute_axis_guide(&bridge.state, 800.0, 600.0);
+    assert!(guide_y.visible);
+    assert_eq!(guide_y.color, [70, 167, 88]); // Verde do eixo Y
+
+    assert!(bridge.end_gizmo_drag());
+
+    // Inicia Move modal no eixo Z
+    let z_tip = parse_tip(&gizmo.z_commands);
+    assert!(bridge.begin_gizmo_drag(z_tip[0], z_tip[1]));
+    let guide_z = compute_axis_guide(&bridge.state, 800.0, 600.0);
+    assert!(guide_z.visible);
+    assert_eq!(guide_z.color, [62, 99, 221]); // Azul do eixo Z
+
+    assert!(bridge.end_gizmo_drag());
+}
+
+#[test]
+fn test_dimension_annotation_blueprint_and_hud_pill() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // Em repouso: cota e hud pill invisíveis
+    let dim_idle = compute_dimension_annotation(&bridge.state, 800.0, 600.0);
+    assert!(!dim_idle.visible);
+    assert!(!bridge.view_model().hud_pill_visible);
+
+    // Inicia Move arrastando pelo centro
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+    let gizmo = bridge.view_model().gizmo;
+    assert!(bridge.begin_gizmo_drag(gizmo.origin_x, gizmo.origin_y));
+
+    // Atualiza o arrasto com deslocamento significativo
+    assert!(bridge.update_viewport_transform(gizmo.origin_x + 80.0, gizmo.origin_y + 40.0));
+
+    // Verifica cota blueprint (Fase 4)
+    let dim = compute_dimension_annotation(&bridge.state, 800.0, 600.0);
+    assert!(dim.visible);
+    assert!(dim.text.contains("m"));
+    assert!(dim.commands.contains("M ") && dim.commands.contains(" L "));
+    assert!(dim.label_x.is_finite() && dim.label_y.is_finite());
+
+    // Verifica Floating HUD Pill no view model
+    let vm = bridge.view_model();
+    assert!(vm.hud_pill_visible);
+    assert_eq!(vm.hud_pill_title, "Move");
+    assert!(!vm.hud_pill_value.is_empty());
+    assert!(vm.hud_pill_x > 0.0 && vm.hud_pill_y > 0.0);
+
+    // Finaliza arrasto: cota e hud pill somem
+    assert!(bridge.end_gizmo_drag());
+    assert!(!compute_dimension_annotation(&bridge.state, 800.0, 600.0).visible);
+    assert!(!bridge.view_model().hud_pill_visible);
+}
+
+#[test]
+fn test_magnetic_snap_marker_projection() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // Sem snap ativado: marcador invisível
+    assert!(!bridge.state.snap_enabled);
+    let marker_idle = compute_snap_marker(&bridge.state, 800.0, 600.0);
+    assert!(!marker_idle.visible);
+
+    // Ativa snap e inicia transformação
+    bridge.state.snap_enabled = true;
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+    let gizmo = bridge.view_model().gizmo;
+    assert!(bridge.begin_gizmo_drag(gizmo.origin_x, gizmo.origin_y));
+
+    // Com snap ativo e modal em andamento: marcador é projetado
+    let marker_active = compute_snap_marker(&bridge.state, 800.0, 600.0);
+    assert!(marker_active.visible);
+    assert!(marker_active.x >= 0.0 && marker_active.x <= 800.0);
+    assert!(marker_active.y >= 0.0 && marker_active.y <= 600.0);
+
+    assert!(bridge.end_gizmo_drag());
+}
