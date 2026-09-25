@@ -229,12 +229,19 @@ pub(crate) fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoM
             origin[0] + direction[0] * ROD_LENGTH,
             origin[1] + direction[1] * ROD_LENGTH,
         ];
+        let label_pos = [
+            origin[0] + direction[0] * (ROD_LENGTH + 14.0),
+            origin[1] + direction[1] * (ROD_LENGTH + 14.0),
+        ];
         if axis == glam::Vec3::X {
             model.x_end = end;
+            model.x_label = label_pos;
         } else if axis == glam::Vec3::Y {
             model.y_end = end;
+            model.y_label = label_pos;
         } else if axis == glam::Vec3::Z {
             model.z_end = end;
+            model.z_label = label_pos;
         }
 
         if state.session.tools.active_tool == "rotate" {
@@ -578,6 +585,9 @@ pub struct AxisGuideModel {
     pub visible: bool,
     pub commands: String,
     pub color: [u8; 3],
+    pub label: String,
+    pub label_x: f32,
+    pub label_y: f32,
 }
 
 pub(crate) fn compute_axis_guide(state: &AppState, width: f32, height: f32) -> AxisGuideModel {
@@ -643,11 +653,83 @@ pub(crate) fn compute_axis_guide(state: &AppState, width: f32, height: f32) -> A
 
     let commands = dotted_line_with_spacing(start, end, 6.0, 4.0);
 
+    let label = match axis_idx {
+        0 => "X".to_string(),
+        1 => "Y".to_string(),
+        _ => "Z".to_string(),
+    };
+    let badge_dist = 64.0;
+    let label_x = p_screen[0] + ux * badge_dist;
+    let label_y = p_screen[1] + uy * badge_dist;
+
     AxisGuideModel {
         visible: true,
         commands,
         color,
+        label,
+        label_x,
+        label_y,
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorldAxisLabelModel {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+    pub color: [u8; 3],
+}
+
+pub(crate) fn compute_world_axis_labels(
+    state: &AppState,
+    width: f32,
+    height: f32,
+) -> Vec<WorldAxisLabelModel> {
+    if !state.ui.colorblind_axes
+        || width <= 1.0
+        || height <= 1.0
+        || state.workspace != Workspace::Model
+    {
+        return Vec::new();
+    }
+
+    let view_proj = state.session.camera.view_proj();
+    let project = |pos: glam::Vec3| -> Option<[f32; 2]> {
+        let clip = view_proj * pos.extend(1.0);
+        if clip.w <= 0.05 {
+            return None;
+        }
+        let inv_w = 1.0 / clip.w;
+        let sx = (clip.x * inv_w * 0.5 + 0.5) * width;
+        let sy = (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height;
+        if sx >= 24.0 && sx <= width - 24.0 && sy >= 24.0 && sy <= height - 24.0 {
+            Some([sx, sy])
+        } else {
+            None
+        }
+    };
+
+    let mut labels = Vec::new();
+    const EXTENT: f32 = 8.0;
+    let candidates = [
+        (glam::Vec3::new(EXTENT, 0.0, 0.0), "+X", [229, 77, 66]),
+        (glam::Vec3::new(-EXTENT, 0.0, 0.0), "-X", [229, 77, 66]),
+        (glam::Vec3::new(0.0, 0.0, EXTENT), "+Z", [62, 99, 221]),
+        (glam::Vec3::new(0.0, 0.0, -EXTENT), "-Z", [62, 99, 221]),
+    ];
+
+    for (pos, text, color) in candidates {
+        if let Some([x, y]) = project(pos) {
+            labels.push(WorldAxisLabelModel {
+                text: text.to_string(),
+                x,
+                y,
+                color,
+            });
+        }
+    }
+
+    labels
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

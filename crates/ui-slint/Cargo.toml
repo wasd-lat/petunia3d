@@ -9,6 +9,7 @@ build = "build.rs"
 [dependencies]
 petunia_config = { workspace = true }
 petunia_core = { workspace = true }
+petunia_mesh = { workspace = true }
 petunia_project = { workspace = true }
 petunia_render = { workspace = true }
 petunia_render_wgpu = { path = "../render-wgpu" }

@@ -189,6 +189,10 @@ profile_presets = "2D Profile Presets"
 profile_add_rect = "Add Rect"
 profile_add_circle = "Add Circle"
 profile_canvas_hint = "Click on canvas to plot vertices or insert a 2D primitive."
+profile_wall_thickness = "Wall Thickness"
+profile_smooth_curves = "Smooth Curves"
+profile_sharp_corners = "Sharp Corners"
+profile_smoothness = "Smoothness"
 
 [pivot]
 median = "Median Point"

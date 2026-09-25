@@ -57,6 +57,10 @@ pub fn profile_add_point(state: &mut AppState, nx: f32, ny: f32) {
         return;
     }
     state.profile.points.push([x, y]);
+    state
+        .profile
+        .nodes
+        .push(petunia_mesh::curve::BezierNode::new([x, y]));
     state.mark_dirty();
 }
 
@@ -71,16 +75,18 @@ pub fn profile_capture_frame(state: &mut AppState) {
     state.profile.origin = origin;
     state.profile.normal = normal;
     state.profile.points.clear();
+    state.profile.nodes.clear();
     state.profile.closed = false;
 }
 
 pub fn generate_extrude(state: &mut AppState) {
     let p: ProfileState = state.profile.clone();
-    if p.points.len() < 3 || !p.closed {
+    let effective = p.effective_points();
+    if effective.len() < 3 || !p.closed {
         state.set_status(state.t("profile.need_closed"));
         return;
     }
-    match Mesh::from_polygon(&p.points, p.depth.max(0.05)) {
+    match Mesh::from_polygon(&effective, p.depth.max(0.05)) {
         Ok(mut m) => {
             // leva do frame XY/Z-local para o mundo
             let r = glam::Vec3::from(p.right);
@@ -104,7 +110,8 @@ pub fn generate_extrude(state: &mut AppState) {
 
 pub fn generate_revolve(state: &mut AppState) {
     let p = state.profile.clone();
-    if p.points.len() < 2 {
+    let effective = p.effective_points();
+    if effective.len() < 2 {
         state.set_status(state.t("profile.need_points"));
         return;
     }
@@ -114,7 +121,7 @@ pub fn generate_revolve(state: &mut AppState) {
     } else {
         p.revolve_angle
     };
-    match Mesh::revolve_angle(&p.points, p.revolve_segments.max(3), angle) {
+    match Mesh::revolve_angle(&effective, p.revolve_segments.max(3), angle) {
         Ok(mut m) => {
             let r = glam::Vec3::from(p.right);
             let u = glam::Vec3::from(p.up);
@@ -154,6 +161,12 @@ pub fn profile_set_rectangle(state: &mut AppState, width: f32, height: f32) {
         [w * 0.5, h * 0.5],
         [-w * 0.5, h * 0.5],
     ];
+    state.profile.nodes = state
+        .profile
+        .points
+        .iter()
+        .map(|&p| petunia_mesh::curve::BezierNode::new(p))
+        .collect();
     state.profile.closed = true;
     state.session.tools.active_tool = "draw_profile".to_string();
     state.set_status(format!(
@@ -177,13 +190,60 @@ pub fn profile_set_circle(state: &mut AppState, radius: f32, segments: usize) {
         let angle = std::f32::consts::TAU * (i as f32) / (segs as f32);
         points.push([r * angle.cos(), r * angle.sin()]);
     }
-    state.profile.points = points;
+    state.profile.points = points.clone();
+    state.profile.nodes = points
+        .into_iter()
+        .map(petunia_mesh::curve::BezierNode::new)
+        .collect();
     state.profile.closed = true;
     state.session.tools.active_tool = "draw_profile".to_string();
     state.set_status(format!(
         "Profile 2D Circle created (r={:.1}, {} segs): choose Extrude or Revolve",
         r, segs
     ));
+    state.mark_dirty();
+}
+
+/// Converte todos os nós do perfil atual em curvas Bézier suaves (G1/C1 contínuas).
+pub fn profile_smooth_curves(state: &mut AppState) {
+    if state.profile.nodes.is_empty() && !state.profile.points.is_empty() {
+        state.profile.nodes = state
+            .profile
+            .points
+            .iter()
+            .map(|&p| petunia_mesh::curve::BezierNode::new(p))
+            .collect();
+    }
+    let mut path = petunia_mesh::curve::BezierPath {
+        nodes: state.profile.nodes.clone(),
+        closed: state.profile.closed,
+    };
+    path.auto_smooth(0.25);
+    state.profile.nodes = path.nodes;
+    state.mark_dirty();
+    state.set_status("Profile curves smoothed (Cubic Bézier)".to_string());
+}
+
+/// Converte todos os nós do perfil atual em cantos retos (Sharp).
+pub fn profile_clear_curves(state: &mut AppState) {
+    for node in &mut state.profile.nodes {
+        node.handle_in = None;
+        node.handle_out = None;
+        node.kind = petunia_mesh::curve::BezierNodeKind::Sharp;
+    }
+    state.mark_dirty();
+    state.set_status("Profile corners sharpened".to_string());
+}
+
+/// Ajusta a espessura de parede (Wall Thickness) para perfis ocos.
+pub fn profile_set_wall_thickness(state: &mut AppState, thickness: f32) {
+    state.profile.wall_thickness = thickness.max(0.0);
+    state.mark_dirty();
+}
+
+/// Ajusta a tolerância de suavização de tesselação das curvas Bézier.
+pub fn profile_set_curve_smoothness(state: &mut AppState, smoothness: f32) {
+    state.profile.curve_smoothness = smoothness.clamp(0.005, 0.2);
     state.mark_dirty();
 }
 

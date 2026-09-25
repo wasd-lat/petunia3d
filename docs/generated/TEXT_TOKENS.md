@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **765**.
+Total de chaves de localização cadastradas: **769**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -690,6 +690,10 @@ Total de chaves de localização cadastradas: **765**.
 | `ui.profile_points` | Points | Pontos |
 | `ui.profile_presets` | 2D Profile Presets | Presets de perfil 2D |
 | `ui.profile_revolve` | Revolve | Revolve |
+| `ui.profile_sharp_corners` | Sharp Corners | Cantos Retos |
+| `ui.profile_smooth_curves` | Smooth Curves | Suavizar Curvas |
+| `ui.profile_smoothness` | Smoothness | Suavização |
+| `ui.profile_wall_thickness` | Wall Thickness | Espessura de Parede |
 | `ui.project_asset_library` | Project Asset Library | Biblioteca de Assets do Projeto |
 | `ui.properties` | Properties | Propriedades |
 | `ui.push_pull_hint` | Drag vertically or enter a distance to move selected faces without creating side walls. | Arraste verticalmente ou informe a distância para mover as faces selecionadas sem criar paredes. |

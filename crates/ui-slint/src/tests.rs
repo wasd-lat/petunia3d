@@ -5409,7 +5409,11 @@ fn test_colorblind_gizmo_axis_endpoints() {
     assert!(gizmo.origin_x > 0.0 && gizmo.origin_y > 0.0);
 
     // As coordenadas de ponta dos eixos devem ser válidas e distintas da origem
-    for (label, end) in [("X", gizmo.x_end), ("Y", gizmo.y_end), ("Z", gizmo.z_end)] {
+    for (label, end, lbl_pos) in [
+        ("X", gizmo.x_end, gizmo.x_label),
+        ("Y", gizmo.y_end, gizmo.y_label),
+        ("Z", gizmo.z_end, gizmo.z_label),
+    ] {
         assert!(end[0].is_finite(), "Endpoint {label} x is not finite");
         assert!(end[1].is_finite(), "Endpoint {label} y is not finite");
         let dist = ((end[0] - gizmo.origin_x).powi(2) + (end[1] - gizmo.origin_y).powi(2)).sqrt();
@@ -5417,6 +5421,88 @@ fn test_colorblind_gizmo_axis_endpoints() {
             dist > 10.0,
             "Endpoint {label} está muito próximo da origem do gizmo (dist={dist})"
         );
+
+        // Os rótulos de acessibilidade não-cromática ficam ligeiramente além da ponta da haste
+        assert!(lbl_pos[0].is_finite(), "Label {label} x is not finite");
+        assert!(lbl_pos[1].is_finite(), "Label {label} y is not finite");
+        let lbl_dist =
+            ((lbl_pos[0] - gizmo.origin_x).powi(2) + (lbl_pos[1] - gizmo.origin_y).powi(2)).sqrt();
+        assert!(
+            lbl_dist > dist,
+            "Rótulo {label} deve ficar posicionado além da ponta da haste do gizmo (lbl_dist={lbl_dist}, end_dist={dist})"
+        );
+    }
+}
+
+#[test]
+fn test_axis_guide_colorblind_labels() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.apply(UiIntent::SetActiveTool("move".to_string()));
+
+    bridge
+        .state
+        .begin_modal(petunia_core::ModalKind::Move)
+        .unwrap();
+
+    // Restrição ao eixo X
+    bridge
+        .state
+        .set_modal_constraint(petunia_core::ModalConstraint::Axis(0))
+        .unwrap();
+    let vm = bridge.view_model();
+    assert!(vm.axis_guide_visible);
+    assert_eq!(vm.axis_guide_label, "X");
+    assert!(vm.axis_guide_label_x.is_finite());
+    assert!(vm.axis_guide_label_y.is_finite());
+
+    // Restrição ao eixo Y
+    bridge
+        .state
+        .set_modal_constraint(petunia_core::ModalConstraint::Axis(1))
+        .unwrap();
+    let vm = bridge.view_model();
+    assert_eq!(vm.axis_guide_label, "Y");
+
+    // Restrição ao eixo Z
+    bridge
+        .state
+        .set_modal_constraint(petunia_core::ModalConstraint::Axis(2))
+        .unwrap();
+    let vm = bridge.view_model();
+    assert_eq!(vm.axis_guide_label, "Z");
+}
+
+#[test]
+fn test_world_axis_labels_projection() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+
+    // Quando colorblind_axes = false (padrão), não projeta rótulos de eixos de grid
+    assert!(!bridge.view_model().colorblind_axes);
+    assert!(bridge.view_model().world_axis_labels.is_empty());
+
+    // Ativa diferenciação não-cromática
+    bridge.apply(UiIntent::SetColorblindAxes(true));
+    let vm = bridge.view_model();
+    assert!(vm.colorblind_axes);
+    assert!(!vm.world_axis_labels.is_empty());
+
+    let texts: Vec<&str> = vm
+        .world_axis_labels
+        .iter()
+        .map(|l| l.text.as_str())
+        .collect();
+    assert!(
+        texts.contains(&"+X")
+            || texts.contains(&"-X")
+            || texts.contains(&"+Z")
+            || texts.contains(&"-Z")
+    );
+
+    for label in &vm.world_axis_labels {
+        assert!(label.x >= 0.0 && label.x <= 800.0);
+        assert!(label.y >= 0.0 && label.y <= 600.0);
     }
 }
 
@@ -5813,6 +5899,49 @@ fn test_profile_revolve_custom_angle() {
 }
 
 #[test]
+fn test_profile_bezier_smoothing_and_wall_thickness() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetActiveTool("draw_profile".to_string()));
+
+    // Cria retângulo 2D
+    bridge.add_profile_rectangle(4.0, 4.0);
+    let vm = bridge.view_model();
+    assert_eq!(vm.profile_point_count, 4);
+    assert!(vm.profile_closed);
+    assert!(!vm.profile_has_curves);
+
+    // Ajusta espessura de parede (perfil oco)
+    assert!(bridge.set_profile_wall_thickness(0.5));
+    assert_eq!(bridge.state.profile.wall_thickness, 0.5);
+
+    // Ativa suavização Bézier
+    assert!(bridge.profile_smooth_curves());
+    let vm_smoothed = bridge.view_model();
+    assert!(vm_smoothed.profile_has_curves);
+
+    // Pontos efetivos devem conter laço externo e laço interno
+    let effective = bridge.state.profile.effective_points();
+    assert!(effective.len() > 8);
+
+    // Gera extrusão com sucesso
+    let initial_count = bridge.state.project.assets.len();
+    assert!(bridge.generate_profile_extrude());
+    assert_eq!(bridge.state.project.assets.len(), initial_count + 1);
+
+    let active_mesh = bridge.state.project.active_mesh().unwrap();
+    assert!(!active_mesh.verts.is_empty());
+    assert!(!active_mesh.faces.is_empty());
+
+    // Limpeza de curvas
+    bridge.apply(UiIntent::SetActiveTool("draw_profile".to_string()));
+    bridge.add_profile_rectangle(2.0, 2.0);
+    bridge.profile_smooth_curves();
+    assert!(bridge.view_model().profile_has_curves);
+    bridge.profile_clear_curves();
+    assert!(!bridge.view_model().profile_has_curves);
+}
+
+#[test]
 fn test_boolean_op_auto_operand_with_two_objects() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     // Initial scene has 1 cube
@@ -6074,4 +6203,29 @@ fn test_protractor_overlay_during_rotate_modal() {
     bridge.state.cancel_modal();
     let protractor_after = projection::compute_protractor(&bridge.state, 800.0, 600.0, None);
     assert!(!protractor_after.visible);
+}
+
+#[test]
+fn shortcuts_model_reflects_custom_keybinds() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // Padrão canônico inicial
+    let vm1 = bridge.view_model();
+    assert_eq!(vm1.shortcuts.model_move, "G");
+    assert_eq!(vm1.shortcuts.undo, "Ctrl+Z");
+    assert_eq!(vm1.shortcuts.model_extrude, "E");
+
+    // Customização de atalho em tempo de execução (ex: usuário altera no menu Settings)
+    let new_binding = petunia_config::keybinds::parse_binding("W").expect("binding valido");
+    bridge
+        .state
+        .ui
+        .keybinds
+        .set_binding("model.move", new_binding);
+
+    // Imediatamente refletido no view_model e repassado para as tooltips
+    let vm2 = bridge.view_model();
+    assert_eq!(vm2.shortcuts.model_move, "W");
+    assert_eq!(vm2.shortcuts.undo, "Ctrl+Z");
+    assert_eq!(vm2.shortcuts.model_extrude, "E");
 }

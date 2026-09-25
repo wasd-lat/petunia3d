@@ -96,6 +96,63 @@ export struct WorldAxisTag {
     tint: color,
 }
 
+export struct ShortcutsEntry {
+    undo: string,
+    redo: string,
+    save: string,
+    open: string,
+    search: string,
+    settings: string,
+    parts: string,
+    model-select: string,
+    model-lasso: string,
+    model-cursor: string,
+    model-measure: string,
+    model-move: string,
+    model-rotate: string,
+    model-scale: string,
+    model-transform: string,
+    model-add-primitive: string,
+    model-duplicate: string,
+    model-extrude: string,
+    model-push-pull: string,
+    model-inset: string,
+    model-bevel: string,
+    model-knife: string,
+    model-loop-cut: string,
+    model-profile: string,
+    model-subdivide: string,
+    model-merge: string,
+    model-slice: string,
+    model-delete: string,
+    select-point: string,
+    select-edge: string,
+    select-face: string,
+    select-object: string,
+    view-proj: string,
+    view-frame: string,
+    view-reset: string,
+    view-wireframe: string,
+    view-solid: string,
+    view-material: string,
+    view-lit: string,
+    view-xray: string,
+    view-pivot: string,
+    view-snap: string,
+    view-prop: string,
+    paint-brush: string,
+    paint-airbrush: string,
+    paint-eraser: string,
+    paint-picker: string,
+    paint-fill: string,
+    paint-line: string,
+    paint-rectangle: string,
+    uv-select: string,
+    uv-unwrap: string,
+    uv-pack: string,
+    uv-project-ref: string,
+}
+
 /// Tooltip rico moderno (Blender / VS Code / Figma style):
 /// Cabeçalho com título em destaque e badge kbd estilizado para o atalho,
 /// corpo com micro-explicação em texto secundário e rodapé de dicas/gestos.
@@ -2883,6 +2940,10 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> label-profile-add-rect: "";
     in-out property <string> label-profile-add-circle: "";
     in-out property <string> label-profile-canvas-hint: "";
+    in-out property <string> label-profile-wall-thickness: "";
+    in-out property <string> label-profile-smooth-curves: "";
+    in-out property <string> label-profile-sharp-corners: "";
+    in-out property <string> label-profile-smoothness: "";
     in-out property <string> hint-model-loop-cut: "";
     in-out property <string> hint-model-slice: "";
     in-out property <string> hint-model-push-pull: "";
@@ -2962,6 +3023,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> profile-closed: false;
     in-out property <string> profile-preview-commands: "";
     in-out property <float> profile-depth: 1.0;
+    in-out property <float> profile-wall-thickness: 0.0;
+    in-out property <float> profile-smoothness: 0.02;
+    in-out property <bool> profile-has-curves: false;
     in-out property <bool> pivot-menu-open: false;
     in-out property <string> tool-activation: "drag";
     in-out property <bool> keyboard-tool-modal-active: false;
@@ -2998,6 +3062,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> slice-trim: false;
     in-out property <bool> bevel-clamp-overlap: true;
     in-out property <bool> bevel-affect-vertices: false;
+    in-out property <ShortcutsEntry> shortcuts;
 
     callback workspace-changed(string);
     callback save-requested;
@@ -3122,6 +3187,10 @@ export component PetuniaSlintShell inherits Window {
     callback profile-generate;
     callback profile-revolve;
     callback profile-depth-set(string) -> bool;
+    callback profile-wall-thickness-set(string) -> bool;
+    callback profile-smoothness-set(string) -> bool;
+    callback profile-smooth-curves();
+    callback profile-clear-curves();
     callback primitive-param-float(string, float);
     callback primitive-param-bool(string, bool);
     callback primitive-confirm;
@@ -3376,7 +3445,7 @@ export component PetuniaSlintShell inherits Window {
                         TopAction {
                             icon: IconSet.Undo;
                             semantic-label: "Undo";
-                            shortcut: "Ctrl+Z";
+                            shortcut: root.shortcuts.undo;
                             description: "Revert the most recent modeling or editing operation";
                             enabled: root.can-undo;
                             clicked => { root.undo-requested(); }
@@ -3384,7 +3453,7 @@ export component PetuniaSlintShell inherits Window {
                         TopAction {
                             icon: IconSet.Redo;
                             semantic-label: "Redo";
-                            shortcut: "Ctrl+Shift+Z";
+                            shortcut: root.shortcuts.redo;
                             description: "Reapply the most recently undone operation";
                             enabled: root.can-redo;
                             clicked => { root.redo-requested(); }
@@ -3395,35 +3464,35 @@ export component PetuniaSlintShell inherits Window {
                         TopAction {
                             icon: IconSet.PanelLeft;
                             semantic-label: "Parts";
-                            shortcut: "F4";
+                            shortcut: root.shortcuts.parts;
                             description: "Toggle the scene parts outliner and hierarchy list";
                             clicked => { root.scene-requested(); }
                         }
                         TopAction {
                             icon: IconSet.FolderOpen;
                             semantic-label: "Open project";
-                            shortcut: "Ctrl+O";
+                            shortcut: root.shortcuts.open;
                             description: "Open an existing project from disk (.p3d)";
                             clicked => { root.open-project-requested(); }
                         }
                         TopAction {
                             icon: IconSet.Save;
                             semantic-label: "Save project";
-                            shortcut: "Ctrl+S";
+                            shortcut: root.shortcuts.save;
                             description: "Save the current project and scene to disk";
                             clicked => { root.save-requested(); }
                         }
                         TopAction {
                             icon: IconSet.Search;
                             semantic-label: "Command search";
-                            shortcut: "Ctrl+P";
+                            shortcut: root.shortcuts.search;
                             description: "Quick search and execute any command, tool or setting";
                             clicked => { root.search-requested(); }
                         }
                         TopAction {
                             icon: IconSet.Settings;
                             semantic-label: "Settings";
-                            shortcut: "Ctrl+,";
+                            shortcut: root.shortcuts.settings;
                             description: "Open application preferences, keymaps and theme settings";
                             clicked => { root.settings-requested(); }
                         }
@@ -3466,7 +3535,7 @@ export component PetuniaSlintShell inherits Window {
                                     ToolButton {
                                         icon: IconSet.MousePointer2;
                                         semantic-label: root.label-model-select;
-                                        shortcut: "W";
+                                        shortcut: root.shortcuts.model-select;
                                         description: "Box / click selection of scene points, edges and faces";
                                         active: active-tool == "select" || active-tool == "box_select";
                                         clicked => { root.active-tool-changed("select"); }
@@ -3474,7 +3543,7 @@ export component PetuniaSlintShell inherits Window {
                                     ToolButton {
                                         icon: IconSet.Spline;
                                         semantic-label: root.label-model-lasso;
-                                        shortcut: "Shift+Space";
+                                        shortcut: root.shortcuts.model-lasso;
                                         description: "Freehand polygon loop lasso selection";
                                         active: active-tool == "lasso_select";
                                         clicked => { root.command-executed("model.tool_lasso"); }
@@ -3486,7 +3555,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Crosshair;
                                 semantic-label: "3D Cursor";
-                                shortcut: "Shift+RMB";
+                                shortcut: root.shortcuts.model-cursor;
                                 description: "Place 3D cursor as origin for new objects and transformations";
                                 active: active-tool == "cursor" || active-tool == "cursor_3d";
                                 clicked => { root.command-executed("model.tool_cursor"); }
@@ -3496,7 +3565,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.ArrowUpDown;
                                 semantic-label: "Measure";
-                                shortcut: "M";
+                                shortcut: root.shortcuts.model-measure;
                                 description: "Measure distances and angles between geometry elements in 3D";
                                 active: active-tool == "measure";
                                 clicked => { root.command-executed("model.measure"); }
@@ -3510,7 +3579,7 @@ export component PetuniaSlintShell inherits Window {
                             ViewportSvgButton {
                                 glyph: @image-url("icons/tool-position.svg");
                                 label: root.label-model-position;
-                                shortcut: "G";
+                                shortcut: root.shortcuts.model-move;
                                 description: "Translate active selection along axes or viewport plane";
                                 active: active-tool == "move";
                                 live-mode: active-tool == "move" && root.transform-instant-active;
@@ -3519,7 +3588,7 @@ export component PetuniaSlintShell inherits Window {
                             ViewportSvgButton {
                                 glyph: @image-url("icons/tool-rotate.svg");
                                 label: root.label-model-rotate;
-                                shortcut: "R";
+                                shortcut: root.shortcuts.model-rotate;
                                 description: "Rotate active selection around the active pivot point";
                                 active: active-tool == "rotate";
                                 live-mode: active-tool == "rotate" && root.transform-instant-active;
@@ -3528,7 +3597,7 @@ export component PetuniaSlintShell inherits Window {
                             ViewportSvgButton {
                                 glyph: @image-url("icons/tool-scale.svg");
                                 label: root.label-model-scale;
-                                shortcut: "S";
+                                shortcut: root.shortcuts.model-scale;
                                 description: "Resize active selection proportionally or along specific axes";
                                 active: active-tool == "scale";
                                 live-mode: active-tool == "scale" && root.transform-instant-active;
@@ -3537,7 +3606,7 @@ export component PetuniaSlintShell inherits Window {
                             ViewportSvgButton {
                                 glyph: @image-url("icons/tool-transform.svg");
                                 label: root.label-model-transform;
-                                shortcut: "T";
+                                shortcut: root.shortcuts.model-transform;
                                 description: "Universal 3-in-1 gizmo for translate, rotate and scale";
                                 active: active-tool == "transform";
                                 live-mode: active-tool == "transform" && root.transform-instant-active;
@@ -3553,7 +3622,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Plus;
                                 semantic-label: "Add Primitive";
-                                shortcut: "Shift+A";
+                                shortcut: root.shortcuts.model-add-primitive;
                                 description: "Quick menu to create standard 3D parametric shapes";
                                 active: root.add-menu-open;
                                 clicked => {
@@ -3584,7 +3653,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Paintbrush;
                                 semantic-label: "Brush";
-                                shortcut: "B";
+                                shortcut: root.shortcuts.paint-brush;
                                 description: "Freehand raster texture painting with adjustable size and softness";
                                 active: active-tool == "brush";
                                 clicked => { root.active-tool-changed("brush"); }
@@ -3592,7 +3661,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Eraser;
                                 semantic-label: "Eraser";
-                                shortcut: "E";
+                                shortcut: root.shortcuts.paint-eraser;
                                 description: "Erase pixel color values and alpha transparency from active texture";
                                 active: active-tool == "eraser";
                                 clicked => { root.active-tool-changed("eraser"); }
@@ -3600,7 +3669,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Pipette;
                                 semantic-label: "Color Picker";
-                                shortcut: "I";
+                                shortcut: root.shortcuts.paint-picker;
                                 description: "Sample color from viewport pixels under mouse cursor";
                                 active: active-tool == "picker";
                                 clicked => { root.active-tool-changed("picker"); }
@@ -3608,7 +3677,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.PaintBucket;
                                 semantic-label: "Fill Bucket";
-                                shortcut: "G";
+                                shortcut: root.shortcuts.paint-fill;
                                 description: "Flood fill contiguous color areas on active UV map";
                                 active: active-tool == "fill";
                                 clicked => { root.active-tool-changed("fill"); }
@@ -3616,7 +3685,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.SquareDashed;
                                 semantic-label: "Line";
-                                shortcut: "D";
+                                shortcut: root.shortcuts.paint-line;
                                 description: "Draw straight brush strokes between clicked endpoints";
                                 active: active-tool == "line";
                                 clicked => { root.active-tool-changed("line"); }
@@ -3624,7 +3693,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Square;
                                 semantic-label: "Rectangle";
-                                shortcut: "U";
+                                shortcut: root.shortcuts.paint-rectangle;
                                 description: "Fill or stroke rectangular 2D shapes on texture canvas";
                                 active: active-tool == "rectangle";
                                 clicked => { root.active-tool-changed("rectangle"); }
@@ -3636,7 +3705,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.MousePointer2;
                                 semantic-label: "UV Select";
-                                shortcut: "W";
+                                shortcut: root.shortcuts.uv-select;
                                 description: "Select UV vertices, edges and polygon islands";
                                 active: active-tool == "uv_select";
                                 clicked => { root.active-tool-changed("uv_select"); }
@@ -3644,7 +3713,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Maximize2;
                                 semantic-label: "Unwrap";
-                                shortcut: "U";
+                                shortcut: root.shortcuts.uv-unwrap;
                                 description: "Unfold 3D mesh surface into flat 2D UV layout";
                                 active: false;
                                 clicked => { root.command-executed("uv.unwrap"); }
@@ -3652,7 +3721,7 @@ export component PetuniaSlintShell inherits Window {
                             ToolButton {
                                 icon: IconSet.Grid2x2;
                                 semantic-label: "Pack Islands";
-                                shortcut: "Ctrl+P";
+                                shortcut: root.shortcuts.uv-pack;
                                 description: "Pack and arrange UV islands efficiently without overlap";
                                 active: false;
                                 clicked => { root.command-executed("uv.pack_islands"); }
@@ -4390,6 +4459,37 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
 
+                    // Rótulos não-cromáticos dos eixos do mundo no chão 3D (Grid Viewport)
+                    if root.colorblind-axes && active-workspace == "MODEL": Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        for tag in root.world-axis-labels: Rectangle {
+                            x: tag.x * 1px - 8px;
+                            y: tag.y * 1px - 8px;
+                            width: 16px;
+                            height: 16px;
+                            border-radius: 8px;
+                            background: #14141ecc;
+                            border-width: 1px;
+                            border-color: tag.tint.transparentize(0.2);
+                            drop-shadow-blur: 4px;
+                            drop-shadow-color: #00000066;
+
+                            Text {
+                                text: tag.text;
+                                color: tag.tint;
+                                font-size: 9px;
+                                font-weight: 700;
+                                font-family: "monospace";
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
                     // HUD Flutuante no Cursor (Fase 4: HUD Numérico em Tempo Real)
                     if root.hud-pill-visible && active-workspace == "MODEL": Rectangle {
                         x: root.hud-pill-x;
@@ -4477,7 +4577,7 @@ export component PetuniaSlintShell inherits Window {
                             ViewportBarButton {
                                 icon: IconSet.Camera;
                                 label: "Projection";
-                                shortcut: "Numpad 5";
+                                shortcut: root.shortcuts.view-proj;
                                 description: "Toggle between perspective 3D projection and orthographic view";
                                 active: is-orthographic;
                                 clicked => { root.toggle-projection-requested(); }
@@ -4485,7 +4585,7 @@ export component PetuniaSlintShell inherits Window {
                             ViewportBarButton {
                                 icon: IconSet.Maximize2;
                                 label: "Frame";
-                                shortcut: "Numpad .";
+                                shortcut: root.shortcuts.view-frame;
                                 description: "Frame and center camera view on currently selected geometry";
                                 active: false;
                                 clicked => { root.command-executed("view.frame_selection"); }
@@ -4493,7 +4593,7 @@ export component PetuniaSlintShell inherits Window {
                             ViewportBarButton {
                                 icon: IconSet.RotateCcw;
                                 label: "Reset view";
-                                shortcut: "Home";
+                                shortcut: root.shortcuts.view-reset;
                                 description: "Reset camera zoom, orientation and position to default origin";
                                 active: false;
                                 clicked => { root.reset-camera-requested(); }
@@ -4527,17 +4627,17 @@ export component PetuniaSlintShell inherits Window {
                                 spacing: 4px;
                                 alignment: center;
 
-                                ViewportSvgButton { glyph: @image-url("icons/view-wire.svg"); label: root.label-view-wireframe; shortcut: "Shift+Z"; description: "Display mesh edges with transparent wireframe surfaces"; active: root.shading-mode == "wireframe"; clicked => { root.shading-mode-set("wireframe"); } }
-                                ViewportSvgButton { glyph: @image-url("icons/view-solid.svg"); label: root.label-view-solid; shortcut: "Z"; description: "Standard matte shaded surfaces with basic directional lighting"; active: root.shading-mode == "solid"; clicked => { root.shading-mode-set("solid"); } }
-                                ViewportSvgButton { glyph: @image-url("icons/view-material.svg"); label: root.label-view-material; shortcut: "Alt+Z"; description: "Preview PBR surface materials, roughness and base colors"; active: root.shading-mode == "material"; clicked => { root.shading-mode-set("material"); } }
-                                ViewportSvgButton { glyph: @image-url("icons/view-lit.svg"); label: root.label-view-lit; shortcut: "Ctrl+Alt+Z"; description: "Full raytraced or realistic real-time lighting with shadows"; active: root.shading-mode == "rendered"; clicked => { root.shading-mode-set("rendered"); } }
+                                ViewportSvgButton { glyph: @image-url("icons/view-wire.svg"); label: root.label-view-wireframe; shortcut: root.shortcuts.view-wireframe; description: "Display mesh edges with transparent wireframe surfaces"; active: root.shading-mode == "wireframe"; clicked => { root.shading-mode-set("wireframe"); } }
+                                ViewportSvgButton { glyph: @image-url("icons/view-solid.svg"); label: root.label-view-solid; shortcut: root.shortcuts.view-solid; description: "Standard matte shaded surfaces with basic directional lighting"; active: root.shading-mode == "solid"; clicked => { root.shading-mode-set("solid"); } }
+                                ViewportSvgButton { glyph: @image-url("icons/view-material.svg"); label: root.label-view-material; shortcut: root.shortcuts.view-material; description: "Preview PBR surface materials, roughness and base colors"; active: root.shading-mode == "material"; clicked => { root.shading-mode-set("material"); } }
+                                ViewportSvgButton { glyph: @image-url("icons/view-lit.svg"); label: root.label-view-lit; shortcut: root.shortcuts.view-lit; description: "Full raytraced or realistic real-time lighting with shadows"; active: root.shading-mode == "rendered"; clicked => { root.shading-mode-set("rendered"); } }
 
                                 Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
 
                                 ViewportBarButton {
                                     icon: IconSet.Eye;
                                     label: "X-Ray";
-                                    shortcut: "Alt+Z";
+                                    shortcut: root.shortcuts.view-xray;
                                     description: "Semi-transparent surfaces allowing selection of occluded geometry";
                                     active: root.show-xray;
                                     clicked => { root.toggle-xray-requested(); }
@@ -4575,7 +4675,7 @@ export component PetuniaSlintShell inherits Window {
                                 ViewportBarButton {
                                     icon: IconSet.Crosshair;
                                     label: "\{root.label-model-pivot}: \{root.pivot-label}";
-                                    shortcut: ".";
+                                    shortcut: root.shortcuts.view-pivot;
                                     description: "Change pivot point origin for transformations (Median, Cursor, Bounds)";
                                     active: root.pivot-menu-open;
                                     clicked => { root.pivot-menu-toggled(!root.pivot-menu-open); }
@@ -4583,7 +4683,7 @@ export component PetuniaSlintShell inherits Window {
                                 if root.viewport-region-width >= 680: ViewportBarButton {
                                     icon: IconSet.Magnet;
                                     label: root.snap-enabled ? "Snap (\{root.snap-target})" : "Snap";
-                                    shortcut: "Shift+Tab";
+                                    shortcut: root.shortcuts.view-snap;
                                     description: "Snap transformations to grid intervals, vertices, edges or faces";
                                     active: root.snap-enabled;
                                     clicked => { root.toggle-snap-enabled(); }
@@ -4591,7 +4691,7 @@ export component PetuniaSlintShell inherits Window {
                                 if root.viewport-region-width >= 750: ViewportBarButton {
                                     icon: IconSet.CircleDot;
                                     label: root.proportional-editing ? "Prop (\{round(root.proportional-radius * 10) / 10})" : "Prop";
-                                    shortcut: "O";
+                                    shortcut: root.shortcuts.view-prop;
                                     description: "Smoothly deform neighboring vertices with proportional falloff curve";
                                     active: root.proportional-editing;
                                     clicked => { root.toggle-proportional-editing(); }
@@ -4656,10 +4756,10 @@ export component PetuniaSlintShell inherits Window {
                             spacing: 3px;
                             alignment: center;
                             for domain in [
-                                { id: "OBJECT", icon: IconSet.Box, label: "Object", shortcut: "0", description: "Select and manipulate entire objects as discrete units" },
-                                { id: "POINT", icon: IconSet.CircleDot, label: "Point", shortcut: "1", description: "Select and transform individual vertices (points)" },
-                                { id: "EDGE", icon: IconSet.SquareDashed, label: "Edge", shortcut: "2", description: "Select and transform polygonal boundary edges" },
-                                { id: "FACE", icon: IconSet.Square, label: "Face", shortcut: "3", description: "Select and transform polygonal planar faces" },
+                                { id: "OBJECT", icon: IconSet.Box, label: "Object", shortcut: root.shortcuts.select-object, description: "Select and manipulate entire objects as discrete units" },
+                                { id: "POINT", icon: IconSet.CircleDot, label: "Point", shortcut: root.shortcuts.select-point, description: "Select and transform individual vertices (points)" },
+                                { id: "EDGE", icon: IconSet.SquareDashed, label: "Edge", shortcut: root.shortcuts.select-edge, description: "Select and transform polygonal boundary edges" },
+                                { id: "FACE", icon: IconSet.Square, label: "Face", shortcut: root.shortcuts.select-face, description: "Select and transform polygonal planar faces" },
                             ]: ViewportBarButton {
                                 icon: domain.icon;
                                 label: domain.label;
@@ -4862,6 +4962,45 @@ export component PetuniaSlintShell inherits Window {
                                 label: ""; value: root.profile-depth; horizontal-stretch: 1; step: 0.1;
                                 text-committed(text) => { root.profile-depth-set(text); }
                                 scrubbed(delta, fine) => { root.profile-depth-set("\{root.profile-depth + delta * (fine ? 0.01 : 0.1)}"); }
+                            }
+                        }
+                        if root.profile-closed: HorizontalLayout {
+                            spacing: 5px; height: 28px;
+                            Text { text: root.label-profile-wall-thickness; color: DesignTokens.text-secondary; font-size: 10px; width: 80px; vertical-alignment: center; }
+                            NumericField {
+                                label: ""; value: root.profile-wall-thickness; horizontal-stretch: 1; step: 0.05;
+                                text-committed(text) => { root.profile-wall-thickness-set(text); }
+                                scrubbed(delta, fine) => { root.profile-wall-thickness-set("\{root.profile-wall-thickness + delta * (fine ? 0.01 : 0.05)}"); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 5px; height: 26px;
+                            Rectangle {
+                                horizontal-stretch: 1; border-radius: 4px;
+                                background: root.profile-has-curves ? DesignTokens.accent.transparentize(0.8) : DesignTokens.surface;
+                                border-width: 1px; border-color: root.profile-has-curves ? DesignTokens.accent : DesignTokens.border;
+                                Text {
+                                    text: root.profile-has-curves ? root.label-profile-sharp-corners : root.label-profile-smooth-curves;
+                                    color: DesignTokens.text-primary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center;
+                                }
+                                TouchArea {
+                                    clicked => {
+                                        if root.profile-has-curves {
+                                            root.profile-clear-curves();
+                                        } else {
+                                            root.profile-smooth-curves();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if root.profile-has-curves: HorizontalLayout {
+                            spacing: 5px; height: 28px;
+                            Text { text: root.label-profile-smoothness; color: DesignTokens.text-secondary; font-size: 10px; width: 80px; vertical-alignment: center; }
+                            NumericField {
+                                label: ""; value: root.profile-smoothness; horizontal-stretch: 1; step: 0.01;
+                                text-committed(text) => { root.profile-smoothness-set(text); }
+                                scrubbed(delta, fine) => { root.profile-smoothness-set("\{root.profile-smoothness + delta * (fine ? 0.002 : 0.01)}"); }
                             }
                         }
                         if root.profile-closed: HorizontalLayout {
@@ -5457,23 +5596,26 @@ export component PetuniaSlintShell inherits Window {
                         }
                         if root.colorblind-axes: Rectangle {
                             for axis-badge in [
-                                { label: "X", x: root.gizmo-x-end-x, y: root.gizmo-x-end-y, tint: DesignTokens.axis-x },
-                                { label: "Y", x: root.gizmo-y-end-x, y: root.gizmo-y-end-y, tint: DesignTokens.axis-y },
-                                { label: "Z", x: root.gizmo-z-end-x, y: root.gizmo-z-end-y, tint: DesignTokens.axis-z },
+                                { label: "X", x: root.gizmo-x-label-x != 0px ? root.gizmo-x-label-x : root.gizmo-x-end-x, y: root.gizmo-x-label-y != 0px ? root.gizmo-x-label-y : root.gizmo-x-end-y, tint: DesignTokens.axis-x },
+                                { label: "Y", x: root.gizmo-y-label-x != 0px ? root.gizmo-y-label-x : root.gizmo-y-end-x, y: root.gizmo-y-label-y != 0px ? root.gizmo-y-label-y : root.gizmo-y-end-y, tint: DesignTokens.axis-y },
+                                { label: "Z", x: root.gizmo-z-label-x != 0px ? root.gizmo-z-label-x : root.gizmo-z-end-x, y: root.gizmo-z-label-y != 0px ? root.gizmo-z-label-y : root.gizmo-z-end-y, tint: DesignTokens.axis-z },
                             ]: Rectangle {
-                                x: axis-badge.x - 9px;
-                                y: axis-badge.y - 9px;
-                                width: 18px;
-                                height: 18px;
-                                border-radius: 4px;
-                                background: DesignTokens.surface-raised;
-                                border-width: 1.5px;
-                                border-color: axis-badge.tint;
+                                x: axis-badge.x - 8px;
+                                y: axis-badge.y - 8px;
+                                width: 16px;
+                                height: 16px;
+                                border-radius: 8px;
+                                background: #14141ee6;
+                                border-width: 1px;
+                                border-color: axis-badge.tint.transparentize(0.2);
+                                drop-shadow-blur: 4px;
+                                drop-shadow-color: #00000088;
                                 Text {
                                     text: axis-badge.label;
                                     color: axis-badge.tint;
-                                    font-size: 11px;
+                                    font-size: 10px;
                                     font-weight: 700;
+                                    font-family: "monospace";
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
@@ -5598,7 +5740,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.Copy;
                                 semantic-label: "Duplicate";
-                                shortcut: "Shift+D";
+                                shortcut: root.shortcuts.model-duplicate;
                                 description: "Create an identical clone of selected geometry or parts";
                                 clicked => { root.duplicate-requested(); }
                             }
@@ -5612,28 +5754,28 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Move3d;
                                 semantic-label: "Extrude";
-                                shortcut: "E";
+                                shortcut: root.shortcuts.model-extrude;
                                 description: "Pull new vertices and faces outward from selected edges or faces";
                                 clicked => { root.command-executed("model.extrude"); }
                             }
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.ArrowUpDown;
                                 semantic-label: root.label-model-push-pull;
-                                shortcut: "Alt+E";
+                                shortcut: root.shortcuts.model-push-pull;
                                 description: "Push or pull faces along surface normals directly";
                                 clicked => { root.command-executed("model.push_pull"); }
                             }
                             if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.SquareDashed;
                                 semantic-label: "Inset";
-                                shortcut: "I";
+                                shortcut: root.shortcuts.model-inset;
                                 description: "Inset new polygonal boundary inside selected faces";
                                 clicked => { root.command-executed("model.inset"); }
                             }
                             if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.CircleDot;
                                 semantic-label: "Bevel";
-                                shortcut: "Ctrl+B";
+                                shortcut: root.shortcuts.model-bevel;
                                 description: "Round edges or vertices with smooth chamfer bevel fillets";
                                 clicked => { root.command-executed("model.bevel"); }
                             }
@@ -5647,7 +5789,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "MODEL": ToolButton {
                                 icon: IconSet.Scissors;
                                 semantic-label: "Knife";
-                                shortcut: "K";
+                                shortcut: root.shortcuts.model-knife;
                                 description: "Interactively slice through edges and faces with cutting line";
                                 active: active-tool == "knife";
                                 clicked => { root.command-executed("model.knife"); }
@@ -5655,7 +5797,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.Grid2x2;
                                 semantic-label: root.label-model-loop-cut;
-                                shortcut: "Ctrl+R";
+                                shortcut: root.shortcuts.model-loop-cut;
                                 description: "Insert a connected edge loop ring across quad mesh geometry";
                                 active: active-tool == "loop_cut";
                                 clicked => { root.active-tool-changed("loop_cut"); }
@@ -5663,7 +5805,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.PenLine;
                                 semantic-label: root.label-model-profile;
-                                shortcut: "Alt+R";
+                                shortcut: root.shortcuts.model-profile;
                                 description: "Revolve a 2D profile curve 360 degrees around rotational axis";
                                 active: active-tool == "draw_profile";
                                 clicked => { root.active-tool-changed("draw_profile"); }
@@ -5671,21 +5813,21 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.Square;
                                 semantic-label: "Subdivide";
-                                shortcut: "Ctrl+1";
+                                shortcut: root.shortcuts.model-subdivide;
                                 description: "Subdivide faces into quad quarters creating finer geometry";
                                 clicked => { root.command-executed("model.subdivide"); }
                             }
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.Merge;
                                 semantic-label: "Merge Center";
-                                shortcut: "M, C";
+                                shortcut: root.shortcuts.model-merge;
                                 description: "Collapse and merge all selected vertices to their median center";
                                 clicked => { root.command-executed("model.merge"); }
                             }
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.Slice;
                                 semantic-label: root.label-model-slice;
-                                shortcut: "Shift+K";
+                                shortcut: root.shortcuts.model-slice;
                                 description: "Cut mesh along an infinite cutting plane through selection";
                                 active: active-tool == "slice";
                                 clicked => { root.active-tool-changed("slice"); }
@@ -5694,7 +5836,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "PAINT": ToolButton {
                                 icon: IconSet.Paintbrush;
                                 semantic-label: "Brush";
-                                shortcut: "B";
+                                shortcut: root.shortcuts.paint-brush;
                                 description: "Freehand raster texture painting with adjustable size and softness";
                                 active: active-tool == "brush";
                                 clicked => { root.active-tool-changed("brush"); }
@@ -5702,7 +5844,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "PAINT": ToolButton {
                                 icon: IconSet.Spline;
                                 semantic-label: "Airbrush";
-                                shortcut: "Shift+B";
+                                shortcut: root.shortcuts.paint-airbrush;
                                 description: "Smooth gradual airbrush spray effect onto active texture";
                                 active: active-tool == "airbrush";
                                 clicked => { root.active-tool-changed("airbrush"); }
@@ -5710,7 +5852,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "PAINT": ToolButton {
                                 icon: IconSet.Eraser;
                                 semantic-label: "Eraser";
-                                shortcut: "E";
+                                shortcut: root.shortcuts.paint-eraser;
                                 description: "Erase pixel color values and alpha transparency from active texture";
                                 active: active-tool == "eraser";
                                 clicked => { root.active-tool-changed("eraser"); }
@@ -5718,7 +5860,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "PAINT": ToolButton {
                                 icon: IconSet.Pipette;
                                 semantic-label: "Color Picker";
-                                shortcut: "I";
+                                shortcut: root.shortcuts.paint-picker;
                                 description: "Sample color from viewport pixels under mouse cursor";
                                 active: active-tool == "picker";
                                 clicked => { root.active-tool-changed("picker"); }
@@ -5726,7 +5868,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "PAINT": ToolButton {
                                 icon: IconSet.PaintBucket;
                                 semantic-label: "Fill";
-                                shortcut: "G";
+                                shortcut: root.shortcuts.paint-fill;
                                 description: "Flood fill contiguous color areas on active UV map";
                                 active: active-tool == "fill";
                                 clicked => { root.active-tool-changed("fill"); }
@@ -5734,7 +5876,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "PAINT": ToolButton {
                                 icon: IconSet.SquareDashed;
                                 semantic-label: "Line";
-                                shortcut: "D";
+                                shortcut: root.shortcuts.paint-line;
                                 description: "Draw straight brush strokes between clicked endpoints";
                                 active: active-tool == "line";
                                 clicked => { root.active-tool-changed("line"); }
@@ -5742,7 +5884,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "PAINT": ToolButton {
                                 icon: IconSet.Square;
                                 semantic-label: "Rectangle";
-                                shortcut: "U";
+                                shortcut: root.shortcuts.paint-rectangle;
                                 description: "Fill or stroke rectangular 2D shapes on texture canvas";
                                 active: active-tool == "rectangle";
                                 clicked => { root.active-tool-changed("rectangle"); }
@@ -5751,21 +5893,21 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace == "UV": ToolButton {
                                 icon: IconSet.Maximize2;
                                 semantic-label: "Unwrap";
-                                shortcut: "U";
+                                shortcut: root.shortcuts.uv-unwrap;
                                 description: "Unfold 3D mesh surface into flat 2D UV layout";
                                 clicked => { root.command-executed("uv.unwrap_auto"); }
                             }
                             if active-workspace == "UV": ToolButton {
                                 icon: IconSet.Grid2x2;
                                 semantic-label: "Pack Islands";
-                                shortcut: "Ctrl+P";
+                                shortcut: root.shortcuts.uv-pack;
                                 description: "Pack and arrange UV islands efficiently without overlap";
                                 clicked => { root.command-executed("uv.pack_islands"); }
                             }
                             if active-workspace == "UV": ToolButton {
                                 icon: IconSet.Camera;
                                 semantic-label: "Project Ref";
-                                shortcut: "Alt+U";
+                                shortcut: root.shortcuts.uv-project-ref;
                                 description: "Project UV coordinates from active camera perspective";
                                 clicked => { root.command-executed("uv.project_reference"); }
                             }
@@ -5778,7 +5920,7 @@ export component PetuniaSlintShell inherits Window {
                             if active-workspace != "MODEL" || root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.Trash2;
                                 semantic-label: "Delete";
-                                shortcut: "X";
+                                shortcut: root.shortcuts.model-delete;
                                 description: "Remove selected points, edges, faces or entire objects";
                                 clicked => { root.delete-requested(); }
                             }
@@ -6000,15 +6142,15 @@ export component PetuniaSlintShell inherits Window {
                         VerticalLayout {
                             padding: 8px;
                             spacing: 2px;
-                            ContextMenuItem { label: "Duplicate"; shortcut: "Shift+D"; clicked => { root.shelf-overflow-open = false; root.duplicate-requested(); } }
-                            ContextMenuItem { label: "Loop Cut"; shortcut: "Ctrl+R"; clicked => { root.shelf-overflow-open = false; root.command-executed("model.loop_cut"); } }
-                            ContextMenuItem { label: root.label-model-push-pull; shortcut: "Alt+E"; clicked => { root.shelf-overflow-open = false; root.command-executed("model.push_pull"); } }
-                            ContextMenuItem { label: root.label-model-profile; shortcut: "Alt+R"; clicked => { root.shelf-overflow-open = false; root.active-tool-changed("draw_profile"); } }
-                            ContextMenuItem { label: root.label-model-slice; shortcut: "Shift+K"; clicked => { root.shelf-overflow-open = false; root.active-tool-changed("slice"); } }
-                            ContextMenuItem { label: "Subdivide"; shortcut: "Ctrl+1"; clicked => { root.shelf-overflow-open = false; root.command-executed("model.subdivide"); } }
-                            ContextMenuItem { label: "Merge Center"; shortcut: "M, C"; clicked => { root.shelf-overflow-open = false; root.command-executed("model.merge"); } }
-                            ContextMenuItem { label: "Slice"; shortcut: "Shift+K"; clicked => { root.shelf-overflow-open = false; root.command-executed("model.slice"); } }
-                            ContextMenuItem { label: "Delete"; shortcut: "X"; danger: true; clicked => { root.shelf-overflow-open = false; root.delete-requested(); } }
+                            ContextMenuItem { label: "Duplicate"; shortcut: root.shortcuts.model-duplicate; clicked => { root.shelf-overflow-open = false; root.duplicate-requested(); } }
+                            ContextMenuItem { label: "Loop Cut"; shortcut: root.shortcuts.model-loop-cut; clicked => { root.shelf-overflow-open = false; root.command-executed("model.loop_cut"); } }
+                            ContextMenuItem { label: root.label-model-push-pull; shortcut: root.shortcuts.model-push-pull; clicked => { root.shelf-overflow-open = false; root.command-executed("model.push_pull"); } }
+                            ContextMenuItem { label: root.label-model-profile; shortcut: root.shortcuts.model-profile; clicked => { root.shelf-overflow-open = false; root.active-tool-changed("draw_profile"); } }
+                            ContextMenuItem { label: root.label-model-slice; shortcut: root.shortcuts.model-slice; clicked => { root.shelf-overflow-open = false; root.active-tool-changed("slice"); } }
+                            ContextMenuItem { label: "Subdivide"; shortcut: root.shortcuts.model-subdivide; clicked => { root.shelf-overflow-open = false; root.command-executed("model.subdivide"); } }
+                            ContextMenuItem { label: "Merge Center"; shortcut: root.shortcuts.model-merge; clicked => { root.shelf-overflow-open = false; root.command-executed("model.merge"); } }
+                            ContextMenuItem { label: "Slice"; shortcut: root.shortcuts.model-slice; clicked => { root.shelf-overflow-open = false; root.command-executed("model.slice"); } }
+                            ContextMenuItem { label: "Delete"; shortcut: root.shortcuts.model-delete; danger: true; clicked => { root.shelf-overflow-open = false; root.delete-requested(); } }
                         }
                     }
 

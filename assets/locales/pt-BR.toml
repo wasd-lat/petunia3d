@@ -189,6 +189,10 @@ profile_presets = "Presets de perfil 2D"
 profile_add_rect = "Add Retângulo"
 profile_add_circle = "Add Círculo"
 profile_canvas_hint = "Clique no canvas para marcar vértices ou inserir um primitivo 2D."
+profile_wall_thickness = "Espessura de Parede"
+profile_smooth_curves = "Suavizar Curvas"
+profile_sharp_corners = "Cantos Retos"
+profile_smoothness = "Suavização"
 
 [pivot]
 median = "Ponto mediano"

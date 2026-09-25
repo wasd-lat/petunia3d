@@ -114,6 +114,9 @@ pub struct GizmoModel {
     pub x_end: [f32; 2],
     pub y_end: [f32; 2],
     pub z_end: [f32; 2],
+    pub x_label: [f32; 2],
+    pub y_label: [f32; 2],
+    pub z_label: [f32; 2],
     /// Setas como triângulos preenchidos (`M .. L .. L .. Z`).
     pub x_arrow_commands: String,
     pub y_arrow_commands: String,
@@ -2585,34 +2588,76 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     fn profile_preview_commands(&self) -> String {
         let profile = &self.state.profile;
-        if profile.points.is_empty() || self.viewport_size[0] <= 1.0 || self.viewport_size[1] <= 1.0
-        {
+        let points = profile.tessellated_points();
+        if points.is_empty() || self.viewport_size[0] <= 1.0 || self.viewport_size[1] <= 1.0 {
             return String::new();
         }
         let matrix = self.state.session.camera.view_proj();
-        let mut commands = String::new();
-        let mut projected = Vec::with_capacity(profile.points.len());
-        for index in 0..profile.points.len() {
-            let point = matrix * profile.to_3d(index).extend(1.0);
+        let project_pt = |p: [f32; 2]| -> Option<[f32; 2]> {
+            let pt_3d = profile.to_3d_point(p);
+            let point = matrix * pt_3d.extend(1.0);
             if !point.is_finite() || point.w <= 0.05 || point.z < 0.0 || point.z > point.w {
-                return String::new();
+                None
+            } else {
+                Some([
+                    (point.x / point.w * 0.5 + 0.5) * self.viewport_size[0],
+                    (0.5 - point.y / point.w * 0.5) * self.viewport_size[1],
+                ])
             }
-            projected.push([
-                (point.x / point.w * 0.5 + 0.5) * self.viewport_size[0],
-                (0.5 - point.y / point.w * 0.5) * self.viewport_size[1],
-            ]);
-        }
+        };
+
+        let mut commands = String::new();
         use std::fmt::Write as _;
-        for (index, point) in projected.iter().enumerate() {
-            let action = if index == 0 { 'M' } else { 'L' };
-            let _ = write!(commands, "{action} {:.2} {:.2} ", point[0], point[1]);
+
+        // Loop externo
+        let mut first = true;
+        for &pt in &points {
+            if let Some(screen_pt) = project_pt(pt) {
+                let action = if first {
+                    first = false;
+                    'M'
+                } else {
+                    'L'
+                };
+                let _ = write!(
+                    commands,
+                    "{action} {:.2} {:.2} ",
+                    screen_pt[0], screen_pt[1]
+                );
+            }
         }
+
         if profile.closed {
             commands.push_str("Z ");
+
+            // Se for oco (wall_thickness > 0), desenha também o laço interno no preview
+            if profile.wall_thickness > 0.0 && points.len() >= 3 {
+                let inner = profile.inner_points();
+                let mut first_inner = true;
+                for &pt in &inner {
+                    if let Some(screen_pt) = project_pt(pt) {
+                        let action = if first_inner {
+                            first_inner = false;
+                            'M'
+                        } else {
+                            'L'
+                        };
+                        let _ = write!(
+                            commands,
+                            "{action} {:.2} {:.2} ",
+                            screen_pt[0], screen_pt[1]
+                        );
+                    }
+                }
+                if !first_inner {
+                    commands.push_str("Z ");
+                }
+            }
         } else {
             let [x, y] = self.pointer_position;
             let _ = write!(commands, "L {:.2} {:.2}", x, y);
         }
+
         commands
     }
 
@@ -2661,6 +2706,44 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         self.state.profile.depth = depth.clamp(0.01, 1000.0);
         self.state.mark_dirty();
+        true
+    }
+
+    pub fn set_profile_wall_thickness(&mut self, thickness: f32) -> bool {
+        if !thickness.is_finite()
+            || thickness < 0.0
+            || self.state.session.tools.active_tool != "draw_profile"
+        {
+            return false;
+        }
+        petunia_module_model::profile_set_wall_thickness(&mut self.state, thickness);
+        true
+    }
+
+    pub fn set_profile_smoothness(&mut self, smoothness: f32) -> bool {
+        if !smoothness.is_finite()
+            || smoothness <= 0.0
+            || self.state.session.tools.active_tool != "draw_profile"
+        {
+            return false;
+        }
+        petunia_module_model::profile_set_curve_smoothness(&mut self.state, smoothness);
+        true
+    }
+
+    pub fn profile_smooth_curves(&mut self) -> bool {
+        if self.state.session.tools.active_tool != "draw_profile" {
+            return false;
+        }
+        petunia_module_model::profile_smooth_curves(&mut self.state);
+        true
+    }
+
+    pub fn profile_clear_curves(&mut self) -> bool {
+        if self.state.session.tools.active_tool != "draw_profile" {
+            return false;
+        }
+        petunia_module_model::profile_clear_curves(&mut self.state);
         true
     }
 
@@ -7385,6 +7468,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.axis_guide_visible = axis_guide.visible;
         vm.axis_guide_commands = axis_guide.commands;
         vm.axis_guide_color = axis_guide.color;
+        vm.axis_guide_label = axis_guide.label;
+        vm.axis_guide_label_x = axis_guide.label_x;
+        vm.axis_guide_label_y = axis_guide.label_y;
+
+        vm.world_axis_labels =
+            compute_world_axis_labels(&self.state, self.viewport_size[0], self.viewport_size[1]);
 
         let dimension =
             compute_dimension_annotation(&self.state, self.viewport_size[0], self.viewport_size[1]);
@@ -7633,6 +7722,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_profile_add_rect = translated(petunia_config::text_id::UI_PROFILE_ADD_RECT);
         vm.label_profile_add_circle = translated(petunia_config::text_id::UI_PROFILE_ADD_CIRCLE);
         vm.label_profile_canvas_hint = translated(petunia_config::text_id::UI_PROFILE_CANVAS_HINT);
+        vm.label_profile_wall_thickness =
+            translated(petunia_config::text_id::UI_PROFILE_WALL_THICKNESS);
+        vm.label_profile_smooth_curves =
+            translated(petunia_config::text_id::UI_PROFILE_SMOOTH_CURVES);
+        vm.label_profile_sharp_corners =
+            translated(petunia_config::text_id::UI_PROFILE_SHARP_CORNERS);
+        vm.label_profile_smoothness = translated(petunia_config::text_id::UI_PROFILE_SMOOTHNESS);
         vm.label_hide_part = translated(petunia_config::text_id::UI_HIDE_PART);
         vm.label_show_part = translated(petunia_config::text_id::UI_SHOW_PART);
         vm.label_lock_part = translated(petunia_config::text_id::UI_LOCK_PART);
@@ -7866,6 +7962,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.profile_point_count = self.state.profile.points.len() as i32;
         vm.profile_closed = self.state.profile.closed;
         vm.profile_depth = self.state.profile.depth;
+        vm.profile_wall_thickness = self.state.profile.wall_thickness;
+        vm.profile_smoothness = self.state.profile.curve_smoothness;
+        vm.profile_has_curves = self
+            .state
+            .profile
+            .nodes
+            .iter()
+            .any(|n| n.handle_in.is_some() || n.handle_out.is_some());
         if vm.profile_active {
             vm.profile_preview_commands = self.profile_preview_commands();
         }

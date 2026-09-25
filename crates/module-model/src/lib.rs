@@ -31,8 +31,9 @@ pub use bevel::BevelTool;
 pub use connect::ConnectTool;
 pub use dissolve::DissolveTool;
 pub use draw_profile::{
-    DrawProfileTool, profile_add_point, profile_screen_to_plane, profile_set_circle,
-    profile_set_rectangle,
+    DrawProfileTool, profile_add_point, profile_clear_curves, profile_screen_to_plane,
+    profile_set_circle, profile_set_curve_smoothness, profile_set_rectangle,
+    profile_set_wall_thickness, profile_smooth_curves,
 };
 pub use extrude::ExtrudeTool;
 pub use inset::InsetTool;

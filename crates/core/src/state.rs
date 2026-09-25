@@ -140,6 +140,7 @@ impl ReferenceImage {
 #[derive(Debug, Clone, Default)]
 pub struct ProfileState {
     pub points: Vec<[f32; 2]>,
+    pub nodes: Vec<petunia_mesh::curve::BezierNode>,
     pub right: [f32; 3],
     pub up: [f32; 3],
     pub origin: [f32; 3],
@@ -148,30 +149,89 @@ pub struct ProfileState {
     pub depth: f32,
     pub revolve_segments: u32,
     pub revolve_angle: f32,
+    pub wall_thickness: f32,
+    pub curve_smoothness: f32,
     pub snap: bool,
 }
 
 impl ProfileState {
     pub fn clear(&mut self) {
+        let depth = if self.depth == 0.0 { 1.0 } else { self.depth };
+        let revolve_segments = if self.revolve_segments == 0 {
+            12
+        } else {
+            self.revolve_segments
+        };
+        let revolve_angle = if self.revolve_angle <= 0.0 {
+            360.0
+        } else {
+            self.revolve_angle
+        };
+        let wall_thickness = self.wall_thickness;
+        let curve_smoothness = if self.curve_smoothness <= 0.0 {
+            0.02
+        } else {
+            self.curve_smoothness
+        };
         *self = Self {
-            depth: self.depth,
-            revolve_segments: self.revolve_segments,
-            revolve_angle: self.revolve_angle,
+            depth,
+            revolve_segments,
+            revolve_angle,
+            wall_thickness,
+            curve_smoothness,
             ..Default::default()
         };
-        if self.depth == 0.0 {
-            self.depth = 1.0;
-        }
-        if self.revolve_segments == 0 {
-            self.revolve_segments = 12;
-        }
-        if self.revolve_angle <= 0.0 {
-            self.revolve_angle = 360.0;
-        }
     }
+
     pub fn to_3d(&self, i: usize) -> Vec3 {
         let p = self.points[i];
         Vec3::from(self.origin) + Vec3::from(self.right) * p[0] + Vec3::from(self.up) * p[1]
+    }
+
+    pub fn to_3d_point(&self, p: [f32; 2]) -> Vec3 {
+        Vec3::from(self.origin) + Vec3::from(self.right) * p[0] + Vec3::from(self.up) * p[1]
+    }
+
+    /// Retorna os pontos amostrados/tesselados avaliando curvas Bézier caso haja alças.
+    pub fn tessellated_points(&self) -> Vec<[f32; 2]> {
+        if self.nodes.is_empty() {
+            return self.points.clone();
+        }
+        let has_curves = self
+            .nodes
+            .iter()
+            .any(|n| n.handle_in.is_some() || n.handle_out.is_some());
+        if has_curves {
+            let path = petunia_mesh::curve::BezierPath {
+                nodes: self.nodes.clone(),
+                closed: self.closed,
+            };
+            path.tessellate(self.curve_smoothness.max(0.005))
+        } else if !self.points.is_empty() {
+            self.points.clone()
+        } else {
+            self.nodes.iter().map(|n| n.point).collect()
+        }
+    }
+
+    /// Retorna os pontos efetivos para geração de geometria (com espessura de parede oca se configurada).
+    pub fn effective_points(&self) -> Vec<[f32; 2]> {
+        let pts = self.tessellated_points();
+        if self.wall_thickness > 0.0 && self.closed && pts.len() >= 3 {
+            petunia_mesh::curve::create_hollow_profile(&pts, self.wall_thickness)
+        } else {
+            pts
+        }
+    }
+
+    /// Retorna os pontos do contorno interno se houver espessura de parede configurada.
+    pub fn inner_points(&self) -> Vec<[f32; 2]> {
+        let pts = self.tessellated_points();
+        if self.wall_thickness > 0.0 && self.closed && pts.len() >= 3 {
+            petunia_mesh::curve::offset_polygon(&pts, -self.wall_thickness)
+        } else {
+            Vec::new()
+        }
     }
 }
 

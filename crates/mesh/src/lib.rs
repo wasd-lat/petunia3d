@@ -214,6 +214,7 @@ impl Mesh {
 mod bevel;
 pub mod boolean;
 mod connect;
+pub mod curve;
 pub mod half_edge;
 pub mod knife;
 pub mod loop_cut;
@@ -227,6 +228,7 @@ pub mod uv;
 pub mod uv_tools;
 pub mod uv_xatlas;
 
+pub use curve::{BezierNode, BezierNodeKind, BezierPath, create_hollow_profile, offset_polygon};
 pub use half_edge::{
     EdgeId, FaceId, HalfEdge, HalfEdgeId, HalfEdgeMesh, TopologyDefect, TopologyReport, VertexId,
 };

@@ -312,6 +312,10 @@ pub mod text_id {
     pub const UI_PROFILE_ADD_RECT: TextId = TextId::new("ui.profile_add_rect");
     pub const UI_PROFILE_ADD_CIRCLE: TextId = TextId::new("ui.profile_add_circle");
     pub const UI_PROFILE_CANVAS_HINT: TextId = TextId::new("ui.profile_canvas_hint");
+    pub const UI_PROFILE_WALL_THICKNESS: TextId = TextId::new("ui.profile_wall_thickness");
+    pub const UI_PROFILE_SMOOTH_CURVES: TextId = TextId::new("ui.profile_smooth_curves");
+    pub const UI_PROFILE_SHARP_CORNERS: TextId = TextId::new("ui.profile_sharp_corners");
+    pub const UI_PROFILE_SMOOTHNESS: TextId = TextId::new("ui.profile_smoothness");
     pub const UI_MODEL_SELECT_HINT: TextId = TextId::new("ui.model_select_hint");
     pub const UI_MODEL_POSITION_HINT: TextId = TextId::new("ui.model_position_hint");
     pub const UI_MODEL_ROTATE_HINT: TextId = TextId::new("ui.model_rotate_hint");
@@ -627,6 +631,10 @@ pub mod text_id {
         UI_PROFILE_ADD_RECT,
         UI_PROFILE_ADD_CIRCLE,
         UI_PROFILE_CANVAS_HINT,
+        UI_PROFILE_WALL_THICKNESS,
+        UI_PROFILE_SMOOTH_CURVES,
+        UI_PROFILE_SHARP_CORNERS,
+        UI_PROFILE_SMOOTHNESS,
         UI_MODEL_SELECT_HINT,
         UI_MODEL_POSITION_HINT,
         UI_MODEL_ROTATE_HINT,

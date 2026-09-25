@@ -5,7 +5,25 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
-### Acessibilidade de Tooltips Ricos e Rollover de Menus da Barra Superior (25/09/2026)
+### Sprint A: Draw Profile com Sistema Bézier Completo e Perfis Ocos (25/09/2026)
+- **Sistema Bézier Cúbico 2D (`BezierNode`, `BezierPath`)**:
+  - Implementação de nós de controle com tipos de curvatura canônicos (`BezierNodeKind::Sharp`, `Smooth`, `Symmetric`, `Free`), suportando alças independentes ou tangentes contínuas ($G^1/C^1$).
+  - Algoritmo adaptativo de tesselação baseado na formulação de De Casteljau com critério recursivo de linearidade de corda (*flatness*), garantindo fidelidade geométrica visual sem sobrecarga poligonal.
+  - Conversão bidirecional entre SVG Path (`M`, `C`, `L`, `Z`) e representações de curvas 2D.
+  - Alternância rápida na interface entre nós retos e nós suavizados (*Smooth Curves* / *Sharp Corners*), com geração automática de alças tangentes proporcionais à distância entre nós vizinhos.
+- **Hollow Profile & Wall Thickness (Perfis Ocos com Espessura de Parede)**:
+  - Algoritmo de offset de polígonos fechados (`offset_polygon`) com bissetrizes normais e contenção de esquadria (*miter clamping*) a 3× para prevenção de autointerseções em cantos agudos.
+  - Geração de perfis de casca oca (`create_hollow_profile`), costurando o laço externo com o laço interno em ordem reversa e gerando geometria 3D oca sólida em extrusão direta (`generate_extrude`) e revolução (`generate_revolve`).
+  - Preview interativo em tempo real na viewport Slint (`profile_preview_commands`), projetando simultaneamente o contorno externo e o contorno oco interno durante a edição.
+- **Integração Completa na UI Slint**:
+  - Novos controles táteis no ToolCard de Draw Profile: campos numéricos para *Wall Thickness* e *Smoothness*, botão dinâmico para suavização e cantos retos.
+  - TextIDs e traduções completas em inglês e português brasileiro sem strings hardcoded (`UI_PROFILE_WALL_THICKNESS`, `UI_PROFILE_SMOOTH_CURVES`, `UI_PROFILE_SHARP_CORNERS`, `UI_PROFILE_SMOOTHNESS`).
+  - Bateria de testes unitários automatizados validando tesselação Bézier, offset de polígonos, perfis ocos e integração no shell Slint.
+
+### Acessibilidade de Tooltips Ricos Dinâmicos e Rollover de Menus da Barra Superior (25/09/2026)
+- **Atalhos Dinâmicos Derivados do Keymap Ativo (`ShortcutsModel` & `ShortcutsEntry`)**:
+  - Eliminação de atalhos físicos hardcoded na interface Slint. O modelo reativo `ShortcutsModel` extrai dinamicamente todas as combinações de teclas a partir de `state.ui.keybinds` (`keybinds.format_shortcut(...)`).
+  - Qualquer personalização feita nas configurações de atalhos ou troca de perfil de keymap (ex: Blender, Maya, Petunia Padrão, Notebook) reflete-se **instantaneamente** nas badges `<kbd>` dos tooltips em todos os painéis e ferramentas.
 - **Tooltips Ricos Modernos (`RichTooltip`)**: Implementação de componente universal com cabeçalho em destaque, badge estético estilizado em fonte mono para teclas de atalho (`shortcut`), micro-explicação contextual em texto secundário (`description`) e rodapé com dicas de interação e gestos (`hint`), seguindo as melhores práticas e padrões de UX de softwares como Blender, VS Code e Figma.
 - **Cobertura Completa em Toda a Interface**: Adicionados rótulos, atalhos físicos e explicações detalhadas em:
   - Ferramentas de modelagem, seleção e medição do painel esquerdo (Select `W`, Lasso `Shift+Space`, 3D Cursor `Shift+RMB`, Measure `M`, Move `G`, Rotate `R`, Scale `S`, Transform `T`, Add Primitive `Shift+A`, Cube, Sphere).

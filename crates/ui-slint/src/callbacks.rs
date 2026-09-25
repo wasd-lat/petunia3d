@@ -78,12 +78,18 @@ pub(crate) fn sync_overlay_models(
     window.set_gizmo_x_commands(gizmo.x_commands.as_str().into());
     window.set_gizmo_y_commands(gizmo.y_commands.as_str().into());
     window.set_gizmo_z_commands(gizmo.z_commands.as_str().into());
-    window.set_view_gizmo_x_end_x(gizmo.x_end[0]);
-    window.set_view_gizmo_x_end_y(gizmo.x_end[1]);
-    window.set_view_gizmo_y_end_x(gizmo.y_end[0]);
-    window.set_view_gizmo_y_end_y(gizmo.y_end[1]);
-    window.set_view_gizmo_z_end_x(gizmo.z_end[0]);
-    window.set_view_gizmo_z_end_y(gizmo.z_end[1]);
+    window.set_gizmo_x_end_x(gizmo.x_end[0]);
+    window.set_gizmo_x_end_y(gizmo.x_end[1]);
+    window.set_gizmo_y_end_x(gizmo.y_end[0]);
+    window.set_gizmo_y_end_y(gizmo.y_end[1]);
+    window.set_gizmo_z_end_x(gizmo.z_end[0]);
+    window.set_gizmo_z_end_y(gizmo.z_end[1]);
+    window.set_gizmo_x_label_x(gizmo.x_label[0]);
+    window.set_gizmo_x_label_y(gizmo.x_label[1]);
+    window.set_gizmo_y_label_x(gizmo.y_label[0]);
+    window.set_gizmo_y_label_y(gizmo.y_label[1]);
+    window.set_gizmo_z_label_x(gizmo.z_label[0]);
+    window.set_gizmo_z_label_y(gizmo.z_label[1]);
     window.set_gizmo_x_arrow_commands(gizmo.x_arrow_commands.as_str().into());
     window.set_gizmo_y_arrow_commands(gizmo.y_arrow_commands.as_str().into());
     window.set_gizmo_z_arrow_commands(gizmo.z_arrow_commands.as_str().into());
@@ -150,6 +156,9 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
         axis_guide.color[1],
         axis_guide.color[2],
     ));
+    window.set_axis_guide_label(axis_guide.label.as_str().into());
+    window.set_axis_guide_label_x(axis_guide.label_x);
+    window.set_axis_guide_label_y(axis_guide.label_y);
 
     let dimension = compute_dimension_annotation(&bridge.state, width, height);
     window.set_dimension_visible(dimension.visible);
@@ -186,6 +195,18 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
         .collect();
     window.set_measure_tags(std::rc::Rc::new(slint::VecModel::from(measure_tags)).into());
 
+    let world_axis_labels = compute_world_axis_labels(&bridge.state, width, height);
+    let world_axis_tags: Vec<WorldAxisTag> = world_axis_labels
+        .iter()
+        .map(|tag| WorldAxisTag {
+            text: tag.text.as_str().into(),
+            x: tag.x,
+            y: tag.y,
+            tint: slint::Color::from_rgb_u8(tag.color[0], tag.color[1], tag.color[2]),
+        })
+        .collect();
+    window.set_world_axis_labels(std::rc::Rc::new(slint::VecModel::from(world_axis_tags)).into());
+
     window.set_micro_inspector_open(bridge.micro_inspector_open);
     window.set_micro_inspector_x(bridge.micro_inspector_pos[0]);
     window.set_micro_inspector_y(bridge.micro_inspector_pos[1]);
@@ -196,11 +217,73 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
     window.set_protractor_ticks_commands(protractor.ticks_commands.as_str().into());
 }
 
+impl From<&crate::view_model::ShortcutsModel> for ShortcutsEntry {
+    fn from(s: &crate::view_model::ShortcutsModel) -> Self {
+        Self {
+            undo: s.undo.as_str().into(),
+            redo: s.redo.as_str().into(),
+            save: s.save.as_str().into(),
+            open: s.open.as_str().into(),
+            search: s.search.as_str().into(),
+            settings: s.settings.as_str().into(),
+            parts: s.parts.as_str().into(),
+            model_select: s.model_select.as_str().into(),
+            model_lasso: s.model_lasso.as_str().into(),
+            model_cursor: s.model_cursor.as_str().into(),
+            model_measure: s.model_measure.as_str().into(),
+            model_move: s.model_move.as_str().into(),
+            model_rotate: s.model_rotate.as_str().into(),
+            model_scale: s.model_scale.as_str().into(),
+            model_transform: s.model_transform.as_str().into(),
+            model_add_primitive: s.model_add_primitive.as_str().into(),
+            model_duplicate: s.model_duplicate.as_str().into(),
+            model_extrude: s.model_extrude.as_str().into(),
+            model_push_pull: s.model_push_pull.as_str().into(),
+            model_inset: s.model_inset.as_str().into(),
+            model_bevel: s.model_bevel.as_str().into(),
+            model_knife: s.model_knife.as_str().into(),
+            model_loop_cut: s.model_loop_cut.as_str().into(),
+            model_profile: s.model_profile.as_str().into(),
+            model_subdivide: s.model_subdivide.as_str().into(),
+            model_merge: s.model_merge.as_str().into(),
+            model_slice: s.model_slice.as_str().into(),
+            model_delete: s.model_delete.as_str().into(),
+            select_point: s.select_point.as_str().into(),
+            select_edge: s.select_edge.as_str().into(),
+            select_face: s.select_face.as_str().into(),
+            select_object: s.select_object.as_str().into(),
+            view_proj: s.view_proj.as_str().into(),
+            view_frame: s.view_frame.as_str().into(),
+            view_reset: s.view_reset.as_str().into(),
+            view_wireframe: s.view_wireframe.as_str().into(),
+            view_solid: s.view_solid.as_str().into(),
+            view_material: s.view_material.as_str().into(),
+            view_lit: s.view_lit.as_str().into(),
+            view_xray: s.view_xray.as_str().into(),
+            view_pivot: s.view_pivot.as_str().into(),
+            view_snap: s.view_snap.as_str().into(),
+            view_prop: s.view_prop.as_str().into(),
+            paint_brush: s.paint_brush.as_str().into(),
+            paint_airbrush: s.paint_airbrush.as_str().into(),
+            paint_eraser: s.paint_eraser.as_str().into(),
+            paint_picker: s.paint_picker.as_str().into(),
+            paint_fill: s.paint_fill.as_str().into(),
+            paint_line: s.paint_line.as_str().into(),
+            paint_rectangle: s.paint_rectangle.as_str().into(),
+            uv_select: s.uv_select.as_str().into(),
+            uv_unwrap: s.uv_unwrap.as_str().into(),
+            uv_pack: s.uv_pack.as_str().into(),
+            uv_project_ref: s.uv_project_ref.as_str().into(),
+        }
+    }
+}
+
 pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
     window.set_active_workspace(vm.workspace_label().into());
     window.set_saved(vm.saved);
     window.set_can_undo(vm.can_undo);
     window.set_can_redo(vm.can_redo);
+    window.set_shortcuts((&vm.shortcuts).into());
     window.set_status_message(vm.status_message.as_str().into());
     window.set_active_tool(vm.active_tool.as_str().into());
     let domain_str = match vm.selection_domain {
@@ -473,6 +556,10 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_label_profile_add_rect(vm.label_profile_add_rect.as_str().into());
     window.set_label_profile_add_circle(vm.label_profile_add_circle.as_str().into());
     window.set_label_profile_canvas_hint(vm.label_profile_canvas_hint.as_str().into());
+    window.set_label_profile_wall_thickness(vm.label_profile_wall_thickness.as_str().into());
+    window.set_label_profile_smooth_curves(vm.label_profile_smooth_curves.as_str().into());
+    window.set_label_profile_sharp_corners(vm.label_profile_sharp_corners.as_str().into());
+    window.set_label_profile_smoothness(vm.label_profile_smoothness.as_str().into());
     window.set_hint_model_select(vm.hint_model_select.as_str().into());
     window.set_hint_model_position(vm.hint_model_position.as_str().into());
     window.set_hint_model_rotate(vm.hint_model_rotate.as_str().into());
@@ -614,6 +701,9 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_profile_closed(vm.profile_closed);
     window.set_profile_preview_commands(vm.profile_preview_commands.as_str().into());
     window.set_profile_depth(vm.profile_depth);
+    window.set_profile_wall_thickness(vm.profile_wall_thickness);
+    window.set_profile_smoothness(vm.profile_smoothness);
+    window.set_profile_has_curves(vm.profile_has_curves);
     window.set_tool_activation(vm.tool_activation.as_str().into());
     window.set_keyboard_tool_modal_active(vm.keyboard_tool_modal_active);
     window.set_invert_vertical_drag(vm.invert_vertical_drag);
@@ -647,6 +737,9 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
         vm.axis_guide_color[1],
         vm.axis_guide_color[2],
     ));
+    window.set_axis_guide_label(vm.axis_guide_label.as_str().into());
+    window.set_axis_guide_label_x(vm.axis_guide_label_x);
+    window.set_axis_guide_label_y(vm.axis_guide_label_y);
     window.set_dimension_visible(vm.dimension_visible);
     window.set_dimension_commands(vm.dimension_commands.as_str().into());
     window.set_dimension_text(vm.dimension_text.as_str().into());
@@ -677,6 +770,18 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
         })
         .collect();
     window.set_measure_tags(std::rc::Rc::new(slint::VecModel::from(measure_tags)).into());
+
+    let world_axis_tags: Vec<WorldAxisTag> = vm
+        .world_axis_labels
+        .iter()
+        .map(|tag| WorldAxisTag {
+            text: tag.text.as_str().into(),
+            x: tag.x,
+            y: tag.y,
+            tint: slint::Color::from_rgb_u8(tag.color[0], tag.color[1], tag.color[2]),
+        })
+        .collect();
+    window.set_world_axis_labels(std::rc::Rc::new(slint::VecModel::from(world_axis_tags)).into());
 
     window.set_micro_inspector_open(vm.micro_inspector_open);
     window.set_micro_inspector_x(vm.micro_inspector_x);
@@ -2980,6 +3085,62 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
                 if let Some(frame) = bridge.render_viewport() {
                     window.set_viewport_image(frame);
                 }
+            }
+        }
+    });
+
+    let profile_wall_thickness_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_profile_wall_thickness_set(move |text| {
+        let Ok(thickness) = text.trim().parse::<f32>() else {
+            return false;
+        };
+        if let Ok(mut bridge) = profile_wall_thickness_bridge.lock() {
+            let accepted = bridge.set_profile_wall_thickness(thickness);
+            if accepted && let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+            accepted
+        } else {
+            false
+        }
+    });
+
+    let profile_smoothness_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_profile_smoothness_set(move |text| {
+        let Ok(smoothness) = text.trim().parse::<f32>() else {
+            return false;
+        };
+        if let Ok(mut bridge) = profile_smoothness_bridge.lock() {
+            let accepted = bridge.set_profile_smoothness(smoothness);
+            if accepted && let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+            accepted
+        } else {
+            false
+        }
+    });
+
+    let profile_smooth_curves_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_profile_smooth_curves(move || {
+        if let Ok(mut bridge) = profile_smooth_curves_bridge.lock() {
+            bridge.profile_smooth_curves();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let profile_clear_curves_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_profile_clear_curves(move || {
+        if let Ok(mut bridge) = profile_clear_curves_bridge.lock() {
+            bridge.profile_clear_curves();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
             }
         }
     });
