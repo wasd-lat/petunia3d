@@ -3913,6 +3913,29 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.menu_open.is_some()
     }
 
+    /// Abre diretamente um menu ou troca para ele (rollover entre menus do topo).
+    pub fn open_menu(&mut self, id: &str) -> bool {
+        let next = MenuKind::ALL.into_iter().find(|kind| kind.id() == id);
+        if self.menu_open == next {
+            return false;
+        }
+        self.menu_open = next;
+        match self.menu_open {
+            Some(_) => self.overlays.push(OverlayEntry {
+                id: OverlayId::MenuBar,
+                kind: OverlayKind::Popover,
+                pinned: false,
+                dismiss_on_escape: true,
+                dismiss_on_click_away: true,
+            }),
+            None => {
+                self.overlays.remove(OverlayId::MenuBar);
+            }
+        }
+        self.state.mark_dirty();
+        self.menu_open.is_some()
+    }
+
     pub fn close_menu(&mut self) -> bool {
         self.overlays.remove(OverlayId::MenuBar);
         self.menu_open.take().is_some()

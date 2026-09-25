@@ -1580,6 +1580,34 @@ fn menu_toggles_open_and_close_and_escape_closes_it_first() {
 }
 
 #[test]
+fn menu_open_and_rollover_switches_between_menus() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    assert_eq!(bridge.view_model().menu_open, "");
+
+    // Abrir o menu "file" diretamente
+    assert!(bridge.open_menu("file"));
+    assert_eq!(bridge.view_model().menu_open, "file");
+
+    // Rollover para "edit": transição suave sem clique extra
+    assert!(bridge.open_menu("edit"));
+    assert_eq!(bridge.view_model().menu_open, "edit");
+
+    // Rollover para "view" e "window"
+    assert!(bridge.open_menu("view"));
+    assert_eq!(bridge.view_model().menu_open, "view");
+    assert!(bridge.open_menu("window"));
+    assert_eq!(bridge.view_model().menu_open, "window");
+
+    // Abrir novamente o mesmo menu retorna false (sem dirty desnecessário)
+    assert!(!bridge.open_menu("window"));
+    assert_eq!(bridge.view_model().menu_open, "window");
+
+    // Fecha o menu
+    assert!(bridge.close_menu());
+    assert_eq!(bridge.view_model().menu_open, "");
+}
+
+#[test]
 fn wire_overlay_is_independent_of_base_shading_and_xray() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     let shading = bridge.state.shading;

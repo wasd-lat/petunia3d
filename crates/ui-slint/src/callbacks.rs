@@ -2008,6 +2008,20 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let menu_open_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_menu_opened(move |id| {
+        if let Ok(mut bridge) = menu_open_bridge.lock() {
+            if !bridge.open_menu(id.as_str()) {
+                return;
+            }
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
     let menu_item_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_menu_item_invoked(move |id| {

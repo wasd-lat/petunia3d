@@ -5,6 +5,19 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Acessibilidade de Tooltips Ricos e Rollover de Menus da Barra Superior (25/09/2026)
+- **Tooltips Ricos Modernos (`RichTooltip`)**: Implementação de componente universal com cabeçalho em destaque, badge estético estilizado em fonte mono para teclas de atalho (`shortcut`), micro-explicação contextual em texto secundário (`description`) e rodapé com dicas de interação e gestos (`hint`), seguindo as melhores práticas e padrões de UX de softwares como Blender, VS Code e Figma.
+- **Cobertura Completa em Toda a Interface**: Adicionados rótulos, atalhos físicos e explicações detalhadas em:
+  - Ferramentas de modelagem, seleção e medição do painel esquerdo (Select `W`, Lasso `Shift+Space`, 3D Cursor `Shift+RMB`, Measure `M`, Move `G`, Rotate `R`, Scale `S`, Transform `T`, Add Primitive `Shift+A`, Cube, Sphere).
+  - Ferramentas de pintura (Brush `B`, Eraser `E`, Color Picker `I`, Fill `G`, Line `D`, Rectangle `U`, Airbrush `Shift+B`) e UV (UV Select `W`, Unwrap `U`, Pack Islands `Ctrl+P`, Project Ref `Alt+U`).
+  - Ações do topo (Undo `Ctrl+Z`, Redo `Ctrl+Shift+Z`, Parts `F4`, Open Project `Ctrl+O`, Save `Ctrl+S`, Search `Ctrl+P`, Settings `Ctrl+,`).
+  - Seletor de workspace central (MODEL `F1`, PAINT `F2`, UV `F3`).
+  - Pílulas flutuantes da viewport (Projection `Numpad 5`, Frame `Numpad .`, Reset View `Home`, Wireframe `Shift+Z`, Solid `Z`, Material `Alt+Z`, Rendered `Ctrl+Alt+Z`, X-Ray `Alt+Z`, Shading Options, Pivot `.`, Snap `Shift+Tab`, Proportional Editing `O`).
+  - Domínios de seleção independentes (Object `0`, Point `1`, Edge `2`, Face `3`).
+  - Primitivas 3D da galeria (Cube, Sphere, Cylinder, Plane, Cone, Capsule, Torus, Circle, Icosphere, Wedge) e ferramentas da barra inferior (Duplicate, Extrude, Push/Pull, Inset, Bevel, Knife, Loop Cut, Profile Revolve, Subdivide, Merge Center, Slice, Delete).
+  - Campos numéricos e eixos X, Y, Z (`NumericField`, `Vector3Field`) com instruções táteis de arraste (scrubbing), precisão via `Shift` e edição por teclado.
+- **Rollover Fluido nos Menus do Topo**: Ao abrir qualquer menu suspenso ("File", "Edit", "View", "Window"), sobrepor o mouse sobre qualquer outro menu fecha automaticamente o menu anterior e abre o novo menu de forma imediata (sem cliques adicionais), replicando o comportamento de desktop moderno do macOS, Windows, VS Code e Blender.
+
 ### Ergonomia de Ferramentas, Atalhos e Precisão MODEL/PAINT/UV (25/09/2026, Sprints 1–3)
 - Atalhos universais de domínio de seleção `1` (Point), `2` (Edge), `3` (Face) e `4`/`0` (Object) no workspace MODEL com alternância direta e sem atritos.
 - Ajuste interativo do número de cortes de Loop Cut através da roda do mouse (gesture Zoom) no estado de preview e suspensão contextual de navegação.
