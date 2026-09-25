@@ -129,4 +129,63 @@ impl Mesh {
             .map(|v| v.normalize_or_zero().to_array())
             .collect()
     }
+
+    /// Mapeia uma coordenada UV [0.0..1.0] para uma posição e normal no espaço 3D da superfície da malha.
+    pub fn uv_to_world(&self, uv: [f32; 2]) -> Option<(Vec3, Vec3)> {
+        let u = uv[0];
+        let v = uv[1];
+        for (fi, face) in self.faces.iter().enumerate() {
+            if face.uv.len() < face.verts.len() || face.verts.len() < 3 {
+                continue;
+            }
+            let fnorm = self.face_normal(fi);
+            for corners in self.face_triangle_corners(fi) {
+                let [ca, cb, cc] = corners;
+                let uv0 = face.uv[ca];
+                let uv1 = face.uv[cb];
+                let uv2 = face.uv[cc];
+
+                let denom =
+                    (uv1[1] - uv2[1]) * (uv0[0] - uv2[0]) + (uv2[0] - uv1[0]) * (uv0[1] - uv2[1]);
+                if denom.abs() < 1e-7 {
+                    continue;
+                }
+
+                let w0 =
+                    ((uv1[1] - uv2[1]) * (u - uv2[0]) + (uv2[0] - uv1[0]) * (v - uv2[1])) / denom;
+                let w1 =
+                    ((uv2[1] - uv0[1]) * (u - uv2[0]) + (uv0[0] - uv2[0]) * (v - uv2[1])) / denom;
+                let w2 = 1.0 - w0 - w1;
+
+                const EPS: f32 = 1e-4;
+                if w0 >= -EPS && w1 >= -EPS && w2 >= -EPS {
+                    let va = self.verts[face.verts[ca] as usize].vec();
+                    let vb = self.verts[face.verts[cb] as usize].vec();
+                    let vc = self.verts[face.verts[cc] as usize].vec();
+                    let pos = va * w0 + vb * w1 + vc * w2;
+                    return Some((pos, fnorm));
+                }
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uv_to_world_on_plane() {
+        let mesh = Mesh::plane(2.0);
+        // Plane vertices: (-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)
+        // UVs: (0, 0), (1, 0), (1, 1), (0, 1)
+        let hit = mesh.uv_to_world([0.5, 0.5]);
+        assert!(hit.is_some());
+        let (pos, norm) = hit.unwrap();
+        assert!((pos.x).abs() < 1e-3);
+        assert!((pos.y).abs() < 1e-3);
+        assert!((pos.z).abs() < 1e-3);
+        assert!(norm.y.abs() > 0.9);
+    }
 }

@@ -1610,7 +1610,10 @@ fn menu_open_and_rollover_switches_between_menus() {
 #[test]
 fn wire_overlay_is_independent_of_base_shading_and_xray() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    assert!(bridge.state.session.show_wireframe_overlay);
     let shading = bridge.state.shading;
+    bridge.execute_command(CommandId::ToggleWireOverlay);
+    assert!(!bridge.state.session.show_wireframe_overlay);
     bridge.execute_command(CommandId::ToggleWireOverlay);
     assert!(bridge.state.session.show_wireframe_overlay);
     assert_eq!(bridge.state.shading, shading);
@@ -2250,6 +2253,86 @@ fn decal_layer_transform_and_bake_workflow() {
         !vm.active_layer_is_decal,
         "baked layer should now be Raster / camada rasterizada agora deve ser Raster"
     );
+}
+
+#[test]
+fn test_decal_live_interactive_drag_manipulator_and_preview_commands() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+
+    // Decal layer is initially not active
+    assert!(!bridge.active_layer_is_decal());
+    assert!(bridge.decal_preview_commands().is_empty());
+
+    // Add decal layer
+    assert!(bridge.add_decal_layer());
+    assert!(bridge.active_layer_is_decal());
+
+    let vm = bridge.view_model();
+    assert!(vm.active_layer_is_decal);
+    assert!(!vm.label_decal_transform.is_empty());
+    assert!(!vm.label_decal_position.is_empty());
+    assert!(!vm.label_decal_scale.is_empty());
+    assert!(!vm.label_decal_rotation.is_empty());
+    assert!(!vm.label_decal_bake.is_empty());
+    assert!(!vm.label_decal_hint.is_empty());
+
+    // Decal preview commands generates on-surface manipulator SVG path
+    let commands = bridge.decal_preview_commands();
+    assert!(!commands.is_empty(), "decal preview path must not be empty");
+    assert!(commands.contains('M'), "must contain SVG move-to M");
+    assert!(commands.contains('L'), "must contain SVG line-to L");
+    assert!(commands.contains('Z'), "must contain SVG close-path Z");
+
+    // Interactive drag placement:
+    // Screen center 512, 384 raycasts onto cube front face
+    assert!(bridge.begin_paint_stroke_at(512.0, 384.0));
+    assert!(bridge.paint_stroke_to(520.0, 390.0));
+    assert!(bridge.end_paint_stroke_at(520.0, 390.0));
+    let decal = bridge.active_decal().expect("active decal");
+    assert!(decal.center_uv[0] > 0.0 && decal.center_uv[0] < 1.0);
+    assert!(decal.center_uv[1] > 0.0 && decal.center_uv[1] < 1.0);
+
+    // Interactive drag uniform scale (Shift + drag):
+    let initial_scale = decal.scale_uv;
+    assert!(bridge.begin_paint_stroke_with_modifiers(512.0, 384.0, true, false));
+    // Dragging upwards (384 -> 334) increases scale
+    assert!(bridge.paint_stroke_to_with_modifiers(512.0, 334.0, true, false));
+    assert!(bridge.end_paint_stroke_at(512.0, 334.0));
+    let scaled_decal = bridge.active_decal().expect("scaled decal");
+    assert!(
+        scaled_decal.scale_uv[0] > initial_scale[0],
+        "scale should increase when dragged up with Shift"
+    );
+
+    // Interactive drag rotation (Ctrl + drag):
+    let initial_rot = scaled_decal.rotation_rad;
+    assert!(bridge.begin_paint_stroke_with_modifiers(512.0, 384.0, false, true));
+    // Dragging right (512 -> 562) rotates decal
+    assert!(bridge.paint_stroke_to_with_modifiers(562.0, 384.0, false, true));
+    assert!(bridge.end_paint_stroke_at(562.0, 384.0));
+    let rotated_decal = bridge.active_decal().expect("rotated decal");
+    assert!(
+        (rotated_decal.rotation_rad - initial_rot).abs() > 0.01,
+        "rotation should change when dragged with Ctrl"
+    );
+
+    // Interactive drag cancellation (Escape):
+    let pre_cancel_decal = rotated_decal.clone();
+    assert!(bridge.begin_paint_stroke_at(512.0, 384.0));
+    assert!(bridge.paint_stroke_to(530.0, 395.0));
+    let in_drag_decal = bridge.active_decal().expect("in drag decal");
+    assert_ne!(in_drag_decal.center_uv, pre_cancel_decal.center_uv);
+    assert!(bridge.cancel_paint_stroke());
+    let restored_decal = bridge.active_decal().expect("restored decal");
+    assert_eq!(restored_decal.center_uv, pre_cancel_decal.center_uv);
+    assert_eq!(restored_decal.scale_uv, pre_cancel_decal.scale_uv);
+    assert_eq!(restored_decal.rotation_rad, pre_cancel_decal.rotation_rad);
+
+    // Non-destructive preservation: layer remains Decal until explicit bake
+    assert!(bridge.active_layer_is_decal());
+    bridge.apply(UiIntent::BakeActiveDecal);
+    assert!(!bridge.active_layer_is_decal());
 }
 
 #[test]
@@ -5708,9 +5791,8 @@ fn test_quick_measure_with_multiple_selected_edges() {
     let measure = compute_quick_measure(&state, 800.0, 600.0);
     assert!(measure.visible);
     assert!(measure.distance > 0.0);
-    assert_eq!(measure.tags.len(), 2);
-    assert!(measure.tags[0].text.ends_with('m'));
-    assert!(measure.tags[1].text.ends_with('m'));
+    assert_eq!(measure.tags.len(), 1);
+    assert!(measure.tags[0].text.starts_with("Ø "));
     assert!(measure.hud_text.contains("Total:"));
     assert!(measure.hud_text.contains("(2 edges)"));
     assert!(measure.hud_text.contains("Avg:"));
@@ -5790,6 +5872,20 @@ fn test_selection_domain_shortcuts_and_d_key() {
         bridge.state.session.selection_domain,
         SelectionDomain::Object
     );
+
+    // Tecla 0 não é mais atalho de seleção de objeto (foi removida)
+    assert!(!bridge.route_shortcut("0", false, false, false));
+
+    // Tab alterna entre modo objeto e o último domínio usado
+    assert!(bridge.route_shortcut("2", false, false, false));
+    assert_eq!(bridge.state.session.selection_domain, SelectionDomain::Edge);
+    assert!(bridge.route_shortcut("Tab", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Object
+    );
+    assert!(bridge.route_shortcut("Tab", false, false, false));
+    assert_eq!(bridge.state.session.selection_domain, SelectionDomain::Edge);
 
     // Atalho D / d alterna Edit Pivot
     assert!(!bridge.state.session.edit_pivot);
@@ -6270,4 +6366,100 @@ fn shortcuts_model_reflects_custom_keybinds() {
     assert_eq!(vm2.shortcuts.model_move, "W");
     assert_eq!(vm2.shortcuts.undo, "Ctrl+Z");
     assert_eq!(vm2.shortcuts.model_extrude, "E");
+}
+
+#[test]
+fn wireframe_overlay_defaults_to_true() {
+    let bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    assert!(bridge.state.session.show_wireframe_overlay);
+    assert!(bridge.view_model().is_wireframe);
+}
+
+#[test]
+fn tab_cycles_selection_domain_between_object_and_last_subelement() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Object
+    );
+
+    // Seleciona Face com "3"
+    assert!(bridge.route_shortcut("3", false, false, false));
+    assert_eq!(bridge.state.session.selection_domain, SelectionDomain::Face);
+
+    // Tab vai para Object
+    assert!(bridge.route_shortcut("Tab", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Object
+    );
+
+    // Tab volta para Face
+    assert!(bridge.route_shortcut("Tab", false, false, false));
+    assert_eq!(bridge.state.session.selection_domain, SelectionDomain::Face);
+
+    // Seleciona Vértice com "1"
+    assert!(bridge.route_shortcut("1", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Vertex
+    );
+
+    // Tab vai para Object e volta para Vértice
+    assert!(bridge.route_shortcut("Tab", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Object
+    );
+    assert!(bridge.route_shortcut("Tab", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Vertex
+    );
+
+    // Atalho "4" vai para Object
+    assert!(bridge.route_shortcut("4", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Object
+    );
+
+    // Atalho "0" foi removido e não funciona
+    assert!(!bridge.route_shortcut("0", false, false, false));
+}
+
+#[test]
+fn multiselection_measure_tag_displays_single_average_and_toggles_via_preference() {
+    let mut state = AppState::default();
+    state.set_selection_domain(SelectionDomain::Edge);
+    if let Some(mesh) = state.project.active_mesh_mut() {
+        mesh.deselect_all();
+        mesh.selected_edges.clear();
+        mesh.selected_edges.insert((0, 1));
+        mesh.selected_edges.insert((1, 2));
+        mesh.selected_edges.insert((2, 3));
+    }
+
+    let measure = compute_quick_measure(&state, 800.0, 600.0);
+
+    // Deve ser visível com exatamente 1 tag única contendo a média (Ø)
+    assert!(measure.visible);
+    assert_eq!(measure.tags.len(), 1);
+    assert!(measure.tags[0].text.starts_with("Ø "));
+
+    // Desativa a preferência
+    state.ui.multiselection_measure_tag = false;
+    let measure_disabled = compute_quick_measure(&state, 800.0, 600.0);
+    assert!(measure_disabled.visible);
+    // Com a preferência desligada, não deve projetar tags na viewport
+    assert_eq!(measure_disabled.tags.len(), 0);
+    // Mas o HUD text continua presente
+    assert!(measure_disabled.hud_text.contains("Total:"));
+
+    // Reativa a preferência
+    let mut bridge = SlintUiBridge::new(state, PlaceholderViewport::default());
+    assert!(bridge.set_multiselection_measure_tag(true));
+    assert!(bridge.state.ui.multiselection_measure_tag);
+    assert!(bridge.preferences.multiselection_measure_tag);
+    assert!(bridge.view_model().multiselection_measure_tag);
 }

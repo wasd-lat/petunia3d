@@ -77,7 +77,7 @@ impl Default for ViewportRenderState {
             xray: false,
             show_triangulation: false,
             textured: false,
-            show_wireframe_overlay: false,
+            show_wireframe_overlay: true,
             show_face_orientation: false,
             show_uv_checker: false,
             selection_domain: petunia_core::SelectionDomain::Object,
@@ -251,6 +251,7 @@ pub enum UiIntent {
     Undo,
     Redo,
     SetSelectionDomain(SelectionDomain),
+    CycleSelectionDomain,
     AddPrimitive(petunia_core::PrimitiveKind),
     DeleteActiveAsset,
     SetPaintColor([f32; 3]),
@@ -467,6 +468,8 @@ impl PetuniaViewport for Box<dyn PetuniaViewport> {
         (**self).render_frame(project, camera, state)
     }
 }
+/// Sessão de manipulação interativa de decalque 3D: (origem_x, origem_y, center_uv_inicial, scale_uv_inicial, rot_deg_inicial).
+pub type DecalDragInitial = (f32, f32, [f32; 2], [f32; 2], f32);
 
 /// Bridge entre callbacks Slint e a aplicação. O bridge só aplica intenção
 /// semântica ao `AppState`; algoritmos geométricos permanecem no core/commands.
@@ -533,6 +536,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     pub paint_pixel_grid: bool,
     pub paint_canvas_zoom: i32,
     pub paint_2d_last: Option<(u32, u32)>,
+    /// Sessão de manipulação interativa de decalque 3D: (origem_x, origem_y, center_uv_inicial, scale_uv_inicial, rot_deg_inicial).
+    pub decal_drag_initial: Option<DecalDragInitial>,
     /// Runtime dock/float/pin layouts of the six Inspector sections.
     /// Presentation-only: the document and its Undo history never see this.
     /// Layouts de dock/flutuação/pin das seis seções do Inspector.
@@ -718,6 +723,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             paint_pixel_grid: true,
             paint_canvas_zoom: 1,
             paint_2d_last: None,
+            decal_drag_initial: None,
             section_layouts: section_layout::default_section_layouts(),
             preferences: petunia_config::UserPreferences::default(),
             preferences_path_override: None,
@@ -919,6 +925,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             UiIntent::SetSelectionDomain(domain) => {
                 self.state.set_selection_domain(domain);
+                self.state
+                    .set_status(format!("Modo de seleção: {:?}", domain));
+            }
+            UiIntent::CycleSelectionDomain => {
+                self.state.cycle_selection_domain();
+                let domain = self.state.selection_domain();
                 self.state
                     .set_status(format!("Modo de seleção: {:?}", domain));
             }
@@ -1264,6 +1276,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         scale_uv: [scale_u, scale_v],
                         rotation_rad: rotation_deg.to_radians(),
                     });
+                    petunia_module_paint::PaintModule::composite_active(&mut self.state);
+                    self.state.emit_mesh_changed();
                 }
             }
             UiIntent::BakeActiveDecal => {
@@ -1541,6 +1555,163 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
         }
         Some(slint::Image::from_rgba8(buffer))
+    }
+
+    /// Gera comandos SVG de projeção da estampa de decalque sobre a superfície 3D (P3D-133).
+    pub fn decal_preview_commands(&self) -> String {
+        if self.state.workspace != Workspace::Paint {
+            return String::new();
+        }
+        let Some(decal) = self.active_decal() else {
+            return String::new();
+        };
+        let Some(mesh) = self.state.project.active_mesh() else {
+            return String::new();
+        };
+        let viewport = [
+            self.viewport_size[0].max(1.0),
+            self.viewport_size[1].max(1.0),
+        ];
+        let matrix = self.state.session.camera.view_proj();
+        let project = |point: glam::Vec3| -> Option<[f32; 2]> {
+            let clip = matrix * point.extend(1.0);
+            if !clip.is_finite() || clip.w <= 0.05 || clip.z < 0.0 || clip.z > clip.w {
+                return None;
+            }
+            Some([
+                (clip.x / clip.w * 0.5 + 0.5) * viewport[0],
+                (0.5 - clip.y / clip.w * 0.5) * viewport[1],
+            ])
+        };
+
+        let cu = decal.center_uv[0];
+        let cv = decal.center_uv[1];
+        let su = decal.scale_uv[0];
+        let sv = decal.scale_uv[1];
+        let rot = decal.rotation_rad;
+        let cos_r = rot.cos();
+        let sin_r = rot.sin();
+
+        // Converte coordenadas locais da estampa [-0.5..0.5] para espaço UV
+        let local_to_uv = |lx: f32, ly: f32| -> [f32; 2] {
+            let du = lx * su * cos_r - ly * sv * sin_r;
+            let dv = lx * su * sin_r + ly * sv * cos_r;
+            [(cu + du).clamp(0.0, 1.0), (cv + dv).clamp(0.0, 1.0)]
+        };
+
+        // Âncora central e plano tangente de contingência
+        let center_hit = mesh.uv_to_world([cu, cv]);
+        let (c_pos, c_norm) = center_hit.unwrap_or((glam::Vec3::ZERO, glam::Vec3::Y));
+        let up = if c_norm.y.abs() > 0.9 {
+            glam::Vec3::X
+        } else {
+            glam::Vec3::Y
+        };
+        let tangent = c_norm.cross(up).normalize_or_zero();
+        let bitangent = c_norm.cross(tangent).normalize_or_zero();
+
+        let sample_world_pos = |lx: f32, ly: f32| -> glam::Vec3 {
+            let uv = local_to_uv(lx, ly);
+            if let Some((pos, norm)) = mesh.uv_to_world(uv) {
+                pos + norm * 0.003
+            } else {
+                let du = lx * su * cos_r - ly * sv * sin_r;
+                let dv = lx * su * sin_r + ly * sv * cos_r;
+                c_pos + (tangent * du + bitangent * dv) * 2.0 + c_norm * 0.003
+            }
+        };
+
+        use std::fmt::Write as _;
+        let mut commands = String::new();
+
+        // 1. Perímetro do decalque com subdivisões para conformação a superfícies curvas
+        let mut perimeter_pts = Vec::new();
+        const SUBDIVS: usize = 4;
+        // Borda superior: (-0.5, -0.5) -> (0.5, -0.5)
+        for i in 0..SUBDIVS {
+            let t = i as f32 / SUBDIVS as f32;
+            perimeter_pts.push((-0.5 + t, -0.5));
+        }
+        // Borda direita: (0.5, -0.5) -> (0.5, 0.5)
+        for i in 0..SUBDIVS {
+            let t = i as f32 / SUBDIVS as f32;
+            perimeter_pts.push((0.5, -0.5 + t));
+        }
+        // Borda inferior: (0.5, 0.5) -> (-0.5, 0.5)
+        for i in 0..SUBDIVS {
+            let t = i as f32 / SUBDIVS as f32;
+            perimeter_pts.push((0.5 - t, 0.5));
+        }
+        // Borda esquerda: (-0.5, 0.5) -> (-0.5, -0.5)
+        for i in 0..SUBDIVS {
+            let t = i as f32 / SUBDIVS as f32;
+            perimeter_pts.push((-0.5, 0.5 - t));
+        }
+
+        let mut first = true;
+        for (lx, ly) in perimeter_pts {
+            let world_pos = sample_world_pos(lx, ly);
+            if let Some(screen_pt) = project(world_pos) {
+                if first {
+                    let _ = write!(commands, "M {:.2} {:.2} ", screen_pt[0], screen_pt[1]);
+                    first = false;
+                } else {
+                    let _ = write!(commands, "L {:.2} {:.2} ", screen_pt[0], screen_pt[1]);
+                }
+            }
+        }
+        if !first {
+            commands.push_str("Z ");
+        }
+
+        // 2. Retículo / mira central
+        let center_h0 = sample_world_pos(-0.08, 0.0);
+        let center_h1 = sample_world_pos(0.08, 0.0);
+        if let (Some(a), Some(b)) = (project(center_h0), project(center_h1)) {
+            let _ = write!(
+                commands,
+                "M {:.2} {:.2} L {:.2} {:.2} ",
+                a[0], a[1], b[0], b[1]
+            );
+        }
+        let center_v0 = sample_world_pos(0.0, -0.08);
+        let center_v1 = sample_world_pos(0.0, 0.08);
+        if let (Some(a), Some(b)) = (project(center_v0), project(center_v1)) {
+            let _ = write!(
+                commands,
+                "M {:.2} {:.2} L {:.2} {:.2} ",
+                a[0], a[1], b[0], b[1]
+            );
+        }
+
+        // 3. Indicador direcional de orientação (topo do decalque)
+        let arrow_base = sample_world_pos(0.0, 0.0);
+        let arrow_tip = sample_world_pos(0.0, -0.38);
+        let arrow_left = sample_world_pos(-0.06, -0.28);
+        let arrow_right = sample_world_pos(0.06, -0.28);
+        if let (Some(base), Some(tip), Some(left), Some(right)) = (
+            project(arrow_base),
+            project(arrow_tip),
+            project(arrow_left),
+            project(arrow_right),
+        ) {
+            let _ = write!(
+                commands,
+                "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} ",
+                base[0],
+                base[1],
+                tip[0],
+                tip[1],
+                left[0],
+                left[1],
+                tip[0],
+                tip[1],
+                right[0],
+                right[1]
+            );
+        }
+
+        commands
     }
 
     pub fn resize_viewport(&mut self, width: u32, height: u32) {
@@ -3379,14 +3550,164 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.cancel_transform()
     }
 
-    /// Inicia um traço de pintura contínuo com transação única de undo.
+    pub fn active_layer_is_decal(&self) -> bool {
+        self.state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active())
+            .map(|layer| {
+                matches!(
+                    layer.kind,
+                    petunia_project::paint_layers::LayerKind::Decal(_)
+                )
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn active_decal(&self) -> Option<petunia_project::paint_layers::DecalLayer> {
+        self.state
+            .project
+            .assets
+            .get(self.state.project.active)
+            .and_then(|asset| asset.paint_stack.as_ref())
+            .and_then(|stack| stack.active())
+            .and_then(|layer| match &layer.kind {
+                petunia_project::paint_layers::LayerKind::Decal(decal) => Some(decal.clone()),
+                _ => None,
+            })
+    }
+
+    pub fn set_active_decal_transform(
+        &mut self,
+        center_uv: [f32; 2],
+        scale_uv: [f32; 2],
+        rotation_rad: f32,
+    ) -> bool {
+        let active = self.state.project.active;
+        let Some(asset) = self.state.project.assets.get_mut(active) else {
+            return false;
+        };
+        let Some(stack) = asset.paint_stack.as_mut() else {
+            return false;
+        };
+        let Some(layer) = stack.active_mut() else {
+            return false;
+        };
+        let petunia_project::paint_layers::LayerKind::Decal(ref mut decal) = layer.kind else {
+            return false;
+        };
+        decal.center_uv = [center_uv[0].clamp(0.0, 1.0), center_uv[1].clamp(0.0, 1.0)];
+        decal.scale_uv = [scale_uv[0].clamp(0.01, 5.0), scale_uv[1].clamp(0.01, 5.0)];
+        decal.rotation_rad = rotation_rad;
+        petunia_module_paint::PaintModule::composite_active(&mut self.state);
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    pub fn decal_drag_begin(&mut self, x: f32, y: f32, is_shift: bool, is_ctrl: bool) -> bool {
+        let Some(decal) = self.active_decal() else {
+            return false;
+        };
+        self.decal_drag_initial = Some((
+            x,
+            y,
+            decal.center_uv,
+            decal.scale_uv,
+            decal.rotation_rad.to_degrees(),
+        ));
+        self.decal_drag_to(x, y, is_shift, is_ctrl)
+    }
+
+    pub fn decal_drag_to(&mut self, x: f32, y: f32, is_shift: bool, is_ctrl: bool) -> bool {
+        let Some((init_x, init_y, init_center, init_scale, init_rot)) = self.decal_drag_initial
+        else {
+            return false;
+        };
+
+        if is_shift {
+            let delta_y = init_y - y;
+            let factor = (1.0 + delta_y * 0.01).max(0.05);
+            let new_scale_u = (init_scale[0] * factor).clamp(0.01, 5.0);
+            let new_scale_v = (init_scale[1] * factor).clamp(0.01, 5.0);
+            self.set_active_decal_transform(
+                init_center,
+                [new_scale_u, new_scale_v],
+                init_rot.to_radians(),
+            )
+        } else if is_ctrl {
+            let delta_x = x - init_x;
+            let new_rot_deg = init_rot + delta_x * 0.5;
+            self.set_active_decal_transform(init_center, init_scale, new_rot_deg.to_radians())
+        } else {
+            let width = self.viewport_size[0].max(1.0);
+            let height = self.viewport_size[1].max(1.0);
+            if !x.is_finite()
+                || !y.is_finite()
+                || !(0.0..width).contains(&x)
+                || !(0.0..height).contains(&y)
+            {
+                return false;
+            }
+            let ndc_x = x / width * 2.0 - 1.0;
+            let ndc_y = 1.0 - y / height * 2.0;
+            let (origin, direction) = self.state.session.camera.ray(ndc_x, ndc_y);
+            let uv_opt = pick_face_hit(&self.state, origin, direction).and_then(|(face, hit)| {
+                petunia_module_paint::PaintModule::face_hit_uv(&self.state, face, hit, false)
+            });
+            if let Some(uv) = uv_opt {
+                return self.set_active_decal_transform(uv, init_scale, init_rot.to_radians());
+            }
+            true
+        }
+    }
+
+    pub fn decal_drag_end(&mut self) -> bool {
+        if self.decal_drag_initial.take().is_some() {
+            self.state.checkpoint("decal transform");
+            self.state.set_status("Decal transform committed");
+            self.state.mark_dirty();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn cancel_decal_drag(&mut self) -> bool {
+        if let Some((_, _, init_center, init_scale, init_rot)) = self.decal_drag_initial.take() {
+            self.set_active_decal_transform(init_center, init_scale, init_rot.to_radians());
+            self.state.set_status("Decal transform cancelled");
+            self.state.mark_dirty();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Inicia um traço de pintura ou manipulação de decalque contínuo.
     pub fn begin_paint_stroke_at(&mut self, x: f32, y: f32) -> bool {
+        self.begin_paint_stroke_with_modifiers(x, y, false, false)
+    }
+
+    /// Inicia um traço de pintura ou manipulação interativa de decalque com modificadores (Shift: escala, Ctrl: rotação).
+    pub fn begin_paint_stroke_with_modifiers(
+        &mut self,
+        x: f32,
+        y: f32,
+        is_shift: bool,
+        is_ctrl: bool,
+    ) -> bool {
         if self.state.workspace != Workspace::Paint {
             return false;
         }
         if self.state.project.active_mesh().is_none() {
             self.state.set_status("No active mesh to paint");
             return false;
+        }
+        if self.active_layer_is_decal() {
+            return self.decal_drag_begin(x, y, is_shift, is_ctrl);
         }
         if self.state.session.tools.active_tool == "picker" {
             return self.pick_paint_color_at(x, y);
@@ -3516,6 +3837,20 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     /// Estende o traço interpolando em espaço de tela e pintando cada dab.
     pub fn paint_stroke_to(&mut self, x: f32, y: f32) -> bool {
+        self.paint_stroke_to_with_modifiers(x, y, false, false)
+    }
+
+    /// Estende o traço de pintura ou manipulação de decalque com suporte a modificadores.
+    pub fn paint_stroke_to_with_modifiers(
+        &mut self,
+        x: f32,
+        y: f32,
+        is_shift: bool,
+        is_ctrl: bool,
+    ) -> bool {
+        if self.active_layer_is_decal() {
+            return self.decal_drag_to(x, y, is_shift, is_ctrl);
+        }
         let Some(last) = self.paint_last else {
             return false;
         };
@@ -3533,8 +3868,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
-    /// Confirma o traço como uma única entrada de undo.
+    /// Confirma o traço de pintura ou manipulação de decalque como uma única entrada de undo.
     pub fn end_paint_stroke_at(&mut self, x: f32, y: f32) -> bool {
+        if self.decal_drag_initial.is_some() {
+            return self.decal_drag_end();
+        }
         if self.shape_anchor.is_some() {
             return self.end_paint_shape_at(x, y);
         }
@@ -3546,6 +3884,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn cancel_paint_stroke(&mut self) -> bool {
+        if self.cancel_decal_drag() {
+            return true;
+        }
         if self.cancel_paint_shape() {
             return true;
         }
@@ -3815,6 +4156,17 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
+    /// Exibe tag flutuante com a média de medidas na multiseleção de arestas.
+    pub fn set_multiselection_measure_tag(&mut self, enabled: bool) -> bool {
+        if self.state.ui.multiselection_measure_tag == enabled {
+            return false;
+        }
+        self.state.ui.multiselection_measure_tag = enabled;
+        self.preferences.multiselection_measure_tag = enabled;
+        self.state.mark_dirty();
+        true
+    }
+
     /// Intervalo máximo em milissegundos para duplo toque de tecla de ferramenta.
     pub fn set_double_tap_interval_ms(&mut self, interval_ms: u64) -> bool {
         let clamped = interval_ms.min(2000);
@@ -3955,9 +4307,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         true
     }
 
-    /// O modo Instant está ativo?
+    /// O modo Instant / Modo Livre com mouse está ativo?
     pub fn is_instant_tool_mode(&self) -> bool {
         self.keyboard_tool_modal_active
+            || self.instant_transform
             || self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant
     }
 
@@ -4676,6 +5029,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.preferences.invert_vertical_drag = self.state.ui.invert_vertical_drag;
         self.preferences.colorblind_axes = self.state.ui.colorblind_axes;
         self.preferences.reduced_motion = self.state.ui.reduced_motion;
+        self.preferences.multiselection_measure_tag = self.state.ui.multiselection_measure_tag;
         self.preferences.selection_rgb = self.state.ui.selection_rgb;
         self.preferences.selection_thickness = self.state.ui.selection_thickness;
         self.preferences.model_quick_actions = self.state.ui.model_quick_actions.clone();
@@ -6687,9 +7041,48 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     fn execute_shortcut_tool(&mut self, id: &str) {
-        let was_active = self.tool_modal.is_some();
-        if self.execute_core_command(id).is_ok() && !was_active && self.tool_modal.is_some() {
-            self.keyboard_tool_modal_active = true;
+        let now = std::time::Instant::now();
+        let interval_ms = self.preferences.double_tap_interval_ms;
+
+        let is_double_tap = if interval_ms > 0 {
+            if let Some((ref last_tool, last_time)) = self.last_tool_press {
+                last_tool == id
+                    && now.duration_since(last_time).as_millis() <= interval_ms as u128
+            } else {
+                false
+            }
+        } else {
+            self.tool_modal.as_ref().map_or(false, |m| m.id() == id)
+        };
+
+        let kind = ToolModalKind::from_id(id);
+        let is_instant_pref =
+            self.state.session.tools.tool_activation == petunia_core::ToolActivation::Instant;
+
+        if is_double_tap || is_instant_pref {
+            self.last_tool_press = None;
+            if self.tool_modal.is_none() {
+                let _ = self.execute_core_command(id);
+            }
+            if self.tool_modal.is_some() {
+                self.keyboard_tool_modal_active = true;
+                let label = kind.map_or("Ferramenta", |k| k.title());
+                self.state.set_status(format!(
+                    "{} (Modo Livre) · Mova o mouse, LMB/Enter para confirmar, RMB/Esc para cancelar",
+                    label
+                ));
+            }
+        } else {
+            self.last_tool_press = Some((id.to_string(), now));
+            if self.tool_modal.is_none() {
+                let _ = self.execute_core_command(id);
+            }
+            self.keyboard_tool_modal_active = false;
+            let label = kind.map_or("Ferramenta", |k| k.title());
+            self.state.set_status(format!(
+                "Ferramenta {} ativa · Ajuste no card de opções ou aperte novamente para Modo Livre",
+                label
+            ));
         }
     }
 
@@ -6769,8 +7162,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                     self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
                     return true;
                 }
-                "4" | "0" => {
+                "4" => {
                     self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Object));
+                    return true;
+                }
+                "Tab" => {
+                    self.apply(UiIntent::CycleSelectionDomain);
                     return true;
                 }
                 _ => {}
@@ -7745,6 +8142,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_profile_sharp_corners =
             translated(petunia_config::text_id::UI_PROFILE_SHARP_CORNERS);
         vm.label_profile_smoothness = translated(petunia_config::text_id::UI_PROFILE_SMOOTHNESS);
+        vm.label_decal_transform = translated(petunia_config::text_id::UI_DECAL_TRANSFORM);
+        vm.label_decal_position = translated(petunia_config::text_id::UI_DECAL_POSITION);
+        vm.label_decal_scale = translated(petunia_config::text_id::UI_DECAL_SCALE);
+        vm.label_decal_rotation = translated(petunia_config::text_id::UI_DECAL_ROTATION);
+        vm.label_decal_bake = translated(petunia_config::text_id::UI_DECAL_BAKE);
+        vm.label_decal_hint = translated(petunia_config::text_id::UI_DECAL_HINT);
         vm.label_hide_part = translated(petunia_config::text_id::UI_HIDE_PART);
         vm.label_show_part = translated(petunia_config::text_id::UI_SHOW_PART);
         vm.label_lock_part = translated(petunia_config::text_id::UI_LOCK_PART);
@@ -7879,6 +8282,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.decal_scale_u = decal.scale_uv[0];
             vm.decal_scale_v = decal.scale_uv[1];
             vm.decal_rotation_deg = decal.rotation_rad.to_degrees();
+            vm.decal_preview_commands = self.decal_preview_commands();
         }
         if let Some((width, height)) = self.paint_canvas_dimensions() {
             vm.paint_canvas_size = format!("{width} × {height}");
@@ -8032,11 +8436,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.invert_vertical_drag = self.state.ui.invert_vertical_drag;
         vm.colorblind_axes = self.state.ui.colorblind_axes;
         vm.reduced_motion = self.state.ui.reduced_motion;
+        vm.multiselection_measure_tag = self.state.ui.multiselection_measure_tag;
         vm.double_tap_interval_ms = self.preferences.double_tap_interval_ms as i32;
         vm.label_colorblind_axes = translated(petunia_config::text_id::PREFERENCES_COLORBLIND_AXES);
         vm.label_reduced_motion = translated(petunia_config::text_id::PREFERENCES_REDUCED_MOTION);
         vm.label_double_tap_interval =
             translated(petunia_config::text_id::PREFERENCES_DOUBLE_TAP_INTERVAL);
+        vm.label_multiselection_measure_tag =
+            translated(petunia_config::text_id::PREFERENCES_MULTISELECTION_MEASURE);
         if let Some(kind) = self.tool_modal {
             let (minimum, maximum) = kind.bounds();
             vm.tool_modal_active = true;
@@ -8307,6 +8714,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     state.ui.invert_vertical_drag = preferences.invert_vertical_drag;
     state.ui.colorblind_axes = preferences.colorblind_axes;
     state.ui.reduced_motion = preferences.reduced_motion;
+    state.ui.multiselection_measure_tag = preferences.multiselection_measure_tag;
     state.ui.selection_rgb = if selection_color_has_contrast(preferences.selection_rgb) {
         preferences.selection_rgb
     } else {

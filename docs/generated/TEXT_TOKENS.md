@@ -14,7 +14,7 @@ description: Catálogo canônico de chaves de internacionalização TextId (P3D-
 > **Single Source of Truth (P3D-088, P3D-119)**
 > A UI do Petunia3D é 100% internacionalizada. Nenhuma string do usuário é hardcoded; todas as mensagens passam pelo motor `I18n` com fallback seguro em inglês.
 
-Total de chaves de localização cadastradas: **770**.
+Total de chaves de localização cadastradas: **777**.
 
 | Chave (`TextId`) | Inglês (`en.toml`) | Português (`pt-BR.toml`) |
 | :--- | :--- | :--- |
@@ -345,6 +345,7 @@ Total de chaves de localização cadastradas: **770**.
 | `pivot.origin_to_selection` | Origin to Selection | Origem para a Seleção |
 | `preferences.colorblind_axes` | Colorblind axes differentiation (X, Y, Z labels) | Diferenciação não-cromática de eixos (Rótulos X, Y, Z) |
 | `preferences.double_tap_interval` | Double-tap shortcut interval (ms) | Intervalo de duplo toque de atalho (ms) |
+| `preferences.multiselection_measure_tag` | Display average measure tag on multiple edge selection | Exibir tag de média na multiseleção de arestas |
 | `preferences.reduced_motion` | Reduced motion (disable viewport animations) | Redução de movimento (desativa animações do viewport) |
 | `prims.body_length` | Body Length | Comprimento do Corpo |
 | `prims.bottom_radius` | Bottom Radius | Raio da Base |
@@ -591,6 +592,12 @@ Total de chaves de localização cadastradas: **770**.
 | `ui.close` | Close | Fechar |
 | `ui.collapse` | Collapse section | Recolher painel |
 | `ui.collapse_inspector` | Collapse inspector | Recolher inspector |
+| `ui.decal_bake` | Bake Decal to Layer | Fixar Decalque na Camada |
+| `ui.decal_hint` | Drag on 3D surface to place decal. Shift+drag: scale, Ctrl+drag: rotate. | Arraste na superfície 3D para posicionar. Shift+arraste: escala, Ctrl+arraste: rotação. |
+| `ui.decal_position` | Position | Posição |
+| `ui.decal_rotation` | Rotation | Rotação |
+| `ui.decal_scale` | Scale | Escala |
+| `ui.decal_transform` | Decal Transform (UV) | Transformação do Decalque (UV) |
 | `ui.dock_split_hint` | Drag to resize panels | Arraste para redimensionar os painéis |
 | `ui.duplicate` | Duplicate | Duplicar |
 | `ui.expand` | Expand section | Expandir painel |

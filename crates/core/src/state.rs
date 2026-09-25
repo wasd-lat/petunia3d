@@ -848,7 +848,7 @@ impl EditorSession {
             show_grid: true,
             grid_settings: GridSettings::default(),
             show_axes: true,
-            show_wireframe_overlay: false,
+            show_wireframe_overlay: true,
             show_cursor: true,
             show_face_orientation: false,
             show_uv_checker: false,
@@ -1021,6 +1021,8 @@ pub struct UiState {
     pub colorblind_axes: bool,
     /// Redução de movimento para usuários com sensibilidade vestibular / labirintite.
     pub reduced_motion: bool,
+    /// Exibe tag flutuante com a média de medidas na multiseleção de arestas.
+    pub multiselection_measure_tag: bool,
     pub selection_rgb: [u8; 3],
     pub selection_thickness: f32,
     pub inspector_detached: bool,
@@ -1109,6 +1111,7 @@ impl UiState {
             invert_vertical_drag: false,
             colorblind_axes: false,
             reduced_motion: false,
+            multiselection_measure_tag: true,
             selection_rgb: [233, 106, 0],
             selection_thickness: 2.0,
             inspector_detached: false,

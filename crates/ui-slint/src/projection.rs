@@ -1080,7 +1080,8 @@ pub(crate) fn compute_quick_measure(
             let mut min_pt = glam::Vec3::splat(f32::INFINITY);
             let mut max_pt = glam::Vec3::splat(f32::NEG_INFINITY);
             let mut commands = String::new();
-            let mut tags = Vec::new();
+            let mut vert_counts: std::collections::HashMap<u32, usize> =
+                std::collections::HashMap::new();
 
             for &(v0, v1) in &sorted_edges {
                 let idx0 = v0 as usize;
@@ -1098,11 +1099,13 @@ pub(crate) fn compute_quick_measure(
                 edge_count += 1;
                 min_pt = min_pt.min(p0).min(p1);
                 max_pt = max_pt.max(p0).max(p1);
+                *vert_counts.entry(v0).or_insert(0) += 1;
+                *vert_counts.entry(v1).or_insert(0) += 1;
 
                 let (Some(a), Some(b)) = (project_pt(p0), project_pt(p1)) else {
                     continue;
                 };
-                let Some(([nx, ny], _, tag_pos)) = compute_offset(a, b) else {
+                let Some(([nx, ny], _, _)) = compute_offset(a, b) else {
                     continue;
                 };
                 let _ = write!(
@@ -1121,14 +1124,6 @@ pub(crate) fn compute_quick_measure(
                     b[0],
                     b[1],
                 );
-                // Limita a exibição de tags individuais para evitar poluição visual com dezenas de arestas
-                if tags.len() < 16 {
-                    tags.push(MeasureTagModel {
-                        text: format!("{:.3}m", edge_dist),
-                        x: tag_pos[0],
-                        y: tag_pos[1],
-                    });
-                }
             }
 
             if edge_count == 0 {
@@ -1142,13 +1137,40 @@ pub(crate) fn compute_quick_measure(
                 total_distance, edge_count, avg_distance, span.x, span.y, span.z
             );
             let text = format!("Total: {:.3}m ({} edges)", total_distance, edge_count);
-            let label_x = tags.first().map(|t| t.x).unwrap_or(width * 0.5);
-            let label_y = tags.first().map(|t| t.y).unwrap_or(height * 0.5);
+
+            // Ponto de interseção ou centróide geométrico das arestas selecionadas
+            let center_pt =
+                if let Some((&best_v, &max_c)) = vert_counts.iter().max_by_key(|entry| *entry.1) {
+                    if max_c >= 2 && vert_counts.values().filter(|&&c| c == max_c).count() == 1 {
+                        mesh.verts[best_v as usize].vec()
+                    } else {
+                        let sum: glam::Vec3 = vert_counts
+                            .keys()
+                            .map(|&v| mesh.verts[v as usize].vec())
+                            .sum();
+                        sum / (vert_counts.len() as f32)
+                    }
+                } else {
+                    (min_pt + max_pt) * 0.5
+                };
+
+            let tag_screen_pos = project_pt(center_pt);
+            let mut tags = Vec::new();
+            if let (true, Some([sx, sy])) = (state.ui.multiselection_measure_tag, tag_screen_pos) {
+                tags.push(MeasureTagModel {
+                    text: format!("Ø {:.3}m", avg_distance),
+                    x: sx,
+                    y: sy - 14.0,
+                });
+            }
+
+            let label_x = tag_screen_pos.map(|p| p[0]).unwrap_or(width * 0.5);
+            let label_y = tag_screen_pos.map(|p| p[1] - 14.0).unwrap_or(height * 0.5);
 
             return QuickMeasureModel {
                 visible: true,
                 commands,
-                distance: total_distance,
+                distance: avg_distance,
                 dx: span.x,
                 dy: span.y,
                 dz: span.z,

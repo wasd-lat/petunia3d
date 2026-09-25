@@ -325,7 +325,7 @@ impl CommandRegistry {
             CommandDescriptor {
                 id: CommandId::ToggleSceneDrawer,
                 label_key: "commands.scene_drawer",
-                shortcut: Some("Tab"),
+                shortcut: Some("F4"),
                 workspace: None,
             },
             CommandDescriptor {

@@ -268,7 +268,7 @@ mod tests {
                         xray: false,
                         show_triangulation: false,
                         textured: false,
-                        show_wireframe_overlay: false,
+                        show_wireframe_overlay: true,
                         show_face_orientation: false,
                         show_uv_checker: false,
                         selection_domain: petunia_core::SelectionDomain::Object,

@@ -561,6 +561,13 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_label_profile_smooth_curves(vm.label_profile_smooth_curves.as_str().into());
     window.set_label_profile_sharp_corners(vm.label_profile_sharp_corners.as_str().into());
     window.set_label_profile_smoothness(vm.label_profile_smoothness.as_str().into());
+    window.set_label_decal_transform(vm.label_decal_transform.as_str().into());
+    window.set_label_decal_position(vm.label_decal_position.as_str().into());
+    window.set_label_decal_scale(vm.label_decal_scale.as_str().into());
+    window.set_label_decal_rotation(vm.label_decal_rotation.as_str().into());
+    window.set_label_decal_bake(vm.label_decal_bake.as_str().into());
+    window.set_label_decal_hint(vm.label_decal_hint.as_str().into());
+    window.set_decal_preview_commands(vm.decal_preview_commands.as_str().into());
     window.set_hint_model_select(vm.hint_model_select.as_str().into());
     window.set_hint_model_position(vm.hint_model_position.as_str().into());
     window.set_hint_model_rotate(vm.hint_model_rotate.as_str().into());
@@ -707,13 +714,17 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_profile_has_curves(vm.profile_has_curves);
     window.set_tool_activation(vm.tool_activation.as_str().into());
     window.set_keyboard_tool_modal_active(vm.keyboard_tool_modal_active);
+    window.set_is_instant_tool_mode(vm.is_instant_tool_mode);
     window.set_invert_vertical_drag(vm.invert_vertical_drag);
     window.set_colorblind_axes(vm.colorblind_axes);
     window.set_reduced_motion(vm.reduced_motion);
     window.set_double_tap_interval_ms(vm.double_tap_interval_ms);
+    window.set_multiselection_measure_tag(vm.multiselection_measure_tag);
     window.set_label_colorblind_axes(vm.label_colorblind_axes.as_str().into());
     window.set_label_reduced_motion(vm.label_reduced_motion.as_str().into());
     window.set_label_double_tap_interval(vm.label_double_tap_interval.as_str().into());
+    window
+        .set_label_multiselection_measure_tag(vm.label_multiselection_measure_tag.as_str().into());
     window.set_tool_modal_active(vm.tool_modal_active);
     window.set_tool_options_active(vm.tool_options_active);
     window.set_tool_options_title(vm.tool_options_title.as_str().into());
@@ -1678,12 +1689,16 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
 
     let paint_begin_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_viewport_paint_begin(move |x, y| {
+    window.on_viewport_paint_begin(move |x, y, is_shift, is_ctrl| {
         if let Ok(mut bridge) = paint_begin_bridge.lock() {
-            bridge.begin_paint_stroke_at(x, y);
+            bridge.begin_paint_stroke_with_modifiers(x, y, is_shift, is_ctrl);
             let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
                 bridge.publish_canvas_image(&window);
             }
         }
@@ -1691,9 +1706,9 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
 
     let paint_update_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
-    window.on_viewport_paint_update(move |x, y| {
+    window.on_viewport_paint_update(move |x, y, is_shift, is_ctrl| {
         if let Ok(mut bridge) = paint_update_bridge.lock() {
-            bridge.paint_stroke_to(x, y);
+            bridge.paint_stroke_to_with_modifiers(x, y, is_shift, is_ctrl);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {
@@ -1810,6 +1825,20 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
             }
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let measure_tag_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_multiselection_measure_tag_set(move |enabled| {
+        if let Ok(mut bridge) = measure_tag_bridge.lock() {
+            if bridge.set_multiselection_measure_tag(enabled) {
+                persist_user_preferences(&mut bridge);
+            }
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+                sync_viewport_overlays(&window, &bridge);
             }
         }
     });

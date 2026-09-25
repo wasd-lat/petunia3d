@@ -123,6 +123,8 @@ pub struct UserPreferences {
     pub colorblind_axes: bool,
     /// Redução de movimento para usuários com sensibilidade vestibular / labirintite.
     pub reduced_motion: bool,
+    /// Exibe tag flutuante com a média de medidas na multiseleção de arestas.
+    pub multiselection_measure_tag: bool,
     /// Dock/float/pin por módulo do Inspector, chaveado por `InspectorSectionId::as_str`.
     /// Chaves desconhecidas são descartadas ao carregar; módulos ausentes usam o padrão.
     /// Dock/float/pin per Inspector module, keyed by `InspectorSectionId::as_str`.
@@ -140,6 +142,7 @@ impl Default for UserPreferences {
             double_tap_interval_ms: 350,
             colorblind_axes: false,
             reduced_motion: false,
+            multiselection_measure_tag: true,
             section_layouts: BTreeMap::new(),
         }
     }
@@ -248,6 +251,7 @@ mod tests {
             model_quick_actions: vec!["model.fuse".to_string()],
             colorblind_axes: false,
             reduced_motion: false,
+            multiselection_measure_tag: true,
             double_tap_interval_ms: 300,
             section_layouts: BTreeMap::from([(
                 InspectorSectionId::Material.as_str().to_string(),

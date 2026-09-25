@@ -317,6 +317,12 @@ pub mod text_id {
     pub const UI_PROFILE_SHARP_CORNERS: TextId = TextId::new("ui.profile_sharp_corners");
     pub const UI_PROFILE_SMOOTHNESS: TextId = TextId::new("ui.profile_smoothness");
     pub const UI_PROFILE_SWEEP: TextId = TextId::new("ui.profile_sweep");
+    pub const UI_DECAL_TRANSFORM: TextId = TextId::new("ui.decal_transform");
+    pub const UI_DECAL_POSITION: TextId = TextId::new("ui.decal_position");
+    pub const UI_DECAL_SCALE: TextId = TextId::new("ui.decal_scale");
+    pub const UI_DECAL_ROTATION: TextId = TextId::new("ui.decal_rotation");
+    pub const UI_DECAL_BAKE: TextId = TextId::new("ui.decal_bake");
+    pub const UI_DECAL_HINT: TextId = TextId::new("ui.decal_hint");
     pub const UI_MODEL_SELECT_HINT: TextId = TextId::new("ui.model_select_hint");
     pub const UI_MODEL_POSITION_HINT: TextId = TextId::new("ui.model_position_hint");
     pub const UI_MODEL_ROTATE_HINT: TextId = TextId::new("ui.model_rotate_hint");
@@ -365,6 +371,8 @@ pub mod text_id {
     pub const PREFERENCES_REDUCED_MOTION: TextId = TextId::new("preferences.reduced_motion");
     pub const PREFERENCES_DOUBLE_TAP_INTERVAL: TextId =
         TextId::new("preferences.double_tap_interval");
+    pub const PREFERENCES_MULTISELECTION_MEASURE: TextId =
+        TextId::new("preferences.multiselection_measure_tag");
 
     // Diálogo de recuperação de autosave (P3D-002).
     pub const UI_RECOVERY_TITLE: TextId = TextId::new("ui.recovery_title");
@@ -637,6 +645,12 @@ pub mod text_id {
         UI_PROFILE_SHARP_CORNERS,
         UI_PROFILE_SMOOTHNESS,
         UI_PROFILE_SWEEP,
+        UI_DECAL_TRANSFORM,
+        UI_DECAL_POSITION,
+        UI_DECAL_SCALE,
+        UI_DECAL_ROTATION,
+        UI_DECAL_BAKE,
+        UI_DECAL_HINT,
         UI_MODEL_SELECT_HINT,
         UI_MODEL_POSITION_HINT,
         UI_MODEL_ROTATE_HINT,
@@ -680,6 +694,7 @@ pub mod text_id {
         PREFERENCES_COLORBLIND_AXES,
         PREFERENCES_REDUCED_MOTION,
         PREFERENCES_DOUBLE_TAP_INTERVAL,
+        PREFERENCES_MULTISELECTION_MEASURE,
         FILE_NEW,
         FILE_OPEN_PROJECT,
         FILE_SAVE,
