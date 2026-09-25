@@ -45,7 +45,7 @@ pub fn profile_add_point(state: &mut AppState, nx: f32, ny: f32) {
     let n = state.profile.points.len();
     if n >= 3 {
         let f = state.profile.points[0];
-        if (f[0] - x).hypot(f[1] - y) < 0.15 {
+        if (f[0] - x).hypot(f[1] - y) < 0.25 {
             state.profile.closed = true;
             state.set_status(state.t("profile.closed"));
             state.mark_dirty();
@@ -109,7 +109,12 @@ pub fn generate_revolve(state: &mut AppState) {
         return;
     }
     // perfil aberto vale para revolve (não exige closed)
-    match Mesh::revolve(&p.points, p.revolve_segments.max(3)) {
+    let angle = if p.revolve_angle <= 0.0 {
+        360.0
+    } else {
+        p.revolve_angle
+    };
+    match Mesh::revolve_angle(&p.points, p.revolve_segments.max(3), angle) {
         Ok(mut m) => {
             let r = glam::Vec3::from(p.right);
             let u = glam::Vec3::from(p.up);

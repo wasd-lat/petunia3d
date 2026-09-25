@@ -147,6 +147,7 @@ pub struct ProfileState {
     pub closed: bool,
     pub depth: f32,
     pub revolve_segments: u32,
+    pub revolve_angle: f32,
     pub snap: bool,
 }
 
@@ -155,6 +156,7 @@ impl ProfileState {
         *self = Self {
             depth: self.depth,
             revolve_segments: self.revolve_segments,
+            revolve_angle: self.revolve_angle,
             ..Default::default()
         };
         if self.depth == 0.0 {
@@ -162,6 +164,9 @@ impl ProfileState {
         }
         if self.revolve_segments == 0 {
             self.revolve_segments = 12;
+        }
+        if self.revolve_angle <= 0.0 {
+            self.revolve_angle = 360.0;
         }
     }
     pub fn to_3d(&self, i: usize) -> Vec3 {

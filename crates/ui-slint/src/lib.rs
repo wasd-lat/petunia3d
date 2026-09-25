@@ -4643,6 +4643,21 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         })
     }
 
+    pub fn merge_down_paint_layer(&mut self, id: &str) -> bool {
+        let Ok(id) = uuid::Uuid::parse_str(id) else {
+            return false;
+        };
+        self.mutate_paint_stack("merge down paint layer", |stack| {
+            let Some(pos) = stack.layers.iter().position(|layer| layer.id == id) else {
+                return false;
+            };
+            if pos == 0 {
+                return false;
+            }
+            stack.merge_down(pos)
+        })
+    }
+
     /// Move a camada em `delta` posições na ordem de composição.
     pub fn move_paint_layer(&mut self, id: &str, delta: i32) -> bool {
         let Ok(id) = uuid::Uuid::parse_str(id) else {
@@ -5511,6 +5526,20 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     /// Executa Fuse/Cut/Intersect pelo id canônico do comando.
     pub fn boolean_op(&mut self, id: &str) -> bool {
+        if self.state.session.tools.boolean_operand.is_none()
+            && self.state.project.assets.len() == 2
+        {
+            let active_id = self.state.project.active().map(|a| a.id);
+            if let Some(other) = self
+                .state
+                .project
+                .assets
+                .iter()
+                .find(|a| Some(a.id) != active_id)
+            {
+                self.state.session.tools.boolean_operand = Some(other.id);
+            }
+        }
         match self.execute_core_command(id) {
             Ok(()) => true,
             Err(error) => {

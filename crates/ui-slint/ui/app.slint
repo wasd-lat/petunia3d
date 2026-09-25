@@ -2911,6 +2911,7 @@ export component PetuniaSlintShell inherits Window {
     callback paint-layer-added;
     callback paint-layer-group-added;
     callback paint-layer-removed(string);
+    callback paint-layer-merged-down(string);
     callback paint-layer-activated(string);
     callback paint-layer-visibility-toggled(string);
     callback paint-layer-lock-toggled(string);
@@ -6408,6 +6409,14 @@ export component PetuniaSlintShell inherits Window {
                                                 accessible-label: "Layer locked";
                                                 accessible-checked: layer.locked;
                                                 TouchArea { clicked => { root.paint-layer-lock-toggled(layer.id); } }
+                                            }
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                IconDisplay { icon: IconSet.Merge; size: 11px; stroke: DesignTokens.text-muted; }
+                                                accessible-role: button;
+                                                accessible-label: "Merge layer down";
+                                                TouchArea { clicked => { root.paint-layer-merged-down(layer.id); } }
                                             }
                                             Rectangle {
                                                 width: 18px;

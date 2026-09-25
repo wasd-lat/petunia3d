@@ -2616,6 +2616,24 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let paint_merge_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_layer_merged_down(move |id| {
+        if let Ok(mut bridge) = paint_merge_bridge.lock() {
+            if !bridge.merge_down_paint_layer(id.as_str()) {
+                bridge.state.set_status("Cannot merge down this layer");
+            }
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     let paint_active_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
     window.on_paint_layer_activated(move |id| {

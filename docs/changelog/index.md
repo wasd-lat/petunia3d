@@ -13,6 +13,9 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 - Alternância de costura UV com atalho direto `U` para arestas selecionadas ou dentro do workspace UV.
 - Preenchimento de ilhas UV (`FillScope::UvIsland`) com sangria de textura (UV Bleed / dilation de 2px) em direção a pixels adjacentes transparentes, prevenindo frestas não texturizadas nas costuras em 3D.
 - Diagnóstico de orientação no UV Checkerboard com faixas de destaque no eixo U (quente/avermelhado) e no eixo V (frio/azulado) no WGPU e no renderizador software.
+- Mesclagem de camadas de pintura ("Merge Down") no workspace PAINT com composição determinística de Raster, Decalques projetados e Efeitos, botão dedicado na UI Slint e seleção ativa atualizada.
+- Perfil 2D (Draw Profile) com ângulo de revolução (Lathe/Revolve) customizável (`Mesh::revolve_angle`) para geração de setores parciais com fechamento automático de tampas de extremidade e snap magnético ampliado para 0.25.
+- Operações Booleanas (Fuse, Cut, Intersect) com inferência automática de operando secundário quando o projeto possui exatamente dois objetos.
 
 ### Módulos independentes do Inspector: ancorar, flutuar e fixar (24/09/2026, ADR 005)
 - Cada módulo do Inspector direito (Parts, Transform, Material, Object, Modifiers, Quick Actions) tem estado próprio: ancorado ou flutuante, posição, "manter aberto" e asset fixado, com persistência individual por módulo.

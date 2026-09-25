@@ -460,6 +460,15 @@ mod tests {
     }
 
     #[test]
+    fn revolve_partial_angle_counts() {
+        let profile = [[0.0, 0.0], [1.0, 0.0], [1.0, 2.0], [0.0, 2.0]];
+        let m = Mesh::revolve_angle(&profile, 8, 180.0).expect("revolve 180");
+        assert!(!m.faces.is_empty());
+        assert!(!m.verts.is_empty());
+        assert!(m.faces.iter().all(|f| f.uv.len() == f.verts.len()));
+    }
+
+    #[test]
     fn mirror_welds_center() {
         let mut m = Mesh::plane(2.0);
         m.select_all();

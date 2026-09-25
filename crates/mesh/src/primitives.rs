@@ -634,16 +634,39 @@ impl Mesh {
     /// Revolve (torno): perfil `[[raio, altura], ..]` girado em torno do eixo Y.
     /// Raio é clampado em >= 0. Fecha polos quando o perfil encosta no eixo.
     pub fn revolve(profile: &[[f32; 2]], segments: u32) -> Result<Self, String> {
+        Self::revolve_angle(profile, segments, 360.0)
+    }
+
+    /// Revolução em torno do eixo Y por um ângulo configurável em graus (ex.: 90°, 180°, 360°).
+    pub fn revolve_angle(
+        profile: &[[f32; 2]],
+        segments: u32,
+        angle_degrees: f32,
+    ) -> Result<Self, String> {
         if profile.len() < 2 {
             return Err("perfil precisa de ao menos 2 pontos".to_string());
         }
         let seg = segments.clamp(3, 64) as usize;
+        let angle_deg = if angle_degrees.is_finite() && angle_degrees > 0.0 {
+            angle_degrees.min(360.0)
+        } else {
+            360.0
+        };
+        let is_full_circle = (angle_deg - 360.0).abs() < 1e-3;
+        let angle_rad = angle_deg.to_radians();
+
         let mut m = Mesh::default();
+        let num_steps = if is_full_circle { seg } else { seg + 1 };
+
         // anel por ponto do perfil
         for &[r, y] in profile {
             let r = r.max(0.0);
-            for s in 0..seg {
-                let a = (s as f32 / seg as f32) * std::f32::consts::TAU;
+            for s in 0..num_steps {
+                let a = if is_full_circle {
+                    (s as f32 / seg as f32) * std::f32::consts::TAU
+                } else {
+                    (s as f32 / seg as f32) * angle_rad
+                };
                 m.verts.push(Vertex::new(a.cos() * r, y, a.sin() * r));
             }
         }
@@ -653,10 +676,18 @@ impl Mesh {
                 continue; // segmento degenerado no eixo
             }
             for s in 0..seg {
-                let a = (k * seg + s) as u32;
-                let b = (k * seg + (s + 1) % seg) as u32;
-                let c = ((k + 1) * seg + (s + 1) % seg) as u32;
-                let d = ((k + 1) * seg + s) as u32;
+                let a = (k * num_steps + s) as u32;
+                let b = if is_full_circle {
+                    (k * num_steps + (s + 1) % seg) as u32
+                } else {
+                    (k * num_steps + s + 1) as u32
+                };
+                let c = if is_full_circle {
+                    ((k + 1) * num_steps + (s + 1) % seg) as u32
+                } else {
+                    ((k + 1) * num_steps + s + 1) as u32
+                };
+                let d = ((k + 1) * num_steps + s) as u32;
                 if axis(k) {
                     m.push_face(Face::new(vec![a, d, c]));
                 } else if axis(k + 1) {
@@ -665,6 +696,17 @@ impl Mesh {
                     m.push_face(Face::new(vec![a, d, c, b]));
                 }
             }
+        }
+        // Se a revolução for parcial (setor angular aberto), adiciona tampas nas extremidades
+        if !is_full_circle && profile.len() >= 3 {
+            let start_verts: Vec<u32> =
+                (0..profile.len()).map(|k| (k * num_steps) as u32).collect();
+            let end_verts: Vec<u32> = (0..profile.len())
+                .map(|k| (k * num_steps + seg) as u32)
+                .rev()
+                .collect();
+            m.push_face(Face::new(start_verts));
+            m.push_face(Face::new(end_verts));
         }
         m.project_planar();
         Ok(m)

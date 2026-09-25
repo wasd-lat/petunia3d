@@ -5636,3 +5636,58 @@ fn test_uv_seam_shortcut_u() {
     let mesh = bridge.state.project.active_mesh().unwrap();
     assert!(!mesh.uv_seams.contains(&(0, 1)) && !mesh.uv_seams.contains(&(1, 0)));
 }
+
+#[test]
+fn test_merge_down_paint_layer() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetWorkspace(Workspace::Paint));
+
+    assert!(bridge.add_paint_layer());
+    assert_eq!(bridge.view_model().paint_layers.len(), 2);
+    let new_id = bridge.view_model().paint_layers[1].id.clone();
+    let base_id = bridge.view_model().paint_layers[0].id.clone();
+
+    // Tentar merge down da camada base (índice 0) deve falhar
+    assert!(!bridge.merge_down_paint_layer(&base_id));
+
+    // Merge down da camada 2 com a base deve suceder e resultar em 1 camada
+    assert!(bridge.merge_down_paint_layer(&new_id));
+    assert_eq!(bridge.view_model().paint_layers.len(), 1);
+    assert_eq!(bridge.view_model().paint_layers[0].id, base_id);
+}
+
+#[test]
+fn test_profile_revolve_custom_angle() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetActiveTool("draw_profile".to_string()));
+    bridge.state.profile.points = vec![[0.0, 0.0], [1.0, 0.5], [0.5, 1.0]];
+    bridge.state.profile.revolve_angle = 180.0;
+    bridge.state.profile.revolve_segments = 8;
+
+    let initial_count = bridge.state.project.assets.len();
+    assert!(bridge.generate_profile_revolve());
+    assert_eq!(bridge.state.project.assets.len(), initial_count + 1);
+
+    let active_mesh = bridge.state.project.active_mesh().unwrap();
+    assert!(!active_mesh.verts.is_empty());
+    assert!(!active_mesh.faces.is_empty());
+}
+
+#[test]
+fn test_boolean_op_auto_operand_with_two_objects() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    // Initial scene has 1 cube
+    assert_eq!(bridge.state.project.assets.len(), 1);
+
+    // Adiciona uma esfera na cena -> total 2 objetos
+    bridge
+        .state
+        .project
+        .add("Cube2", petunia_core::Mesh::cube(1.0));
+    assert_eq!(bridge.state.project.assets.len(), 2);
+
+    // Sem selecionar operando manualmente, Fuse auto-seleciona o outro objeto e executa
+    assert!(bridge.state.session.tools.boolean_operand.is_none());
+    assert!(bridge.boolean_op("model.fuse"));
+    assert_eq!(bridge.state.project.assets.len(), 1);
+}

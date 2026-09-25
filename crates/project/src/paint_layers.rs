@@ -313,6 +313,110 @@ impl PaintLayerStack {
         }
     }
 
+    /// Funde a camada na posição `pos` com a camada imediatamente abaixo (`pos - 1`).
+    pub fn merge_down(&mut self, pos: usize) -> bool {
+        if pos == 0 || pos >= self.layers.len() {
+            return false;
+        }
+        let lower_idx = pos - 1;
+        if self.layers[lower_idx].locked {
+            return false;
+        }
+        let (w, h) = if let Some(cv) = self.layers[lower_idx].canvas() {
+            (cv.w, cv.h)
+        } else if let Some(cv) = self.layers[pos].canvas() {
+            (cv.w, cv.h)
+        } else {
+            (256, 256)
+        };
+        if self.layers[lower_idx].canvas().is_none() {
+            self.layers[lower_idx].kind = LayerKind::Raster(Canvas::new(w, h, [0, 0, 0, 0]));
+        }
+
+        let upper = self.layers.remove(pos);
+        let lower = &mut self.layers[lower_idx];
+        if let Some(lower_cv) = lower.canvas_mut() {
+            if upper.visible && upper.opacity > 0.0 {
+                match &upper.kind {
+                    LayerKind::Raster(upper_cv) => {
+                        let blend_w = lower_cv.w.min(upper_cv.w);
+                        let blend_h = lower_cv.h.min(upper_cv.h);
+                        for y in 0..blend_h {
+                            for x in 0..blend_w {
+                                if let (Some(dst), Some(src)) =
+                                    (lower_cv.get(x, y), upper_cv.get(x, y))
+                                {
+                                    let blended =
+                                        blend_pixels(dst, src, upper.opacity, upper.blend);
+                                    lower_cv.set(x, y, blended);
+                                }
+                            }
+                        }
+                    }
+                    LayerKind::Decal(decal) => {
+                        let blend_w = lower_cv.w;
+                        let blend_h = lower_cv.h;
+                        let cos_rot = (-decal.rotation_rad).cos();
+                        let sin_rot = (-decal.rotation_rad).sin();
+                        for y in 0..blend_h {
+                            for x in 0..blend_w {
+                                let u = (x as f32 + 0.5) / blend_w as f32;
+                                let v = (y as f32 + 0.5) / blend_h as f32;
+                                let dx = u - decal.center_uv[0];
+                                let dy = v - decal.center_uv[1];
+                                let rx = dx * cos_rot - dy * sin_rot;
+                                let ry = dx * sin_rot + dy * cos_rot;
+                                let decal_u = rx / decal.scale_uv[0] + 0.5;
+                                let decal_v = ry / decal.scale_uv[1] + 0.5;
+                                if (0.0..=1.0).contains(&decal_u) && (0.0..=1.0).contains(&decal_v)
+                                {
+                                    let sx = (decal_u * decal.image.w as f32)
+                                        .clamp(0.0, decal.image.w as f32 - 1.0)
+                                        as u32;
+                                    let sy = (decal_v * decal.image.h as f32)
+                                        .clamp(0.0, decal.image.h as f32 - 1.0)
+                                        as u32;
+                                    if let (Some(dst), Some(src)) =
+                                        (lower_cv.get(x, y), decal.image.get(sx, sy))
+                                    {
+                                        let blended =
+                                            blend_pixels(dst, src, upper.opacity, upper.blend);
+                                        lower_cv.set(x, y, blended);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    LayerKind::Effect(effect) => {
+                        if upper.opacity >= 1.0 {
+                            apply_effect(lower_cv, effect);
+                        } else {
+                            let before = lower_cv.clone();
+                            apply_effect(lower_cv, effect);
+                            for y in 0..lower_cv.h {
+                                for x in 0..lower_cv.w {
+                                    if let (Some(dst), Some(src)) =
+                                        (before.get(x, y), lower_cv.get(x, y))
+                                    {
+                                        let blended = blend_pixels(
+                                            dst,
+                                            src,
+                                            upper.opacity,
+                                            LayerBlendMode::Normal,
+                                        );
+                                        lower_cv.set(x, y, blended);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.active_layer = lower_idx;
+        true
+    }
+
     pub fn active(&self) -> Option<&PaintLayer> {
         self.layers.get(self.active_layer)
     }
@@ -1182,5 +1286,24 @@ mod tests {
         } else {
             panic!("layer should exist after bake / camada deveria existir após bake");
         }
+    }
+
+    #[test]
+    fn test_paint_layers_merge_down() {
+        let base_canvas = Canvas::new(16, 16, [0, 0, 0, 255]);
+        let mut stack = PaintLayerStack::with_base("Base", base_canvas);
+
+        let mut top_canvas = Canvas::new(16, 16, [0, 0, 0, 0]);
+        top_canvas.set(4, 4, [255, 0, 0, 255]);
+        stack.add_layer(PaintLayer::new_raster("Top", top_canvas));
+
+        assert_eq!(stack.layers.len(), 2);
+        // Merge down of top layer (index 1) into base (index 0)
+        assert!(stack.merge_down(1));
+        assert_eq!(stack.layers.len(), 1);
+        let merged_pixel = stack.layers[0].canvas().unwrap().get(4, 4).unwrap();
+        assert_eq!(merged_pixel, [255, 0, 0, 255]);
+        let unmodified_pixel = stack.layers[0].canvas().unwrap().get(0, 0).unwrap();
+        assert_eq!(unmodified_pixel, [0, 0, 0, 255]);
     }
 }
