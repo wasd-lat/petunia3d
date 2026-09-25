@@ -159,6 +159,21 @@ pub(crate) fn compute_gizmo(state: &AppState, width: f32, height: f32) -> GizmoM
         }
     }
 
+    // 3D Cursor screen projection:
+    if state.session.show_cursor && state.session.show_overlays {
+        let cursor_world = glam::Vec3::from(state.session.cursor_3d);
+        let clip = view_proj * glam::Vec4::new(cursor_world.x, cursor_world.y, cursor_world.z, 1.0);
+        if clip.is_finite() && clip.w > 0.05 && clip.z >= 0.0 && clip.z <= clip.w {
+            let inv_w = 1.0 / clip.w;
+            let sx = (clip.x * inv_w * 0.5 + 0.5) * width;
+            let sy = (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height;
+            if sx >= 0.0 && sx <= width && sy >= 0.0 && sy <= height {
+                model.cursor_screen = [sx, sy];
+                model.cursor_visible = true;
+            }
+        }
+    }
+
     // Hastes de transformação: tamanho fixo em tela. O modo combinado mantém
     // três famílias de handle simultâneas e selecionáveis.
     if state.workspace != Workspace::Model

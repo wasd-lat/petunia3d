@@ -2458,6 +2458,12 @@ export component PetuniaSlintShell inherits Window {
     in-out property <length> view-gizmo-y-end-y: 54px;
     in-out property <length> view-gizmo-z-end-x: 54px;
     in-out property <length> view-gizmo-z-end-y: 54px;
+    in-out property <length> cursor-screen-x: 0px;
+    in-out property <length> cursor-screen-y: 0px;
+    in-out property <bool> cursor-visible: false;
+    in-out property <float> cursor-x: 0.0;
+    in-out property <float> cursor-y: 0.0;
+    in-out property <float> cursor-z: 0.0;
     callback view-axis-clicked(string);
     in-out property <bool> add-menu-open: false;
     in-out property <bool> context-menu-open: false;
@@ -2759,6 +2765,10 @@ export component PetuniaSlintShell inherits Window {
     callback viewport-select(float, float, bool, bool);
     callback viewport-box-select(float, float, float, float, bool, bool);
     callback viewport-lasso-select(string, bool, bool);
+    callback viewport-place-cursor(float, float);
+    callback cursor-coord-committed(int, float);
+    callback reset-cursor-requested;
+    callback frame-cursor-requested;
     callback viewport-transform-begin(string, float, float);
     callback viewport-transform-update(float, float, bool, bool);
     callback viewport-transform-end;
@@ -3091,12 +3101,46 @@ export component PetuniaSlintShell inherits Window {
 
                         if active-workspace == "MODEL": VerticalLayout {
                             spacing: 5px;
+
+                            // Grupo de Seleção (Box & Lasso)
+                            Rectangle {
+                                border-radius: 6px;
+                                background: DesignTokens.canvas;
+                                border-width: 1px;
+                                border-color: DesignTokens.border;
+                                VerticalLayout {
+                                    padding: 2px;
+                                    spacing: 2px;
+                                    ToolButton {
+                                        icon: IconSet.MousePointer2;
+                                        semantic-label: root.label-model-select;
+                                        description: root.hint-model-select;
+                                        active: active-tool == "select" || active-tool == "box_select";
+                                        clicked => { root.active-tool-changed("select"); }
+                                    }
+                                    ToolButton {
+                                        icon: IconSet.Spline;
+                                        semantic-label: root.label-model-lasso;
+                                        description: root.hint-model-lasso;
+                                        active: active-tool == "lasso_select";
+                                        clicked => { root.command-executed("model.tool_lasso"); }
+                                    }
+                                }
+                            }
+
+                            // 3D Cursor / Ponto Âncora 3D
                             ToolButton {
-                                icon: IconSet.MousePointer2;
-                                semantic-label: root.label-model-select;
-                                description: root.hint-model-select;
-                                active: active-tool == "select";
-                                clicked => { root.active-tool-changed("select"); }
+                                icon: IconSet.Crosshair;
+                                semantic-label: "3D Cursor";
+                                description: "3D Cursor (Âncora 3D para criação e câmera)";
+                                active: active-tool == "cursor" || active-tool == "cursor_3d";
+                                clicked => { root.command-executed("model.tool_cursor"); }
+                            }
+
+                            Rectangle {
+                                width: 28px;
+                                height: 1px;
+                                background: DesignTokens.border;
                             }
                             ViewportSvgButton {
                                 glyph: @image-url("icons/tool-position.svg");
@@ -3416,9 +3460,14 @@ export component PetuniaSlintShell inherits Window {
                             root.snap-mode = event.modifiers.control;
                             if event.kind == PointerEventKind.cancel || (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
                                 self.clear-gesture();
-                                // Blender: com sessão ativa o botão direito
-                                // cancela; sem sessão abre o menu da viewport.
-                                root.viewport-context-requested(self.mouse-x / 1px, self.mouse-y / 1px);
+                                if event.kind == PointerEventKind.down && event.modifiers.shift {
+                                    consume-click = true;
+                                    root.viewport-place-cursor(self.mouse-x / self.width, self.mouse-y / self.height);
+                                } else {
+                                    // Blender: com sessão ativa o botão direito
+                                    // cancela; sem sessão abre o menu da viewport.
+                                    root.viewport-context-requested(self.mouse-x / 1px, self.mouse-y / 1px);
+                                }
                             } else if event.kind == PointerEventKind.down {
                                 root-focus.focus();
                                 last-x = self.mouse-x;
@@ -3448,9 +3497,6 @@ export component PetuniaSlintShell inherits Window {
                                     && !root.profile-active && root.active-tool != "slice" {
                                     is-orbit = true;
                                     is-pan = false;
-                                } else if event.button == PointerEventButton.left && root.active-tool == "box_select" && !event.modifiers.alt {
-                                    is-box-select = true;
-                                    subtract-selection = event.modifiers.control;
                                 } else if event.button == PointerEventButton.left && root.active-tool == "lasso_select" && !event.modifiers.alt {
                                     is-lasso-select = true;
                                     subtract-selection = event.modifiers.control;
@@ -3460,8 +3506,10 @@ export component PetuniaSlintShell inherits Window {
                                     lasso-points = "\{self.mouse-x / self.width},\{self.mouse-y / self.height};";
                                     lasso-commands = "M \{self.mouse-x / 1px} \{self.mouse-y / 1px} ";
                                     moved-since-down = true;
+                                } else if event.button == PointerEventButton.left && (root.active-tool == "cursor" || root.active-tool == "cursor_3d") {
+                                    consume-click = true;
+                                    root.viewport-place-cursor(self.mouse-x / self.width, self.mouse-y / self.height);
                                 } else if event.button == PointerEventButton.left
-                                    && !event.modifiers.shift
                                     && !event.modifiers.alt {
                                     // O gizmo tem picking próprio: clicar num
                                     // handle restringe a transformação ao eixo.
@@ -3495,13 +3543,13 @@ export component PetuniaSlintShell inherits Window {
                                             // A ferramenta só inicia uma operação após um
                                             // arrasto real; um clique continua selecionando.
                                             pending-transform = true;
-                                        } else if root.active-tool == "select"
+                                        } else if (root.active-tool == "select" || root.active-tool == "box_select")
                                             && root.active-workspace == "MODEL"
                                             && root.gizmo-hover-axis < 0
                                             && !root.transform-instant-active
                                             && !root.tool-modal-active
                                             && !root.loop-cut-active {
-                                            // Tweak (Blender): arrastar com Select
+                                            // Tweak / Box Select (Blender): arrastar
                                             // vira box select; o clique (sem
                                             // arrasto) cai no viewport-select.
                                             pending-box-select = true;
@@ -3679,6 +3727,52 @@ export component PetuniaSlintShell inherits Window {
                         fill: transparent;
                         stroke: DesignTokens.selection;
                         stroke-width: 1.5px;
+                    }
+
+                    // 3D Cursor overlay (âncora 3D para criação de primitivas e foco de câmera)
+                    if root.cursor-visible && active-workspace == "MODEL": Rectangle {
+                        x: root.cursor-screen-x - 14px;
+                        y: root.cursor-screen-y - 14px;
+                        width: 28px;
+                        height: 28px;
+
+                        // Outer ring (white)
+                        Rectangle {
+                            x: 2px; y: 2px;
+                            width: 24px; height: 24px;
+                            border-radius: 12px;
+                            border-width: 1.5px;
+                            border-color: #ffffffdd;
+                            background: transparent;
+                        }
+                        // Inner ring (accent / red)
+                        Rectangle {
+                            x: 4px; y: 4px;
+                            width: 20px; height: 20px;
+                            border-radius: 10px;
+                            border-width: 1.5px;
+                            border-color: #e54d42dd;
+                            background: transparent;
+                        }
+                        // Horizontal crosshair
+                        Rectangle {
+                            x: 0px; y: 13px;
+                            width: 28px; height: 2px;
+                            background: #ffffffdd;
+                        }
+                        // Vertical crosshair
+                        Rectangle {
+                            x: 13px; y: 0px;
+                            width: 2px; height: 28px;
+                            background: #ffffffdd;
+                        }
+                        // Center dot
+                        Rectangle {
+                            x: 12px; y: 12px;
+                            width: 4px; height: 4px;
+                            border-radius: 2px;
+                            background: #e54d42;
+                        }
                     }
 
                     // Pílula Flutuante da Viewport: Câmera & Projeção (Esquerda)
@@ -4080,7 +4174,7 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
 
-                    if !tool-modal-active && !loop-cut-active && !loop-cut-armed && !profile-active && !operation-hud-active && (root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale" || root.active-tool == "knife" || root.active-tool == "slice"): ToolCard {
+                    if !tool-modal-active && !loop-cut-active && !loop-cut-armed && !profile-active && !operation-hud-active && (root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale" || root.active-tool == "knife" || root.active-tool == "slice" || root.active-tool == "cursor" || root.active-tool == "cursor_3d"): ToolCard {
                         x: 14px;
                         y: 58px;
                         title: root.tool-options-title != "" ? root.tool-options-title : "Tool Options";
@@ -4281,8 +4375,60 @@ export component PetuniaSlintShell inherits Window {
                             Text { text: "Drag mouse across mesh · Esc cancel"; color: DesignTokens.text-muted; font-size: 9px; }
                         }
 
+                        if root.active-tool == "cursor" || root.active-tool == "cursor_3d": VerticalLayout {
+                            spacing: 6px;
+                            Vector3Field {
+                                row-label: "Cursor";
+                                field-hint: root.label-numeric-field-hint;
+                                x-value: root.cursor-x;
+                                y-value: root.cursor-y;
+                                z-value: root.cursor-z;
+                                scrubbed(axis, delta, fine) => {
+                                    root.cursor-coord-committed(axis, (axis == 0 ? root.cursor-x : (axis == 1 ? root.cursor-y : root.cursor-z)) + delta * (fine ? 0.01 : 0.1));
+                                }
+                                text-committed(axis, text) => {
+                                    root.cursor-coord-committed(axis, text.to-float());
+                                    return true;
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 4px;
+                                height: 26px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text {
+                                        text: "Focus Camera";
+                                        color: DesignTokens.text-primary;
+                                        font-size: 10px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { root.frame-cursor-requested(); } }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: DesignTokens.surface;
+                                    border-width: 1px;
+                                    border-color: DesignTokens.border;
+                                    Text {
+                                        text: "Reset (0,0,0)";
+                                        color: DesignTokens.text-primary;
+                                        font-size: 10px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { root.reset-cursor-requested(); } }
+                                }
+                            }
+                        }
+
                         Text {
-                            text: (root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale") ? "G move · R rotate · S scale · Shift precision" : "";
+                            text: (root.active-tool == "cursor" || root.active-tool == "cursor_3d") ? "LMB Click to place · Shift+RMB in any tool" : ((root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale") ? "G move · R rotate · S scale · Shift precision" : "");
                             color: DesignTokens.text-muted;
                             font-size: 9px;
                         }
@@ -4472,13 +4618,6 @@ export component PetuniaSlintShell inherits Window {
                             alignment: center;
 
                             // --- MODEL: Ferramentas de modelagem e topologia (Transform vive no painel esquerdo) ---
-                            if active-workspace == "MODEL": ToolButton {
-                                icon: IconSet.Spline;
-                                semantic-label: root.label-model-lasso;
-                                description: root.hint-model-lasso;
-                                active: active-tool == "lasso_select";
-                                clicked => { root.command-executed("model.tool_lasso"); }
-                            }
                             if active-workspace == "MODEL" && root.viewport-region-width >= 760: ToolButton {
                                 icon: IconSet.Copy;
                                 semantic-label: "Duplicate";

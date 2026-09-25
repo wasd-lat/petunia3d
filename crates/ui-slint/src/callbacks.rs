@@ -98,6 +98,9 @@ pub(crate) fn sync_overlay_models(
     window.set_view_gizmo_z_end_y(gizmo.view_z_end[1]);
     window.set_view_gizmo_origin_x(gizmo.view_origin_x);
     window.set_view_gizmo_origin_y(gizmo.view_origin_y);
+    window.set_cursor_screen_x(gizmo.cursor_screen[0]);
+    window.set_cursor_screen_y(gizmo.cursor_screen[1]);
+    window.set_cursor_visible(gizmo.cursor_visible);
 }
 
 pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
@@ -187,6 +190,9 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_scale_x(vm.scale[0]);
     window.set_scale_y(vm.scale[1]);
     window.set_scale_z(vm.scale[2]);
+    window.set_cursor_x(vm.cursor_3d[0]);
+    window.set_cursor_y(vm.cursor_3d[1]);
+    window.set_cursor_z(vm.cursor_3d[2]);
 
     window.set_active_object_title(vm.active_object_title.as_str().into());
     window.set_active_object_details(vm.active_object_details.as_str().into());
@@ -1099,6 +1105,74 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
             if let Some(window) = lasso_window.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
                 if let Some(frame) = bridge.render_viewport() {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let place_cursor_bridge = Arc::clone(&bridge);
+    let place_cursor_window = window.as_weak();
+    window.on_viewport_place_cursor(move |norm_x, norm_y| {
+        if let Ok(mut bridge) = place_cursor_bridge.lock()
+            && bridge.place_cursor_3d(norm_x, norm_y)
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = place_cursor_window.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let cursor_coord_bridge = Arc::clone(&bridge);
+    let cursor_coord_window = window.as_weak();
+    window.on_cursor_coord_committed(move |axis_idx, val| {
+        if let Ok(mut bridge) = cursor_coord_bridge.lock()
+            && bridge.set_cursor_3d_coord(axis_idx as usize, val)
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = cursor_coord_window.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let reset_cursor_bridge = Arc::clone(&bridge);
+    let reset_cursor_window = window.as_weak();
+    window.on_reset_cursor_requested(move || {
+        if let Ok(mut bridge) = reset_cursor_bridge.lock()
+            && bridge.reset_cursor_3d()
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = reset_cursor_window.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let frame_cursor_bridge = Arc::clone(&bridge);
+    let frame_cursor_window = window.as_weak();
+    window.on_frame_cursor_requested(move || {
+        if let Ok(mut bridge) = frame_cursor_bridge.lock()
+            && bridge.frame_cursor()
+        {
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = frame_cursor_window.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
                     window.set_viewport_image(frame);
                 }
             }

@@ -4756,3 +4756,83 @@ fn decal_layer_creation_and_rendering() {
         petunia_project::paint_layers::LayerKind::Decal(_)
     )));
 }
+
+#[test]
+fn cursor_tool_activation_placement_and_view_model() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.execute_command(CommandId::ToolCursor);
+    assert_eq!(bridge.state.session.tools.active_tool, "cursor");
+
+    assert!(bridge.place_cursor_3d(0.5, 0.5));
+    let vm = bridge.view_model();
+    assert_eq!(vm.cursor_3d, bridge.state.session.cursor_3d);
+
+    // Adjust individual coordinates
+    assert!(bridge.set_cursor_3d_coord(0, 3.5));
+    assert!(bridge.set_cursor_3d_coord(1, -2.0));
+    assert!(bridge.set_cursor_3d_coord(2, 7.25));
+    assert_eq!(bridge.state.session.cursor_3d, [3.5, -2.0, 7.25]);
+    assert_eq!(bridge.view_model().cursor_3d, [3.5, -2.0, 7.25]);
+
+    // Reset cursor to origin
+    assert!(bridge.reset_cursor_3d());
+    assert_eq!(bridge.state.session.cursor_3d, [0.0, 0.0, 0.0]);
+    assert_eq!(bridge.view_model().cursor_3d, [0.0, 0.0, 0.0]);
+}
+
+#[test]
+fn cursor_focuses_camera_and_serves_as_orbit_pivot() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.state.session.cursor_3d = [10.0, 5.0, -8.0];
+
+    // Frame cursor centers camera target on cursor_3d
+    bridge.execute_command(CommandId::FrameCursor);
+    assert_eq!(
+        bridge.state.session.camera.target,
+        glam::Vec3::new(10.0, 5.0, -8.0)
+    );
+
+    // When cursor tool is active, orbiting sets camera target to cursor_3d
+    bridge.execute_command(CommandId::ToolCursor);
+    bridge.state.session.camera.target = glam::Vec3::ZERO;
+    assert!(bridge.orbit_viewport(10.0, 10.0));
+    assert_eq!(
+        bridge.state.session.camera.target,
+        glam::Vec3::new(10.0, 5.0, -8.0)
+    );
+}
+
+#[test]
+fn cursor_offsets_primitive_spawning() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.state.session.cursor_3d = [5.0, 3.0, -2.0];
+
+    // Spawning a cube uses cursor_3d as origin offset
+    assert!(bridge.state.dispatch_command("model.add_cube").is_ok());
+    let active_mesh = bridge.state.project.active_mesh().unwrap();
+    let center: glam::Vec3 = active_mesh
+        .verts
+        .iter()
+        .map(|v| v.vec())
+        .sum::<glam::Vec3>()
+        / active_mesh.verts.len() as f32;
+
+    assert!((center.x - 5.0).abs() < 1e-4);
+    assert!((center.y - 3.0).abs() < 1e-4);
+    assert!((center.z - (-2.0)).abs() < 1e-4);
+}
+
+#[test]
+fn cursor_screen_projection_in_gizmo_model() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.viewport_size = [800.0, 600.0];
+    bridge.state.session.cursor_3d = [0.0, 0.0, 0.0];
+    bridge.state.session.show_cursor = true;
+    bridge.state.session.show_overlays = true;
+
+    let gizmo = compute_gizmo(&bridge.state, 800.0, 600.0);
+    assert!(gizmo.cursor_visible);
+    // Origin projected with default camera should be near center of screen
+    assert!((gizmo.cursor_screen[0] - 400.0).abs() < 50.0);
+    assert!((gizmo.cursor_screen[1] - 300.0).abs() < 50.0);
+}

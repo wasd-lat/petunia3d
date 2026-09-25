@@ -41,6 +41,8 @@ pub enum CommandId {
     ToggleUvChecker,
     ToggleProportionalEditing,
     ToggleSnap,
+    ToolCursor,
+    FrameCursor,
 }
 
 impl CommandId {
@@ -83,6 +85,8 @@ impl CommandId {
             Self::ToggleUvChecker => "view.toggle_uv_checker",
             Self::ToggleProportionalEditing => "tools.toggle_proportional",
             Self::ToggleSnap => "tools.toggle_snap",
+            Self::ToolCursor => "model.tool_cursor",
+            Self::FrameCursor => "view.frame_cursor",
         }
     }
 
@@ -125,6 +129,8 @@ impl CommandId {
             "view.toggle_uv_checker" => Some(Self::ToggleUvChecker),
             "tools.toggle_proportional" => Some(Self::ToggleProportionalEditing),
             "tools.toggle_snap" => Some(Self::ToggleSnap),
+            "model.tool_cursor" => Some(Self::ToolCursor),
+            "view.frame_cursor" => Some(Self::FrameCursor),
             _ => None,
         }
     }

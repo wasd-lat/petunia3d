@@ -129,6 +129,9 @@ pub struct GizmoModel {
     pub view_z_end: [f32; 2],
     pub view_origin_x: f32,
     pub view_origin_y: f32,
+    /// Projeção em tela do 3D Cursor para o overlay da viewport.
+    pub cursor_screen: [f32; 2],
+    pub cursor_visible: bool,
 }
 
 /// Ferramenta paramétrica com preview modal e Tool Properties.
@@ -1601,7 +1604,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if !dx.is_finite() || !dy.is_finite() {
             return false;
         }
-        if let Some(center) = self.selection_pivot() {
+        if self.state.session.tools.active_tool == "cursor"
+            || self.state.session.tools.active_tool == "cursor_3d"
+            || self.state.session.pivot_point == petunia_core::PivotPoint::Cursor3D
+        {
+            self.state.session.camera.target = glam::Vec3::from(self.state.session.cursor_3d);
+        } else if let Some(center) = self.selection_pivot() {
             self.state.session.camera.target = center;
         }
         self.state.session.camera.orbit(dx, dy);
@@ -1630,6 +1638,67 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.session.pivot_point = pivot;
         self.state.mark_dirty();
         self.state.set_status(format!("Pivot: {}", pivot.as_str()));
+        true
+    }
+
+    /// Posiciona o 3D Cursor na viewport dado um ponto normalizado (ou clique na tela).
+    pub fn place_cursor_3d(&mut self, norm_x: f32, norm_y: f32) -> bool {
+        let nx = norm_x * 2.0 - 1.0;
+        let ny = 1.0 - norm_y * 2.0;
+
+        let (origin, dir) = self.state.session.camera.ray(nx, ny);
+        let target_pos = if let Some((_face, hit_pos)) = pick_face_hit(&self.state, origin, dir) {
+            hit_pos
+        } else if dir.y.abs() > 1e-4 {
+            let t = -origin.y / dir.y;
+            if t > 0.0 {
+                origin + dir * t
+            } else {
+                let plane_t = (self.state.session.camera.target.y - origin.y) / dir.y;
+                if plane_t > 0.0 {
+                    origin + dir * plane_t
+                } else {
+                    self.state.session.camera.target
+                }
+            }
+        } else {
+            self.state.session.camera.target
+        };
+
+        self.state.session.cursor_3d = target_pos.to_array();
+        self.state.set_status(format!(
+            "3D Cursor: [{:.2}, {:.2}, {:.2}]",
+            target_pos.x, target_pos.y, target_pos.z
+        ));
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Ajusta uma coordenada individual (X, Y ou Z) do 3D Cursor.
+    pub fn set_cursor_3d_coord(&mut self, index: usize, val: f32) -> bool {
+        if index < 3 && val.is_finite() {
+            self.state.session.cursor_3d[index] = val;
+            self.state.mark_dirty();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redefine a posição do 3D Cursor para a origem (0, 0, 0).
+    pub fn reset_cursor_3d(&mut self) -> bool {
+        self.state.session.cursor_3d = [0.0, 0.0, 0.0];
+        self.state
+            .set_status("3D Cursor redefinido para a origem (0, 0, 0).");
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Centraliza o alvo da câmera na posição do 3D Cursor.
+    pub fn frame_cursor(&mut self) -> bool {
+        self.state.session.camera.target = glam::Vec3::from(self.state.session.cursor_3d);
+        self.state.set_status("Câmera centralizada no 3D Cursor.");
+        self.state.mark_dirty();
         true
     }
 
@@ -5454,6 +5523,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face))
             }
             CommandId::SelectLasso => self.apply(UiIntent::SetActiveTool("lasso_select".into())),
+            CommandId::ToolCursor => self.apply(UiIntent::SetActiveTool("cursor".into())),
+            CommandId::FrameCursor => {
+                self.frame_cursor();
+            }
             CommandId::TransformCombined => self.apply(UiIntent::SetActiveTool("transform".into())),
             CommandId::PaintBrush => self.apply(UiIntent::SetActiveTool("brush".to_string())),
             CommandId::PaintEraser => self.apply(UiIntent::SetActiveTool("eraser".to_string())),
