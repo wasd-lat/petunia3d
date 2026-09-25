@@ -178,6 +178,11 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
     window.set_micro_inspector_open(bridge.micro_inspector_open);
     window.set_micro_inspector_x(bridge.micro_inspector_pos[0]);
     window.set_micro_inspector_y(bridge.micro_inspector_pos[1]);
+
+    let protractor = compute_protractor(&bridge.state, width, height, bridge.drag.as_ref());
+    window.set_protractor_visible(protractor.visible);
+    window.set_protractor_wedge_commands(protractor.wedge_commands.as_str().into());
+    window.set_protractor_ticks_commands(protractor.ticks_commands.as_str().into());
 }
 
 pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
@@ -772,6 +777,10 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_primitive_fill_disc(vm.primitive_fill_disc);
     window.set_slice_trim(vm.slice_trim);
     window.set_bevel_clamp_overlap(vm.bevel_clamp_overlap);
+    window.set_bevel_affect_vertices(vm.bevel_affect_vertices);
+    window.set_protractor_visible(vm.protractor_visible);
+    window.set_protractor_wedge_commands(vm.protractor_wedge_commands.as_str().into());
+    window.set_protractor_ticks_commands(vm.protractor_ticks_commands.as_str().into());
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -3017,6 +3026,18 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_toggle_bevel_clamp_overlap(move || {
         if let Ok(mut bridge) = bevel_clamp_bridge.lock() {
             bridge.toggle_bevel_clamp_overlap();
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let bevel_affect_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_bevel_affect_vertices(move || {
+        if let Ok(mut bridge) = bevel_affect_bridge.lock() {
+            bridge.toggle_bevel_affect_vertices();
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);

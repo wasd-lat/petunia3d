@@ -33,10 +33,12 @@ impl BevelTool {
         let amt = state.bevel_amount;
         let segs = state.bevel_segments.clamp(1, 4);
         let clamp = state.tools.bevel_clamp_overlap;
+        let affect_verts = state.tools.bevel_affect_vertices;
         if let Err(err) = state.dispatch(&petunia_core::BevelCmd {
             amount: amt,
             segments: segs,
             clamp_overlap: clamp,
+            affect_vertices: affect_verts,
         }) {
             state.set_status(format!("bevel: {err}"));
         }

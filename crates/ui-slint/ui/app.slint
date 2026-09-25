@@ -2431,6 +2431,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> dimension-text: "";
     in-out property <length> dimension-x: 0px;
     in-out property <length> dimension-y: 0px;
+    in-out property <bool> protractor-visible: false;
+    in-out property <string> protractor-wedge-commands: "";
+    in-out property <string> protractor-ticks-commands: "";
     in-out property <bool> snap-marker-visible: false;
     in-out property <length> snap-marker-x: 0px;
     in-out property <length> snap-marker-y: 0px;
@@ -2810,6 +2813,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> slice-preview-commands: "";
     in-out property <bool> slice-trim: false;
     in-out property <bool> bevel-clamp-overlap: true;
+    in-out property <bool> bevel-affect-vertices: false;
 
     callback workspace-changed(string);
     callback save-requested;
@@ -2937,6 +2941,7 @@ export component PetuniaSlintShell inherits Window {
     callback primitive-cancel;
     callback slice-trim-set(bool);
     callback toggle-bevel-clamp-overlap;
+    callback toggle-bevel-affect-vertices;
     callback inspector-width-changed(float);
     callback asset-library-height-changed(float);
     callback rename-committed(string);
@@ -3542,6 +3547,22 @@ export component PetuniaSlintShell inherits Window {
                         fill: transparent;
                         stroke: #f59e0b;
                         stroke-width: 1.5px;
+                    }
+
+                    // Protractor (Transferidor Visual de Ângulo para Rotação Modal)
+                    if root.protractor-visible && root.protractor-wedge-commands != "": Path {
+                        fit: ImageFit.preserve;
+                        commands: root.protractor-wedge-commands;
+                        fill: DesignTokens.accent.transparentize(0.85);
+                        stroke: DesignTokens.accent;
+                        stroke-width: 1.5px;
+                    }
+                    if root.protractor-visible && root.protractor-ticks-commands != "": Path {
+                        fit: ImageFit.preserve;
+                        commands: root.protractor-ticks-commands;
+                        fill: transparent;
+                        stroke: DesignTokens.accent.transparentize(0.4);
+                        stroke-width: 1px;
                     }
 
                     viewport-touch := TouchArea {
@@ -4879,6 +4900,25 @@ export component PetuniaSlintShell inherits Window {
                                         vertical-alignment: center;
                                     }
                                     TouchArea { clicked => { root.toggle-bevel-clamp-overlap(); } }
+                                }
+                            }
+                            HorizontalLayout {
+                                height: 26px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: root.bevel-affect-vertices ? DesignTokens.accent.transparentize(0.8) : DesignTokens.surface-raised;
+                                    border-width: 1px;
+                                    border-color: root.bevel-affect-vertices ? DesignTokens.accent : DesignTokens.border;
+                                    Text {
+                                        text: root.bevel-affect-vertices ? "✓ Point (Vertex) Mode" : "Point Mode (Off)";
+                                        color: root.bevel-affect-vertices ? DesignTokens.accent : DesignTokens.text-primary;
+                                        font-size: 10px;
+                                        font-weight: root.bevel-affect-vertices ? 700 : 400;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { root.toggle-bevel-affect-vertices(); } }
                                 }
                             }
                         }

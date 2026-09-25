@@ -508,6 +508,19 @@ mod tests {
     }
 
     #[test]
+    fn bevel_vertex_option() {
+        let mut m = Mesh::cube(2.0);
+        m.selected_edges.clear();
+        m.verts[0].selected = true;
+        let (ok, skip) = m.bevel_selected_full(0.3, 1, true);
+        assert_eq!(ok, 1);
+        assert_eq!(skip, 0);
+        let report = m.validate_topology();
+        assert!(report.is_manifold && report.is_closed);
+        assert_eq!((m.verts.len(), m.faces.len()), (10, 7));
+    }
+
+    #[test]
     fn extrude_keeps_uv_invariant() {
         let mut m = Mesh::cube(2.0);
         m.select_all();

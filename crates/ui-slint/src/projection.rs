@@ -1269,3 +1269,123 @@ pub(crate) fn ray_triangle_cull(
     let distance = edge2.dot(qvec) * inv;
     (distance > 1e-4).then_some(distance)
 }
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProtractorModel {
+    pub visible: bool,
+    pub wedge_commands: String,
+    pub ticks_commands: String,
+    pub center_x: f32,
+    pub center_y: f32,
+    pub angle_degrees: f32,
+}
+
+pub(crate) fn compute_protractor(
+    state: &AppState,
+    width: f32,
+    height: f32,
+    drag: Option<&ViewportDrag>,
+) -> ProtractorModel {
+    if width <= 1.0 || height <= 1.0 {
+        return ProtractorModel::default();
+    }
+    let modal = state.session.tools.modal.as_ref().or(state.modal.as_ref());
+    let Some(modal) = modal else {
+        return ProtractorModel::default();
+    };
+    if modal.kind != petunia_core::ModalKind::Rotate {
+        return ProtractorModel::default();
+    }
+
+    let view_proj = state.session.camera.view_proj();
+    let clip = view_proj * modal.pivot.extend(1.0);
+    if clip.w <= 0.05 {
+        return ProtractorModel::default();
+    }
+    let inv_w = 1.0 / clip.w;
+    let cx = (clip.x * inv_w * 0.5 + 0.5) * width;
+    let cy = (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height;
+
+    let theta0 = if let Some(d) = drag {
+        let dx = d.start[0] - cx;
+        let dy = d.start[1] - cy;
+        if dx.hypot(dy) > 5.0 {
+            dy.atan2(dx)
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+
+    let angle_deg = modal.value;
+    const R: f32 = 80.0;
+
+    use std::fmt::Write as _;
+    let mut wedge_commands = String::new();
+    if angle_deg.abs() >= 0.2 {
+        // Slint screen coordinates: Y increases downwards.
+        // Rotation in standard coordinates is counterclockwise.
+        let delta_rad = -angle_deg.to_radians();
+        let steps = (angle_deg.abs() / 4.0).ceil().clamp(2.0, 72.0) as usize;
+        let _ = write!(wedge_commands, "M {:.2} {:.2} ", cx, cy);
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let th = theta0 + delta_rad * t;
+            let px = cx + R * th.cos();
+            let py = cy + R * th.sin();
+            let _ = write!(wedge_commands, "L {:.2} {:.2} ", px, py);
+        }
+        wedge_commands.push_str("Z");
+    } else {
+        let px = cx + R * theta0.cos();
+        let py = cy + R * theta0.sin();
+        let _ = write!(
+            wedge_commands,
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            cx, cy, px, py
+        );
+    }
+
+    let mut ticks_commands = String::new();
+    // Circular protractor dial ring
+    const RING_SEGS: usize = 36;
+    for i in 0..RING_SEGS {
+        let a1 = i as f32 * std::f32::consts::TAU / (RING_SEGS as f32);
+        let a2 = ((i as f32) + 0.6) * std::f32::consts::TAU / (RING_SEGS as f32);
+        let x1 = cx + R * a1.cos();
+        let y1 = cy + R * a1.sin();
+        let x2 = cx + R * a2.cos();
+        let y2 = cy + R * a2.sin();
+        let _ = write!(
+            ticks_commands,
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            x1, y1, x2, y2
+        );
+    }
+
+    // 24 radial tick marks (every 15 degrees, with 45 degrees being major ticks)
+    for step in 0..24 {
+        let tick_angle = theta0 + (step as f32 * std::f32::consts::TAU / 24.0);
+        let is_major = step % 3 == 0;
+        let r_in = if is_major { R - 8.0 } else { R - 4.0 };
+        let x1 = cx + r_in * tick_angle.cos();
+        let y1 = cy + r_in * tick_angle.sin();
+        let x2 = cx + R * tick_angle.cos();
+        let y2 = cy + R * tick_angle.sin();
+        let _ = write!(
+            ticks_commands,
+            "M {:.2} {:.2} L {:.2} {:.2} ",
+            x1, y1, x2, y2
+        );
+    }
+
+    ProtractorModel {
+        visible: true,
+        wedge_commands,
+        ticks_commands,
+        center_x: cx,
+        center_y: cy,
+        angle_degrees: angle_deg,
+    }
+}

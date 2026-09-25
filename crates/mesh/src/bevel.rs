@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::{Face, Mesh};
+use crate::{Face, Mesh, Vertex};
 
 /// Não publica geometria parcial: rejeita topologias sem solução implementada.
 #[allow(dead_code)]
@@ -291,6 +291,176 @@ pub(crate) fn bevel_edge_segments_clamped(
     Some(result)
 }
 
+/// Chanfro transacional de vértice com preservação estrita de 2-manifold e fechamento.
+pub(crate) fn bevel_vertex(mesh: &Mesh, v: u32, amount: f32, clamp_overlap: bool) -> Option<Mesh> {
+    if !amount.is_finite() || amount <= 1e-5 {
+        return None;
+    }
+    let v_idx = v as usize;
+    if v_idx >= mesh.verts.len() || !mesh.verts[v_idx].vec().is_finite() {
+        return None;
+    }
+    if mesh.faces.iter().any(|face| {
+        face.verts.len() < 3
+            || face.uv.len() != face.verts.len()
+            || face
+                .verts
+                .iter()
+                .any(|&idx| idx as usize >= mesh.verts.len())
+    }) {
+        return None;
+    }
+
+    let input_report = mesh.validate_topology();
+    if !input_report.is_manifold {
+        return None;
+    }
+
+    // Identifica as faces incidentes ao vértice v
+    let incident_faces: Vec<usize> = mesh
+        .faces
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.verts.contains(&v))
+        .map(|(i, _)| i)
+        .collect();
+
+    if incident_faces.len() < 3 {
+        return None;
+    }
+
+    // Coleta arestas incidentes direcionadas: no corner de cada face, (prev -> v -> next)
+    let mut face_corners = Vec::new();
+    let mut neighbors_set = std::collections::HashSet::new();
+    for &fi in &incident_faces {
+        let face = &mesh.faces[fi];
+        let n = face.verts.len();
+        let k = face.verts.iter().position(|&vert| vert == v)?;
+        let prev = face.verts[(k + n - 1) % n];
+        let next = face.verts[(k + 1) % n];
+        if prev == v || next == v || prev == next {
+            return None;
+        }
+        neighbors_set.insert(prev);
+        neighbors_set.insert(next);
+        face_corners.push((fi, k, prev, next));
+    }
+
+    // Para vértice manifold fechado, o número de arestas incidentes é igual ao número de faces incidentes
+    if neighbors_set.len() != incident_faces.len() {
+        return None;
+    }
+
+    let mut result = mesh.clone();
+    let v_pos = mesh.verts[v_idx].vec();
+
+    // Cria os novos vértices ao longo de cada aresta incidente
+    let mut neighbor_new_vert = HashMap::new();
+    let mut neighbor_t = HashMap::new();
+    for &u in &neighbors_set {
+        let u_pos = mesh.verts[u as usize].vec();
+        let edge_vec = u_pos - v_pos;
+        let edge_len = edge_vec.length();
+        if edge_len < 1e-5 {
+            return None;
+        }
+        let t = if clamp_overlap {
+            (amount / edge_len).clamp(0.01, 0.49)
+        } else {
+            (amount / edge_len).clamp(0.01, 0.99)
+        };
+        let new_pos = v_pos + edge_vec * t;
+        let v_vert = &mesh.verts[v_idx];
+        let u_vert = &mesh.verts[u as usize];
+        let new_color = [
+            v_vert.color[0] * (1.0 - t) + u_vert.color[0] * t,
+            v_vert.color[1] * (1.0 - t) + u_vert.color[1] * t,
+            v_vert.color[2] * (1.0 - t) + u_vert.color[2] * t,
+        ];
+        let new_v_idx = result.verts.len() as u32;
+        let mut vert = Vertex::new(new_pos.x, new_pos.y, new_pos.z);
+        vert.color = new_color;
+        vert.selected = true;
+        result.verts.push(vert);
+        neighbor_new_vert.insert(u, new_v_idx);
+        neighbor_t.insert(u, t);
+    }
+
+    // Atualiza as faces incidentes: substitui o vértice v por (v'_prev, v'_next)
+    let mut cut_segments = Vec::new(); // segmentos orientados para a face de tampa: v'_next -> v'_prev
+    for (fi, k, prev, next) in face_corners {
+        let &new_prev = neighbor_new_vert.get(&prev)?;
+        let &new_next = neighbor_new_vert.get(&next)?;
+        let &t_prev = neighbor_t.get(&prev)?;
+        let &t_next = neighbor_t.get(&next)?;
+
+        let face = &mesh.faces[fi];
+        let uv_v = face.uv[k];
+        let prev_k = (k + face.verts.len() - 1) % face.verts.len();
+        let next_k = (k + 1) % face.verts.len();
+        let uv_prev = face.uv[prev_k];
+        let uv_next = face.uv[next_k];
+
+        let uv_new_prev = [
+            uv_v[0] + (uv_prev[0] - uv_v[0]) * t_prev,
+            uv_v[1] + (uv_prev[1] - uv_v[1]) * t_prev,
+        ];
+        let uv_new_next = [
+            uv_v[0] + (uv_next[0] - uv_v[0]) * t_next,
+            uv_v[1] + (uv_next[1] - uv_v[1]) * t_next,
+        ];
+
+        let mut new_verts = Vec::new();
+        let mut new_uvs = Vec::new();
+        for (idx, (&vert, &uv)) in face.verts.iter().zip(&face.uv).enumerate() {
+            if idx == k {
+                new_verts.push(new_prev);
+                new_uvs.push(uv_new_prev);
+                new_verts.push(new_next);
+                new_uvs.push(uv_new_next);
+            } else {
+                new_verts.push(vert);
+                new_uvs.push(uv);
+            }
+        }
+        result.faces[fi] = Face::with_uv(new_verts, new_uvs);
+        // O corte na face fi vai de new_prev para new_next.
+        // A face de fechamento (cap) deve percorrer o segmento no sentido oposto: new_next -> new_prev.
+        cut_segments.push((new_next, new_prev));
+    }
+
+    // Encadeia os cut_segments para formar o polígono da face de fechamento (cap face)
+    let mut cap_verts = Vec::new();
+    let current = cut_segments[0].0;
+    cap_verts.push(current);
+    let mut target = cut_segments[0].1;
+
+    for _ in 1..cut_segments.len() {
+        cap_verts.push(target);
+        let next_seg = cut_segments.iter().find(|seg| seg.0 == target)?;
+        target = next_seg.1;
+    }
+    if target != cap_verts[0] {
+        return None;
+    }
+
+    let mut cap_face = Face::new(cap_verts);
+    cap_face.selected = true;
+    cap_face.fix_uv();
+    result.faces.push(cap_face);
+
+    result.selected_edges.clear();
+    result.remove_isolated_vertices();
+    result.sync_vert_selection_from_faces();
+
+    let report = result.validate_topology();
+    if !report.is_manifold || report.is_closed != input_report.is_closed {
+        return None;
+    }
+
+    Some(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,6 +530,28 @@ mod tests {
             let before = format!("{mesh:?}");
             assert_eq!(mesh.bevel_selected(0.2), (0, 1));
             assert_eq!(format!("{mesh:?}"), before);
+        }
+    }
+
+    #[test]
+    fn every_cube_vertex_bevel_preserves_closed_manifold_surface() {
+        let cube = Mesh::cube(2.0);
+        for vi in 0..cube.verts.len() as u32 {
+            let result = bevel_vertex(&cube, vi, 0.2, true);
+            assert!(result.is_some(), "bevel_vertex failed on vertex {vi}");
+            let mesh = result.unwrap();
+            let report = mesh.validate_topology();
+            assert!(
+                report.is_manifold && report.is_closed,
+                "vertex {vi}: {report:?}"
+            );
+            assert_eq!((mesh.verts.len(), mesh.faces.len()), (10, 7));
+            for (fi, face) in mesh.faces.iter().enumerate() {
+                assert_eq!(face.verts.len(), face.uv.len());
+                let normal = mesh.face_normal(fi);
+                assert!(normal.is_finite());
+                assert!(normal.length_squared() > 0.5);
+            }
         }
     }
 }

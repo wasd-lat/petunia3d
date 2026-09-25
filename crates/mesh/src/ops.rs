@@ -909,7 +909,7 @@ impl Mesh {
         self.bevel_selected_full(amount, segments, true)
     }
 
-    /// Chanfra uma aresta convexa manifold com multi-segmentos e clamp de overlap opcional (P3D-044).
+    /// Chanfra uma aresta ou vértice manifold com multi-segmentos e clamp de overlap opcional (P3D-044).
     pub fn bevel_selected_full(
         &mut self,
         amount: f32,
@@ -918,21 +918,50 @@ impl Mesh {
     ) -> (usize, usize) {
         let count = self.selected_edges.len();
         if count == 0 {
-            return (0, 0);
+            self.bevel_selected_vertex(amount, clamp_overlap)
+        } else {
+            if count != 1 || !amount.is_finite() || amount <= 0.0 {
+                return (0, count);
+            }
+            let Some(&(a, b)) = self.selected_edges.iter().next() else {
+                return (0, 0);
+            };
+            match crate::bevel::bevel_edge_segments_clamped(
+                self,
+                a,
+                b,
+                amount,
+                segments,
+                clamp_overlap,
+            ) {
+                Some(mesh) => {
+                    *self = mesh;
+                    (1, 0)
+                }
+                None => (0, count),
+            }
         }
-        if count != 1 || !amount.is_finite() || amount <= 0.0 {
-            return (0, count);
+    }
+
+    /// Chanfra um vértice manifold selecionado com clamp de overlap opcional (P3D-044).
+    pub fn bevel_selected_vertex(&mut self, amount: f32, clamp_overlap: bool) -> (usize, usize) {
+        let sel_verts: Vec<u32> = self
+            .verts
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.selected)
+            .map(|(i, _)| i as u32)
+            .collect();
+        if sel_verts.len() != 1 || !amount.is_finite() || amount <= 0.0 {
+            return (0, sel_verts.len());
         }
-        let Some(&(a, b)) = self.selected_edges.iter().next() else {
-            return (0, 0);
-        };
-        match crate::bevel::bevel_edge_segments_clamped(self, a, b, amount, segments, clamp_overlap)
-        {
+        let v = sel_verts[0];
+        match crate::bevel::bevel_vertex(self, v, amount, clamp_overlap) {
             Some(mesh) => {
                 *self = mesh;
                 (1, 0)
             }
-            None => (0, count),
+            None => (0, 1),
         }
     }
 

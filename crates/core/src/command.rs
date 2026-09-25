@@ -2867,6 +2867,7 @@ pub struct BevelCmd {
     pub amount: f32,
     pub segments: u32,
     pub clamp_overlap: bool,
+    pub affect_vertices: bool,
 }
 
 impl Default for BevelCmd {
@@ -2875,6 +2876,7 @@ impl Default for BevelCmd {
             amount: 0.1,
             segments: 1,
             clamp_overlap: true,
+            affect_vertices: false,
         }
     }
 }
@@ -2886,8 +2888,10 @@ impl Command for BevelCmd {
 
     fn can_execute(&self, state: &AppState) -> Result<(), &'static str> {
         if let Some(mesh) = state.project.active_mesh() {
-            if mesh.selected_edges.is_empty() {
-                Err("Select edges first")
+            let has_edges = !mesh.selected_edges.is_empty();
+            let has_verts = mesh.verts.iter().any(|v| v.selected);
+            if !has_edges && !has_verts {
+                Err("Select edges or points first")
             } else {
                 Ok(())
             }
@@ -2910,10 +2914,16 @@ impl Command for BevelCmd {
         let Some(mesh) = state.project.active_mesh_mut() else {
             return Err(CommandError::NoActiveAsset);
         };
-        if mesh.selected_edges.is_empty() {
+        let has_edges = !mesh.selected_edges.is_empty();
+        let has_verts = mesh.verts.iter().any(|v| v.selected);
+        if !has_edges && !has_verts {
             return Err(CommandError::EmptySelection);
         }
-        let (v_count, f_count) = mesh.bevel_selected_full(amount, segments, self.clamp_overlap);
+        let (v_count, f_count) = if self.affect_vertices && has_verts {
+            mesh.bevel_selected_vertex(amount, self.clamp_overlap)
+        } else {
+            mesh.bevel_selected_full(amount, segments, self.clamp_overlap)
+        };
         state.set_status(format!("Beveled (+{} verts, +{} faces)", v_count, f_count));
         Ok(())
     }

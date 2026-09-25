@@ -496,6 +496,7 @@ pub struct ToolState {
     pub bevel_amount: f32,
     pub bevel_segments: u32,
     pub bevel_clamp_overlap: bool,
+    pub bevel_affect_vertices: bool,
     pub subdivide_cuts: u32,
     pub revolve_segments: u32,
     pub revolve_angle: f32,
@@ -570,6 +571,7 @@ impl ToolState {
             bevel_amount: 0.15,
             bevel_segments: 1,
             bevel_clamp_overlap: true,
+            bevel_affect_vertices: false,
             subdivide_cuts: 1,
             revolve_segments: 16,
             revolve_angle: 360.0,
@@ -2825,6 +2827,7 @@ impl AppState {
                     amount: self.tools.bevel_amount,
                     segments: self.tools.bevel_segments,
                     clamp_overlap: self.tools.bevel_clamp_overlap,
+                    affect_vertices: self.tools.bevel_affect_vertices,
                 })
             }
             "model.scale" | "model.scale_selection" => {

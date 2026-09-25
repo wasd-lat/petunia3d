@@ -5018,6 +5018,18 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         enabled
     }
 
+    pub fn toggle_bevel_affect_vertices(&mut self) -> bool {
+        self.state.tools.bevel_affect_vertices = !self.state.tools.bevel_affect_vertices;
+        let enabled = self.state.tools.bevel_affect_vertices;
+        self.state.set_status(if enabled {
+            "Bevel: Point (Vertex) Mode ativado"
+        } else {
+            "Bevel: Point (Vertex) Mode desativado"
+        });
+        self.state.render.mark_dirty();
+        enabled
+    }
+
     pub fn uv_equalize_texel_density(&mut self) -> bool {
         match petunia_module_uv::UvModule::equalize_texel_density(&mut self.state) {
             Ok(_) => {
@@ -7160,6 +7172,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.snap_marker_x = snap_marker.x;
         vm.snap_marker_y = snap_marker.y;
 
+        let protractor = compute_protractor(
+            &self.state,
+            self.viewport_size[0],
+            self.viewport_size[1],
+            self.drag.as_ref(),
+        );
+        vm.protractor_visible = protractor.visible;
+        vm.protractor_wedge_commands = protractor.wedge_commands;
+        vm.protractor_ticks_commands = protractor.ticks_commands;
+
         if let Some(menu) = self.context_menu {
             vm.context_menu_open = true;
             vm.context_menu_x = menu.x;
@@ -7594,6 +7616,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         vm.slice_trim = self.slice_trim;
         vm.bevel_clamp_overlap = self.state.tools.bevel_clamp_overlap;
+        vm.bevel_affect_vertices = self.state.tools.bevel_affect_vertices;
         if let Some(anchor) = self.slice_anchor {
             let mut cmd = format!(
                 "M {:.2} {:.2} L {:.2} {:.2}",

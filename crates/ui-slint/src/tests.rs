@@ -5823,3 +5823,59 @@ fn test_nudge_selection_with_arrow_keys() {
     let u_after = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][0];
     assert!((u_after - (u_before + 0.01)).abs() < 1e-4);
 }
+
+#[test]
+fn test_toggle_bevel_affect_vertices() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    // Padrão é affect_vertices desativado (false)
+    assert!(!bridge.state.tools.bevel_affect_vertices);
+    assert!(!bridge.view_model().bevel_affect_vertices);
+
+    // Alterna para true
+    assert!(bridge.toggle_bevel_affect_vertices());
+    assert!(bridge.state.tools.bevel_affect_vertices);
+    assert!(bridge.view_model().bevel_affect_vertices);
+
+    // Alterna de volta para false
+    assert!(!bridge.toggle_bevel_affect_vertices());
+    assert!(!bridge.state.tools.bevel_affect_vertices);
+    assert!(!bridge.view_model().bevel_affect_vertices);
+}
+
+#[test]
+fn test_protractor_overlay_during_rotate_modal() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.viewport_size = [800.0, 600.0];
+
+    // Sem modal ativo: transferidor invisível
+    let protractor = projection::compute_protractor(&bridge.state, 800.0, 600.0, None);
+    assert!(!protractor.visible);
+    assert!(protractor.wedge_commands.is_empty());
+    assert!(protractor.ticks_commands.is_empty());
+
+    // Inicia rotação modal
+    bridge
+        .state
+        .begin_modal(petunia_core::ModalKind::Rotate)
+        .unwrap();
+    bridge.state.update_modal(glam::Vec3::ZERO, 45.0).unwrap();
+
+    let protractor_rot = projection::compute_protractor(&bridge.state, 800.0, 600.0, None);
+    assert!(protractor_rot.visible);
+    assert!(!protractor_rot.wedge_commands.is_empty());
+    assert!(protractor_rot.wedge_commands.contains('M'));
+    assert!(protractor_rot.wedge_commands.contains('Z'));
+    assert!(!protractor_rot.ticks_commands.is_empty());
+    assert_eq!(protractor_rot.angle_degrees, 45.0);
+
+    // View model reflete o transferidor
+    let vm = bridge.view_model();
+    assert!(vm.protractor_visible);
+    assert_eq!(vm.protractor_wedge_commands, protractor_rot.wedge_commands);
+    assert_eq!(vm.protractor_ticks_commands, protractor_rot.ticks_commands);
+
+    // Cancela modal: transferidor volta a ficar invisível
+    bridge.state.cancel_modal();
+    let protractor_after = projection::compute_protractor(&bridge.state, 800.0, 600.0, None);
+    assert!(!protractor_after.visible);
+}

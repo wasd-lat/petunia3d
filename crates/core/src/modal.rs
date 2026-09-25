@@ -222,9 +222,12 @@ impl AppState {
             }
         }
         if kind == ModalKind::Bevel && source.selected_edges.is_empty() {
-            source.sync_edge_selection_from_verts();
-            if source.selected_edges.is_empty() {
-                return Err(ModalError::EdgesRequired);
+            let sel_verts = source.verts.iter().filter(|v| v.selected).count();
+            if sel_verts != 1 {
+                source.sync_edge_selection_from_verts();
+                if source.selected_edges.is_empty() {
+                    return Err(ModalError::EdgesRequired);
+                }
             }
         }
         let mut normal = Vec3::ZERO;
@@ -441,7 +444,13 @@ impl AppState {
             ModalKind::Bevel if value != 0.0 => {
                 let segs = self.tools.bevel_segments.clamp(1, 4);
                 let clamp = self.tools.bevel_clamp_overlap;
-                let (applied, skipped) = mesh.bevel_selected_full(value, segs, clamp);
+                let affect_verts = self.tools.bevel_affect_vertices;
+                let has_verts = mesh.verts.iter().any(|v| v.selected);
+                let (applied, skipped) = if affect_verts && has_verts {
+                    mesh.bevel_selected_vertex(value, clamp)
+                } else {
+                    mesh.bevel_selected_full(value, segs, clamp)
+                };
                 if applied == 0 || skipped > 0 {
                     return Err(ModalError::UnsupportedTopology);
                 }
@@ -886,6 +895,29 @@ mod tests {
                 before.active_mesh().unwrap(),
             );
         }
+    }
+
+    #[test]
+    fn modal_bevel_supports_single_vertex_selection() {
+        let mut state = AppState::default();
+        let mesh = state.project.active_mesh_mut().unwrap();
+        mesh.selected_edges.clear();
+        for f in &mut mesh.faces {
+            f.selected = false;
+        }
+        for v in &mut mesh.verts {
+            v.selected = false;
+        }
+        mesh.verts[0].selected = true;
+
+        assert!(state.begin_modal(ModalKind::Bevel).is_ok());
+        assert!(state.update_modal(Vec3::ZERO, 0.2).is_ok());
+        assert!(state.commit_modal());
+
+        let result = state.project.active_mesh().unwrap();
+        let report = result.validate_topology();
+        assert!(report.is_manifold && report.is_closed);
+        assert_eq!((result.verts.len(), result.faces.len()), (10, 7));
     }
 
     #[test]
