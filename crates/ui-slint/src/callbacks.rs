@@ -160,6 +160,22 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
     window.set_snap_marker_visible(snap_marker.visible);
     window.set_snap_marker_x(snap_marker.x);
     window.set_snap_marker_y(snap_marker.y);
+
+    let measure = compute_quick_measure(&bridge.state, width, height);
+    window.set_measure_visible(measure.visible);
+    window.set_measure_commands(measure.commands.as_str().into());
+    window.set_measure_text(measure.text.as_str().into());
+    window.set_measure_x(measure.label_x);
+    window.set_measure_y(measure.label_y);
+    window.set_measure_distance(measure.distance);
+    window.set_measure_dx(measure.dx);
+    window.set_measure_dy(measure.dy);
+    window.set_measure_dz(measure.dz);
+    window.set_measure_angle_deg(measure.angle_deg);
+
+    window.set_micro_inspector_open(bridge.micro_inspector_open);
+    window.set_micro_inspector_x(bridge.micro_inspector_pos[0]);
+    window.set_micro_inspector_y(bridge.micro_inspector_pos[1]);
 }
 
 pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewModel) {
@@ -614,6 +630,21 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_snap_marker_visible(vm.snap_marker_visible);
     window.set_snap_marker_x(vm.snap_marker_x);
     window.set_snap_marker_y(vm.snap_marker_y);
+
+    window.set_measure_visible(vm.measure_visible);
+    window.set_measure_commands(vm.measure_commands.as_str().into());
+    window.set_measure_text(vm.measure_text.as_str().into());
+    window.set_measure_x(vm.measure_x);
+    window.set_measure_y(vm.measure_y);
+    window.set_measure_distance(vm.measure_distance);
+    window.set_measure_dx(vm.measure_dx);
+    window.set_measure_dy(vm.measure_dy);
+    window.set_measure_dz(vm.measure_dz);
+    window.set_measure_angle_deg(vm.measure_angle_deg);
+
+    window.set_micro_inspector_open(vm.micro_inspector_open);
+    window.set_micro_inspector_x(vm.micro_inspector_x);
+    window.set_micro_inspector_y(vm.micro_inspector_y);
 
     let material_slots: Vec<slint::SharedString> = vm
         .material_slots
@@ -1772,7 +1803,8 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
         let Ok(mut bridge) = tool_text_bridge.lock() else {
             return false;
         };
-        let accepted = match numeric::parse_numeric(text.as_str()) {
+        let base = bridge.tool_modal_value;
+        let accepted = match numeric::parse_numeric_with_base(text.as_str(), base) {
             Ok(value) => bridge.set_tool_modal_value(value),
             Err(error) => {
                 bridge.state.set_status(format!("Invalid value: {error:?}"));
@@ -2744,6 +2776,17 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_pivot_menu_toggled(move |open| {
         if let Ok(mut bridge) = pivot_menu_bridge.lock() {
             bridge.set_pivot_menu_open(open);
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &bridge.view_model());
+            }
+        }
+    });
+
+    let micro_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_micro_inspector_toggle(move || {
+        if let Ok(mut bridge) = micro_bridge.lock() {
+            bridge.toggle_micro_inspector();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &bridge.view_model());
             }

@@ -727,6 +727,16 @@ component NumericField inherits Rectangle {
             }
             reject
         }
+        // Preenchimento do virtual slider durante o scrubbing (estilo Cinema 4D / Blender)
+        if touch.is-scrubbing: Rectangle {
+            x: 0;
+            y: 0;
+            width: Math.clamp(touch.mouse-x, 4px, parent.width);
+            height: 100%;
+            border-radius: 3px;
+            background: (root.label-color != transparent && root.label-color != DesignTokens.text-primary ? root.label-color : DesignTokens.accent).transparentize(0.78);
+        }
+
         HorizontalLayout {
             padding-left: 6px;
             padding-right: 6px;
@@ -784,6 +794,7 @@ component NumericField inherits Rectangle {
         }
         touch := TouchArea {
             enabled: !root.editing;
+            mouse-cursor: ew-resize;
             property <length> start-x;
             property <length> last-x;
             property <float> original-value;
@@ -2420,6 +2431,21 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> snap-marker-visible: false;
     in-out property <length> snap-marker-x: 0px;
     in-out property <length> snap-marker-y: 0px;
+    // Phase 6: Campos Inteligentes & Ferramentas de Consulta
+    in-out property <bool> measure-visible: false;
+    in-out property <string> measure-commands: "";
+    in-out property <string> measure-text: "";
+    in-out property <length> measure-x: 0px;
+    in-out property <length> measure-y: 0px;
+    in-out property <float> measure-distance: 0.0;
+    in-out property <float> measure-dx: 0.0;
+    in-out property <float> measure-dy: 0.0;
+    in-out property <float> measure-dz: 0.0;
+    in-out property <float> measure-angle-deg: 0.0;
+    in-out property <bool> micro-inspector-open: false;
+    in-out property <length> micro-inspector-x: 0px;
+    in-out property <length> micro-inspector-y: 0px;
+    callback micro-inspector-toggle();
     in-out property <bool> operation-hud-active: false;
     in-out property <bool> transform-instant-active: false;
     property <bool> precision-mode: false;
@@ -3213,6 +3239,15 @@ export component PetuniaSlintShell inherits Window {
                                 clicked => { root.command-executed("model.tool_cursor"); }
                             }
 
+                            // Quick Measure Tool (Fase 6: Fita Métrica 3D)
+                            ToolButton {
+                                icon: IconSet.ArrowUpDown;
+                                semantic-label: "Measure";
+                                description: "Quick Measure (Fita Métrica 3D entre pontos)";
+                                active: active-tool == "measure";
+                                clicked => { root.command-executed("model.measure"); }
+                            }
+
                             Rectangle {
                                 width: 28px;
                                 height: 1px;
@@ -3480,6 +3515,15 @@ export component PetuniaSlintShell inherits Window {
                         commands: root.dimension-commands;
                         fill: transparent;
                         stroke: #3e63dd;
+                        stroke-width: 1.5px;
+                    }
+
+                    // Quick Measure Line (Fase 6: Fita Métrica 3D)
+                    if root.measure-visible && root.measure-commands != "": Path {
+                        fit: ImageFit.preserve;
+                        commands: root.measure-commands;
+                        fill: transparent;
+                        stroke: #f59e0b;
                         stroke-width: 1.5px;
                     }
 
@@ -3950,6 +3994,29 @@ export component PetuniaSlintShell inherits Window {
                         dim-label := Text {
                             text: root.dimension-text;
                             color: #ffffff;
+                            font-size: 10px;
+                            font-weight: 700;
+                            font-family: "monospace";
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Rótulo da Fita Métrica Rápida (Fase 6: Medição Rápida 3D)
+                    if root.measure-visible && root.measure-text != "" && active-workspace == "MODEL": Rectangle {
+                        x: root.measure-x - self.width / 2;
+                        y: root.measure-y - self.height / 2;
+                        width: measure-label.preferred-width + 16px;
+                        height: 22px;
+                        border-radius: 4px;
+                        background: #1e1e24f4;
+                        border-width: 1px;
+                        border-color: #f59e0b;
+                        drop-shadow-blur: 8px;
+                        drop-shadow-color: #000000aa;
+                        measure-label := Text {
+                            text: root.measure-text;
+                            color: #f59e0b;
                             font-size: 10px;
                             font-weight: 700;
                             font-family: "monospace";
@@ -5258,6 +5325,141 @@ export component PetuniaSlintShell inherits Window {
                                 background: transparent;
                                 Text { text: origin-item.label; x: 8px; color: DesignTokens.text-primary; font-size: 10px; vertical-alignment: center; }
                                 TouchArea { clicked => { root.command-executed(origin-item.id); root.pivot-menu-toggled(false); } }
+                            }
+                        }
+                    }
+
+                    // Micro-Inspector Flutuante sob o Cursor (Fase 6: Micro-Inspector Flutuante)
+                    if root.micro-inspector-open && active-workspace == "MODEL": Rectangle {
+                        x: min(max(14px, root.micro-inspector-x), parent.width - self.width - 14px);
+                        y: min(max(14px, root.micro-inspector-y), parent.height - self.height - 14px);
+                        width: 250px;
+                        height: 200px;
+                        border-radius: 8px;
+                        background: DesignTokens.surface-raised;
+                        border-width: 1.5px;
+                        border-color: DesignTokens.accent;
+                        drop-shadow-blur: 16px;
+                        drop-shadow-color: #000000aa;
+
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 8px;
+
+                            // Cabeçalho com título e botão de fechar
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "Micro-Inspector";
+                                    color: DesignTokens.accent;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                }
+                                Rectangle {
+                                    width: 18px;
+                                    height: 18px;
+                                    border-radius: 4px;
+                                    background: close-touch.has-hover ? DesignTokens.surface-hover : transparent;
+                                    IconDisplay {
+                                        icon: IconSet.X;
+                                        size: 12px;
+                                        stroke: DesignTokens.text-muted;
+                                    }
+                                    close-touch := TouchArea {
+                                        clicked => { root.micro-inspector-toggle(); }
+                                    }
+                                }
+                            }
+
+                            // Ferramentas de Transformação Rápida
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: stretch;
+                                for tool in [
+                                    { id: "select", label: "Select", icon: IconSet.MousePointer2 },
+                                    { id: "move", label: "Move", icon: IconSet.Move3d },
+                                    { id: "rotate", label: "Rotate", icon: IconSet.RotateCcw },
+                                    { id: "scale", label: "Scale", icon: IconSet.Maximize2 },
+                                    { id: "measure", label: "Measure", icon: IconSet.ArrowUpDown },
+                                ]: Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: root.active-tool == tool.id ? DesignTokens.accent.transparentize(0.75) : (tool-touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface);
+                                    border-width: root.active-tool == tool.id ? 1px : 0px;
+                                    border-color: DesignTokens.accent;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 4px;
+                                        IconDisplay {
+                                            icon: tool.icon;
+                                            size: 13px;
+                                            stroke: root.active-tool == tool.id ? DesignTokens.accent : DesignTokens.text-primary;
+                                        }
+                                    }
+                                    tool-touch := TouchArea {
+                                        clicked => {
+                                            root.active-tool-changed(tool.id);
+                                            root.micro-inspector-toggle();
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: DesignTokens.border; }
+
+                            // Resumo de Dados: Se fita métrica visível ou coordenadas de posição
+                            if root.measure-visible: VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Distance: " + root.measure-distance + "m"; color: #f59e0b; font-size: 11px; font-weight: 700; font-family: "monospace"; }
+                                Text { text: "Δ: X " + root.measure-dx + "  Y " + root.measure-dy + "  Z " + root.measure-dz; color: DesignTokens.text-primary; font-size: 10px; font-family: "monospace"; }
+                                Text { text: "Angle: " + root.measure-angle-deg + "°"; color: DesignTokens.text-muted; font-size: 10px; }
+                            }
+
+                            if !root.measure-visible: VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Transform Quick Readout"; color: DesignTokens.text-muted; font-size: 9px; font-weight: 700; }
+                                Text { text: "Pos: " + root.pos-x + ", " + root.pos-y + ", " + root.pos-z; color: DesignTokens.text-primary; font-size: 10px; font-family: "monospace"; }
+                                Text { text: "Rot: " + root.rot-x + "°, " + root.rot-y + "°, " + root.rot-z + "°"; color: DesignTokens.text-secondary; font-size: 10px; font-family: "monospace"; }
+                            }
+
+                            Rectangle { height: 1px; background: DesignTokens.border; }
+
+                            // Ações de Modelagem Direta
+                            HorizontalLayout {
+                                spacing: 4px;
+                                for act in [
+                                    { id: "model.extrude", label: "Extrude" },
+                                    { id: "model.inset", label: "Inset" },
+                                    { id: "model.bevel", label: "Bevel" },
+                                    { id: "model.loop_cut", label: "Loop Cut" },
+                                ]: Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 24px;
+                                    border-radius: 4px;
+                                    background: act-touch.has-hover ? DesignTokens.surface-hover : DesignTokens.surface;
+                                    Text {
+                                        text: act.label;
+                                        color: DesignTokens.text-primary;
+                                        font-size: 10px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    act-touch := TouchArea {
+                                        clicked => {
+                                            root.command-executed(act.id);
+                                            root.micro-inspector-toggle();
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Rodapé com atalho
+                            Text {
+                                text: "Space: close · Esc: cancel";
+                                color: DesignTokens.text-muted;
+                                font-size: 9px;
+                                horizontal-alignment: center;
                             }
                         }
                     }

@@ -363,6 +363,7 @@ pub enum UiIntent {
     SetColorblindAxes(bool),
     SetReducedMotion(bool),
     SetDoubleTapIntervalMs(u64),
+    ToggleMicroInspector,
 }
 
 // Presentation ViewModels and Data Transfer Objects (DTOs) for the Slint shell.
@@ -537,6 +538,8 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     /// Rastreamento de duplo toque em atalhos de ferramenta: (nome da ferramenta, instante).
     pub last_tool_press: Option<(String, std::time::Instant)>,
     pub slice_trim: bool,
+    pub micro_inspector_open: bool,
+    pub micro_inspector_pos: [f32; 2],
 }
 
 /// Menu de contexto do Outliner aberto sobre uma linha do painel Parts,
@@ -707,6 +710,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             preferences_path_override: None,
             last_tool_press: None,
             slice_trim: false,
+            micro_inspector_open: false,
+            micro_inspector_pos: [512.0, 384.0],
             position: [
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
                 NumericFieldState::new(0.0, None, None).with_steps(0.1, 0.01),
@@ -1279,6 +1284,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             UiIntent::SetDoubleTapIntervalMs(interval) => {
                 let _ = self.set_double_tap_interval_ms(interval);
+            }
+            UiIntent::ToggleMicroInspector => {
+                let _ = self.toggle_micro_inspector();
             }
         }
         self.sync_viewport_context();
@@ -3639,6 +3647,26 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             return false;
         }
         self.preferences.double_tap_interval_ms = clamped;
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Alterna a pílula do Micro-Inspector flutuante sob o cursor (Espaço).
+    pub fn toggle_micro_inspector(&mut self) -> bool {
+        if self.micro_inspector_open {
+            self.micro_inspector_open = false;
+            self.overlays.remove(OverlayId::MicroInspector);
+        } else {
+            self.micro_inspector_open = true;
+            self.micro_inspector_pos = self.pointer_position;
+            self.overlays.push(OverlayEntry {
+                id: OverlayId::MicroInspector,
+                kind: OverlayKind::FloatingPanel,
+                pinned: false,
+                dismiss_on_escape: true,
+                dismiss_on_click_away: true,
+            });
+        }
         self.state.mark_dirty();
         true
     }
@@ -6013,6 +6041,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         cancelled |= self.cancel_slice();
         cancelled |= self.cancel_knife();
         cancelled |= self.cancel_transform();
+        if self.micro_inspector_open {
+            self.micro_inspector_open = false;
+            self.overlays.remove(OverlayId::MicroInspector);
+            cancelled = true;
+        }
         self.drag = None;
         self.gizmo_drag = None;
         self.modal_text.clear();
@@ -6021,6 +6054,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.micro_inspector_open {
+            self.micro_inspector_open = false;
+            self.overlays.remove(OverlayId::MicroInspector);
+            self.state.mark_dirty();
+            return true;
+        }
         if self.close_menu() {
             return true;
         }
@@ -6221,6 +6260,15 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.apply(UiIntent::ToggleEditPivot);
             return true;
         }
+        if (text == " " || text == "Space")
+            && !ctrl
+            && !alt
+            && !shift
+            && self.state.session.tools.modal.is_none()
+            && self.drag.is_none()
+        {
+            return self.toggle_micro_inspector();
+        }
         if self.state.session.tools.modal.is_some() && !ctrl && !alt {
             if let Some(axis) = ["x", "y", "z"]
                 .iter()
@@ -6345,6 +6393,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             "model.loop_cut" => {
                 self.apply(UiIntent::SetActiveTool("loop_cut".to_string()));
+            }
+            "model.measure" => {
+                self.apply(UiIntent::SetActiveTool("measure".to_string()));
             }
             "model.primitives" => {
                 self.add_menu_open = true;
@@ -6558,8 +6609,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         axis: usize,
         text: &str,
     ) -> Result<f32, numeric::NumericInputError> {
+        let current_base = match kind {
+            TransformKind::Position => self.position[axis.min(2)].value(),
+            TransformKind::Rotation => self.rotation[axis.min(2)].value(),
+            TransformKind::Scale => self.scale[axis.min(2)].value(),
+        };
         // Reject malformed text before opening a transaction.
-        let value = numeric::parse_numeric(text)?;
+        let value = numeric::parse_numeric_with_base(text, current_base)?;
         let kind_modal = match kind {
             TransformKind::Position => petunia_core::ModalKind::Move,
             TransformKind::Rotation => petunia_core::ModalKind::Rotate,
@@ -6773,6 +6829,23 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.dimension_text = dimension.text;
         vm.dimension_x = dimension.label_x;
         vm.dimension_y = dimension.label_y;
+
+        let measure =
+            compute_quick_measure(&self.state, self.viewport_size[0], self.viewport_size[1]);
+        vm.measure_visible = measure.visible;
+        vm.measure_commands = measure.commands;
+        vm.measure_text = measure.text;
+        vm.measure_x = measure.label_x;
+        vm.measure_y = measure.label_y;
+        vm.measure_distance = measure.distance;
+        vm.measure_dx = measure.dx;
+        vm.measure_dy = measure.dy;
+        vm.measure_dz = measure.dz;
+        vm.measure_angle_deg = measure.angle_deg;
+
+        vm.micro_inspector_open = self.micro_inspector_open;
+        vm.micro_inspector_x = self.micro_inspector_pos[0];
+        vm.micro_inspector_y = self.micro_inspector_pos[1];
 
         let snap_marker =
             compute_snap_marker(&self.state, self.viewport_size[0], self.viewport_size[1]);
@@ -7477,6 +7550,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             OverlayId::ContextMenu => self.context_menu = None,
             OverlayId::MenuBar => self.menu_open = None,
             OverlayId::PivotMenu => self.pivot_menu_open = false,
+            OverlayId::MicroInspector => self.micro_inspector_open = false,
         }
     }
 }

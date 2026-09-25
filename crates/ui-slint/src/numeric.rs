@@ -68,7 +68,7 @@ impl NumericFieldState {
     }
 
     pub fn commit_text(&mut self, text: &str) -> Result<f32, NumericInputError> {
-        let parsed = parse_numeric(text)?;
+        let parsed = parse_numeric_with_base(text, self.value)?;
         self.value = self.clamp(parsed);
         self.original_value = self.value;
         self.editing = false;
@@ -98,17 +98,335 @@ impl NumericFieldState {
 }
 
 pub fn parse_numeric(text: &str) -> Result<f32, NumericInputError> {
+    parse_numeric_with_base(text, 0.0)
+}
+
+/// Avalia expressões matemáticas absolutas ou relativas ao valor base (estilo Cinema 4D / CAD).
+///
+/// Suporta:
+/// - Expressões absolutas: `"10 + 5"`, `"180 / 4"`, `"2.5 * 4"`, `"(10 - 2) * 3"`.
+/// - Operações relativas: `"+10"`, `"-= 2.5"`, `"*2"`, `"/3"`, `"- 2.5"`.
+/// - Variáveis do valor atual: `"x * 2"`, `"v - 1"`, `"# + 5"`.
+pub fn parse_numeric_with_base(text: &str, base: f32) -> Result<f32, NumericInputError> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err(NumericInputError::Empty);
     }
-    let value = trimmed
-        .parse::<f32>()
-        .map_err(|_| NumericInputError::Invalid)?;
-    if !value.is_finite() {
+
+    // Normalização de vírgula decimal para ponto
+    let normalized = trimmed.replace(',', ".");
+    let norm_str = normalized.trim();
+
+    // Verificação explícita de NaN / Infinity
+    let lower = norm_str.to_ascii_lowercase();
+    if lower == "nan"
+        || lower == "infinity"
+        || lower == "+infinity"
+        || lower == "-infinity"
+        || lower == "inf"
+        || lower == "+inf"
+        || lower == "-inf"
+    {
         return Err(NumericInputError::NonFinite);
     }
-    Ok(value)
+
+    // Prefixo de atribuição composta ou operação relativa direta
+    if let Some(rest) = norm_str.strip_prefix("+=") {
+        let val = eval_expression(rest, base)?;
+        let result = base + val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+    if let Some(rest) = norm_str.strip_prefix("-=") {
+        let val = eval_expression(rest, base)?;
+        let result = base - val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+    if let Some(rest) = norm_str.strip_prefix("*=") {
+        let val = eval_expression(rest, base)?;
+        let result = base * val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+    if let Some(rest) = norm_str.strip_prefix("/=") {
+        let val = eval_expression(rest, base)?;
+        if val.abs() < 1e-12 {
+            return Err(NumericInputError::NonFinite);
+        }
+        let result = base / val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+    if let Some(rest) = norm_str.strip_prefix('*') {
+        let val = eval_expression(rest, base)?;
+        let result = base * val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+    if let Some(rest) = norm_str.strip_prefix('/') {
+        let val = eval_expression(rest, base)?;
+        if val.abs() < 1e-12 {
+            return Err(NumericInputError::NonFinite);
+        }
+        let result = base / val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+    if let Some(rest) = norm_str.strip_prefix('+') {
+        // Se começa com '+', é adição relativa ao valor base
+        let val = eval_expression(rest, base)?;
+        let result = base + val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+    if let Some(rest) = norm_str.strip_prefix("- ") {
+        // "- " com espaço explícito é subtração relativa
+        let val = eval_expression(rest, base)?;
+        let result = base - val;
+        return if result.is_finite() {
+            Ok(result)
+        } else {
+            Err(NumericInputError::NonFinite)
+        };
+    }
+
+    eval_expression(norm_str, base)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Token {
+    Number(f32),
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    LParen,
+    RParen,
+}
+
+fn tokenize(input: &str, base: f32) -> Result<Vec<Token>, NumericInputError> {
+    let mut tokens = Vec::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        match c {
+            '+' => {
+                tokens.push(Token::Plus);
+                i += 1;
+            }
+            '-' => {
+                tokens.push(Token::Minus);
+                i += 1;
+            }
+            '*' => {
+                tokens.push(Token::Star);
+                i += 1;
+            }
+            '/' => {
+                tokens.push(Token::Slash);
+                i += 1;
+            }
+            '(' => {
+                tokens.push(Token::LParen);
+                i += 1;
+            }
+            ')' => {
+                tokens.push(Token::RParen);
+                i += 1;
+            }
+            'x' | 'X' | 'v' | 'V' | '#' => {
+                tokens.push(Token::Number(base));
+                i += 1;
+            }
+            '0'..='9' | '.' => {
+                let start = i;
+                let mut has_dot = c == '.';
+                i += 1;
+                while i < chars.len() {
+                    let ch = chars[i];
+                    if ch.is_ascii_digit() {
+                        i += 1;
+                    } else if ch == '.' && !has_dot {
+                        has_dot = true;
+                        i += 1;
+                    } else if (ch == 'e' || ch == 'E') && i + 1 < chars.len() {
+                        let next = chars[i + 1];
+                        if next == '+' || next == '-' || next.is_ascii_digit() {
+                            i += 2;
+                            while i < chars.len() && chars[i].is_ascii_digit() {
+                                i += 1;
+                            }
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                let num_str: String = chars[start..i].iter().collect();
+                let val: f32 = num_str.parse().map_err(|_| NumericInputError::Invalid)?;
+                if !val.is_finite() {
+                    return Err(NumericInputError::NonFinite);
+                }
+                tokens.push(Token::Number(val));
+            }
+            _ => return Err(NumericInputError::Invalid),
+        }
+    }
+
+    if tokens.is_empty() {
+        Err(NumericInputError::Empty)
+    } else {
+        Ok(tokens)
+    }
+}
+
+struct ExprParser<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+}
+
+impl<'a> ExprParser<'a> {
+    fn new(tokens: &'a [Token]) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    fn peek(&self) -> Option<&'a Token> {
+        self.tokens.get(self.pos)
+    }
+
+    fn consume(&mut self) -> Option<&'a Token> {
+        let tok = self.tokens.get(self.pos);
+        if tok.is_some() {
+            self.pos += 1;
+        }
+        tok
+    }
+
+    fn parse_expr(&mut self) -> Result<f32, NumericInputError> {
+        let mut left = self.parse_term()?;
+        while let Some(tok) = self.peek() {
+            match tok {
+                Token::Plus => {
+                    self.consume();
+                    let right = self.parse_term()?;
+                    left += right;
+                }
+                Token::Minus => {
+                    self.consume();
+                    let right = self.parse_term()?;
+                    left -= right;
+                }
+                _ => break,
+            }
+            if !left.is_finite() {
+                return Err(NumericInputError::NonFinite);
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_term(&mut self) -> Result<f32, NumericInputError> {
+        let mut left = self.parse_factor()?;
+        while let Some(tok) = self.peek() {
+            match tok {
+                Token::Star => {
+                    self.consume();
+                    let right = self.parse_factor()?;
+                    left *= right;
+                }
+                Token::Slash => {
+                    self.consume();
+                    let right = self.parse_factor()?;
+                    if right.abs() < 1e-12 || !right.is_finite() {
+                        return Err(NumericInputError::NonFinite);
+                    }
+                    left /= right;
+                }
+                _ => break,
+            }
+            if !left.is_finite() {
+                return Err(NumericInputError::NonFinite);
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_factor(&mut self) -> Result<f32, NumericInputError> {
+        match self.peek() {
+            Some(Token::Plus) => {
+                self.consume();
+                self.parse_factor()
+            }
+            Some(Token::Minus) => {
+                self.consume();
+                let val = self.parse_factor()?;
+                Ok(-val)
+            }
+            _ => self.parse_primary(),
+        }
+    }
+
+    fn parse_primary(&mut self) -> Result<f32, NumericInputError> {
+        match self.consume() {
+            Some(Token::Number(val)) => {
+                if val.is_finite() {
+                    Ok(*val)
+                } else {
+                    Err(NumericInputError::NonFinite)
+                }
+            }
+            Some(Token::LParen) => {
+                let inner = self.parse_expr()?;
+                match self.consume() {
+                    Some(Token::RParen) => Ok(inner),
+                    _ => Err(NumericInputError::Invalid),
+                }
+            }
+            _ => Err(NumericInputError::Invalid),
+        }
+    }
+}
+
+fn eval_expression(expr: &str, base: f32) -> Result<f32, NumericInputError> {
+    let tokens = tokenize(expr, base)?;
+    let mut parser = ExprParser::new(&tokens);
+    let result = parser.parse_expr()?;
+    if parser.pos < parser.tokens.len() {
+        return Err(NumericInputError::Invalid);
+    }
+    if !result.is_finite() {
+        return Err(NumericInputError::NonFinite);
+    }
+    Ok(result)
 }
 
 fn sanitize_value(value: f32) -> f32 {
@@ -171,5 +489,49 @@ mod tests {
         assert_eq!(parse_numeric("NaN"), Err(NumericInputError::NonFinite));
         assert_eq!(parse_numeric("Infinity"), Err(NumericInputError::NonFinite));
         assert_eq!(parse_numeric("-0.25"), Ok(-0.25));
+    }
+
+    #[test]
+    fn arithmetic_expressions_evaluate_correctly() {
+        assert_eq!(parse_numeric("10 + 5"), Ok(15.0));
+        assert_eq!(parse_numeric("180 / 4"), Ok(45.0));
+        assert_eq!(parse_numeric("2.5 * 4"), Ok(10.0));
+        assert_eq!(parse_numeric("10 - 2.5 * 2"), Ok(5.0));
+        assert_eq!(parse_numeric("(10 - 2.5) * 2"), Ok(15.0));
+        assert_eq!(parse_numeric("2,5 + 3,5"), Ok(6.0));
+        assert_eq!(parse_numeric("10 / 0"), Err(NumericInputError::NonFinite));
+        assert_eq!(parse_numeric("(10 + 5"), Err(NumericInputError::Invalid));
+    }
+
+    #[test]
+    fn relative_operations_modify_base_value() {
+        // Operações diretas relativas
+        assert_eq!(parse_numeric_with_base("+10", 5.0), Ok(15.0));
+        assert_eq!(parse_numeric_with_base("+ 10", 5.0), Ok(15.0));
+        assert_eq!(parse_numeric_with_base("+= 10", 5.0), Ok(15.0));
+        assert_eq!(parse_numeric_with_base("-= 2.5", 10.0), Ok(7.5));
+        assert_eq!(parse_numeric_with_base("- 2.5", 10.0), Ok(7.5));
+        assert_eq!(parse_numeric_with_base("*2", 4.0), Ok(8.0));
+        assert_eq!(parse_numeric_with_base("*= 2", 4.0), Ok(8.0));
+        assert_eq!(parse_numeric_with_base("/3", 12.0), Ok(4.0));
+        assert_eq!(parse_numeric_with_base("/= 3", 12.0), Ok(4.0));
+
+        // Unary minus é absoluto
+        assert_eq!(parse_numeric_with_base("-2.5", 10.0), Ok(-2.5));
+
+        // Uso de variável x, v ou #
+        assert_eq!(parse_numeric_with_base("x * 2 + 1", 3.0), Ok(7.0));
+        assert_eq!(parse_numeric_with_base("v - 2.5", 10.0), Ok(7.5));
+        assert_eq!(parse_numeric_with_base("# / 2", 8.0), Ok(4.0));
+    }
+
+    #[test]
+    fn field_commit_text_supports_expressions_and_relative_mods() {
+        let mut field = NumericFieldState::new(10.0, None, None);
+        assert_eq!(field.commit_text("+5"), Ok(15.0));
+        assert_eq!(field.commit_text("*2"), Ok(30.0));
+        assert_eq!(field.commit_text("-= 10"), Ok(20.0));
+        assert_eq!(field.commit_text("/4"), Ok(5.0));
+        assert_eq!(field.commit_text("x * 2 + 5"), Ok(15.0));
     }
 }

@@ -22,6 +22,7 @@ pub enum OverlayId {
     ContextMenu,
     MenuBar,
     PivotMenu,
+    MicroInspector,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +64,10 @@ impl OverlayStack {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    pub fn contains(&self, id: OverlayId) -> bool {
+        self.entries.iter().any(|entry| entry.id == id)
     }
 
     pub fn esc(&mut self) -> Option<OverlayEntry> {

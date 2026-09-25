@@ -5414,3 +5414,127 @@ fn test_slice_trim_toggle_and_view_model() {
     bridge.slice_trim = false;
     assert!(!bridge.view_model().slice_trim);
 }
+
+#[test]
+fn test_commit_transform_text_arithmetic_expressions() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // Expressão absoluta: 10 + 5 * 2 = 20
+    let res = bridge
+        .commit_transform_text(TransformKind::Position, 0, "10 + 5 * 2")
+        .unwrap();
+    assert_eq!(res, 20.0);
+    assert_eq!(bridge.view_model().position[0], 20.0);
+
+    // Operação relativa com '+': base atual é 20, + 10 -> 30
+    let res = bridge
+        .commit_transform_text(TransformKind::Position, 0, "+10")
+        .unwrap();
+    assert_eq!(res, 30.0);
+
+    // Multiplicação relativa: * 2 -> 60
+    let res = bridge
+        .commit_transform_text(TransformKind::Position, 0, "*2")
+        .unwrap();
+    assert_eq!(res, 60.0);
+
+    // Divisão relativa: / 3 -> 20
+    let res = bridge
+        .commit_transform_text(TransformKind::Position, 0, "/3")
+        .unwrap();
+    assert_eq!(res, 20.0);
+
+    // Atribuição relativa: -= 5 -> 15
+    let res = bridge
+        .commit_transform_text(TransformKind::Position, 0, "-= 5")
+        .unwrap();
+    assert_eq!(res, 15.0);
+
+    // Expressão com variável 'x' ou 'v': x / 3 -> 5.0
+    let res = bridge
+        .commit_transform_text(TransformKind::Position, 0, "x / 3")
+        .unwrap();
+    assert_eq!(res, 5.0);
+    assert_eq!(bridge.view_model().position[0], 5.0);
+
+    // Undo restaura a última transformação
+    assert!(bridge.state.undo());
+}
+
+#[test]
+fn test_quick_measure_with_two_selected_vertices() {
+    let mut state = AppState::default();
+    state.set_selection_domain(SelectionDomain::Vertex);
+    state.selection.verts.clear();
+    state.selection.verts.push(0);
+    state.selection.verts.push(1);
+
+    let measure = compute_quick_measure(&state, 800.0, 600.0);
+    assert!(measure.visible);
+    assert!(measure.distance > 0.0);
+    assert!(!measure.commands.is_empty());
+    assert!(measure.commands.starts_with("M "));
+    assert!(!measure.text.is_empty());
+    assert!(measure.text.contains('m'));
+
+    // Com 3 vértices selecionados, a fita métrica desativa
+    state.selection.verts.push(2);
+    let measure3 = compute_quick_measure(&state, 800.0, 600.0);
+    assert!(!measure3.visible);
+
+    // Com 1 vértice, a fita métrica desativa
+    state.selection.verts.clear();
+    state.selection.verts.push(0);
+    let measure1 = compute_quick_measure(&state, 800.0, 600.0);
+    assert!(!measure1.visible);
+}
+
+#[test]
+fn test_quick_measure_with_active_measurement() {
+    let mut state = AppState::default();
+    state.session.tools.active_measurement = Some(petunia_project::MeasurementItem::new(
+        "Measure",
+        [0.0, 0.0, 0.0],
+        [3.0, 4.0, 0.0],
+        5.0,
+    ));
+
+    let measure = compute_quick_measure(&state, 800.0, 600.0);
+    assert!(measure.visible);
+    assert!((measure.distance - 5.0).abs() < 1e-4);
+    assert!((measure.dx - 3.0).abs() < 1e-4);
+    assert!((measure.dy - 4.0).abs() < 1e-4);
+    assert!(measure.dz < 1e-4);
+    assert!(measure.text.contains("5.000m"));
+}
+
+#[test]
+fn test_micro_inspector_toggle_and_shortcut() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+
+    assert!(!bridge.micro_inspector_open);
+    assert!(!bridge.view_model().micro_inspector_open);
+
+    // Toggle via método
+    assert!(bridge.toggle_micro_inspector());
+    assert!(bridge.micro_inspector_open);
+    assert!(bridge.view_model().micro_inspector_open);
+    assert!(bridge.overlays.contains(OverlayId::MicroInspector));
+
+    // Fechar com Escape
+    assert!(bridge.handle_escape());
+    assert!(!bridge.micro_inspector_open);
+    assert!(!bridge.view_model().micro_inspector_open);
+    assert!(!bridge.overlays.contains(OverlayId::MicroInspector));
+
+    // Abrir via atalho de teclado Space
+    assert!(bridge.route_shortcut("Space", false, false, false));
+    assert!(bridge.micro_inspector_open);
+    assert!(bridge.view_model().micro_inspector_open);
+
+    // Pressionar Space novamente fecha
+    assert!(bridge.route_shortcut("Space", false, false, false));
+    assert!(!bridge.micro_inspector_open);
+    assert!(!bridge.view_model().micro_inspector_open);
+}

@@ -692,6 +692,133 @@ pub(crate) fn compute_dimension_annotation(
     }
 }
 
+/// Modelo de fita métrica tridimensional e consulta dimensional rápida.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QuickMeasureModel {
+    pub visible: bool,
+    pub commands: String,
+    pub distance: f32,
+    pub dx: f32,
+    pub dy: f32,
+    pub dz: f32,
+    pub angle_deg: f32,
+    pub text: String,
+    pub label_x: f32,
+    pub label_y: f32,
+}
+
+pub(crate) fn compute_quick_measure(
+    state: &AppState,
+    width: f32,
+    height: f32,
+) -> QuickMeasureModel {
+    if width <= 1.0 || height <= 1.0 {
+        return QuickMeasureModel::default();
+    }
+
+    // Caso 1: medição ativa explícita no ToolState
+    let (p_start, p_end) = if let Some(m) = state.session.tools.active_measurement.as_ref() {
+        (
+            glam::Vec3::from_array(m.start),
+            glam::Vec3::from_array(m.end),
+        )
+    } else if state.selection.verts.len() == 2 {
+        // Caso 2: exatamente dois vértices selecionados na malha ativa
+        let Some(mesh) = state.project.active_mesh() else {
+            return QuickMeasureModel::default();
+        };
+        let mut iter = state.selection.verts.iter().copied();
+        let (Some(v0), Some(v1)) = (iter.next(), iter.next()) else {
+            return QuickMeasureModel::default();
+        };
+        let idx0 = v0 as usize;
+        let idx1 = v1 as usize;
+        if idx0 >= mesh.verts.len() || idx1 >= mesh.verts.len() {
+            return QuickMeasureModel::default();
+        }
+        (mesh.verts[idx0].vec(), mesh.verts[idx1].vec())
+    } else {
+        return QuickMeasureModel::default();
+    };
+
+    let delta = p_end - p_start;
+    let distance = delta.length();
+    if distance < 1e-4 {
+        return QuickMeasureModel::default();
+    }
+
+    let dx = delta.x.abs();
+    let dy = delta.y.abs();
+    let dz = delta.z.abs();
+    let angle_deg = delta.y.atan2(delta.x).to_degrees().abs();
+
+    let view_proj = state.session.camera.view_proj();
+    let clip_start = view_proj * p_start.extend(1.0);
+    let clip_end = view_proj * p_end.extend(1.0);
+    if clip_start.w <= 0.05 || clip_end.w <= 0.05 {
+        return QuickMeasureModel::default();
+    }
+
+    let a = [
+        (clip_start.x / clip_start.w * 0.5 + 0.5) * width,
+        (1.0 - (clip_start.y / clip_start.w * 0.5 + 0.5)) * height,
+    ];
+    let b = [
+        (clip_end.x / clip_end.w * 0.5 + 0.5) * width,
+        (1.0 - (clip_end.y / clip_end.w * 0.5 + 0.5)) * height,
+    ];
+
+    let screen_dx = b[0] - a[0];
+    let screen_dy = b[1] - a[1];
+    let screen_dist = screen_dx.hypot(screen_dy);
+    if screen_dist < 4.0 {
+        return QuickMeasureModel::default();
+    }
+
+    let (ux, uy) = (screen_dx / screen_dist, screen_dy / screen_dist);
+    let (nx, ny) = (-uy, ux);
+
+    let mut commands = String::new();
+    use std::fmt::Write as _;
+    let _ = write!(
+        commands,
+        "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} ",
+        a[0] - nx * 8.0,
+        a[1] - ny * 8.0,
+        a[0] + nx * 8.0,
+        a[1] + ny * 8.0,
+        b[0] - nx * 8.0,
+        b[1] - ny * 8.0,
+        b[0] + nx * 8.0,
+        b[1] + ny * 8.0,
+        a[0],
+        a[1],
+        b[0],
+        b[1],
+    );
+
+    let text = format!(
+        "{:.3}m  |  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  |  {:.1}°",
+        distance, dx, dy, dz, angle_deg
+    );
+
+    let label_x = (a[0] + b[0]) * 0.5 + nx * 16.0;
+    let label_y = (a[1] + b[1]) * 0.5 + ny * 16.0;
+
+    QuickMeasureModel {
+        visible: true,
+        commands,
+        distance,
+        dx,
+        dy,
+        dz,
+        angle_deg,
+        text,
+        label_x,
+        label_y,
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SnapMarkerModel {
     pub visible: bool,
