@@ -1375,10 +1375,25 @@ impl Renderer {
                     } else if show_uv_checker {
                         let u_cell = (uv[0] * 16.0).floor() as i32;
                         let v_cell = (uv[1] * 16.0).floor() as i32;
-                        if (u_cell + v_cell).rem_euclid(2) == 0 {
-                            col = [0.85, 0.85, 0.85];
+                        let is_even = (u_cell + v_cell).rem_euclid(2) == 0;
+                        let u_macro = u_cell.rem_euclid(8) == 0;
+                        let v_macro = v_cell.rem_euclid(8) == 0;
+                        if is_even {
+                            if u_macro {
+                                col = [0.95, 0.55, 0.45];
+                            } else if v_macro {
+                                col = [0.45, 0.75, 0.95];
+                            } else {
+                                col = [0.85, 0.85, 0.85];
+                            }
                         } else {
-                            col = [0.25, 0.25, 0.25];
+                            if u_macro {
+                                col = [0.45, 0.20, 0.18];
+                            } else if v_macro {
+                                col = [0.18, 0.28, 0.45];
+                            } else {
+                                col = [0.25, 0.25, 0.25];
+                            }
                         }
                     } else {
                         if (col[0] - 0.72).abs() < 0.02

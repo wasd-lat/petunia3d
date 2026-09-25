@@ -75,6 +75,12 @@ description: Atalhos do perfil canônico Petunia, gerados a partir do keymap (P3
 | :--- | :---: |
 | `paint.paint` | <kbd>B</kbd> |
 
+## UV
+
+| Ação | Atalho |
+| :--- | :---: |
+| `uv.toggle_seam` | <kbd>U</kbd> |
+
 ## Visualização & Câmera
 
 | Ação | Atalho |

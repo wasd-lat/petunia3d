@@ -5,6 +5,15 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Ergonomia de Ferramentas, Atalhos e Precisão MODEL/PAINT/UV (25/09/2026, Sprints 1–3)
+- Atalhos universais de domínio de seleção `1` (Point), `2` (Edge), `3` (Face) e `4`/`0` (Object) no workspace MODEL com alternância direta e sem atritos.
+- Ajuste interativo do número de cortes de Loop Cut através da roda do mouse (gesture Zoom) no estado de preview e suspensão contextual de navegação.
+- Ferramenta Slice com restrição angular em incrementos de 15° ao segurar `Ctrl`/snap e indicador direcional de seta perpendicular no preview visual demonstrando o lado preservado vs ceifado durante o modo Trim.
+- Modo Edit Pivot persistente com atalhos `D` e `Insert`, card dedicado no HUD da viewport ("Edit Pivot Mode") e saída limpa via `Escape`.
+- Alternância de costura UV com atalho direto `U` para arestas selecionadas ou dentro do workspace UV.
+- Preenchimento de ilhas UV (`FillScope::UvIsland`) com sangria de textura (UV Bleed / dilation de 2px) em direção a pixels adjacentes transparentes, prevenindo frestas não texturizadas nas costuras em 3D.
+- Diagnóstico de orientação no UV Checkerboard com faixas de destaque no eixo U (quente/avermelhado) e no eixo V (frio/azulado) no WGPU e no renderizador software.
+
 ### Módulos independentes do Inspector: ancorar, flutuar e fixar (24/09/2026, ADR 005)
 - Cada módulo do Inspector direito (Parts, Transform, Material, Object, Modifiers, Quick Actions) tem estado próprio: ancorado ou flutuante, posição, "manter aberto" e asset fixado, com persistência individual por módulo.
 - Card flutuante arrastável dentro da viewport (arrasto pelo header, clamp nas bordas), com camada de cards sobre o canvas — sem janelas do sistema operacional, conforme a V1.

@@ -5538,3 +5538,101 @@ fn test_micro_inspector_toggle_and_shortcut() {
     assert!(!bridge.micro_inspector_open);
     assert!(!bridge.view_model().micro_inspector_open);
 }
+
+#[test]
+fn test_selection_domain_shortcuts_and_d_key() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Object
+    );
+
+    // Atalhos 1, 2, 3, 4 no workspace MODEL
+    assert!(bridge.route_shortcut("1", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Vertex
+    );
+
+    assert!(bridge.route_shortcut("2", false, false, false));
+    assert_eq!(bridge.state.session.selection_domain, SelectionDomain::Edge);
+
+    assert!(bridge.route_shortcut("3", false, false, false));
+    assert_eq!(bridge.state.session.selection_domain, SelectionDomain::Face);
+
+    assert!(bridge.route_shortcut("4", false, false, false));
+    assert_eq!(
+        bridge.state.session.selection_domain,
+        SelectionDomain::Object
+    );
+
+    // Atalho D / d alterna Edit Pivot
+    assert!(!bridge.state.session.edit_pivot);
+    assert!(bridge.route_shortcut("d", false, false, false));
+    assert!(bridge.state.session.edit_pivot);
+
+    // HUD reflete modo Edit Pivot
+    let vm = bridge.view_model();
+    assert!(vm.operation_hud_active);
+    assert_eq!(vm.operation_hud_title, "Edit Pivot Mode");
+    assert_eq!(vm.operation_hud_subject, "Pivot");
+
+    // Escape sai de Edit Pivot
+    assert!(bridge.route_shortcut("Escape", false, false, false));
+    assert!(!bridge.state.session.edit_pivot);
+}
+
+#[test]
+fn test_slice_15_deg_snap_and_trim_arrow() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetActiveTool("slice".to_string()));
+    assert!(bridge.begin_slice(100.0, 100.0));
+    assert_eq!(bridge.slice_anchor, Some([100.0, 100.0]));
+
+    // Movimento com snap: ângulo ~5.7° deve arredondar para 0° (dx=100.0, dy=0.0)
+    assert!(bridge.update_viewport_slice_modified(200.0, 110.0, true));
+    assert_eq!(bridge.pointer_position[1], 100.0);
+    assert!(bridge.pointer_position[0] > 190.0);
+
+    // Sem trim: apenas linha M .. L ..
+    bridge.slice_trim = false;
+    let vm_no_trim = bridge.view_model();
+    assert!(!vm_no_trim.slice_preview_commands.is_empty());
+
+    // Com trim: seta de direção normal adicionada
+    bridge.slice_trim = true;
+    let vm_trim = bridge.view_model();
+    assert!(vm_trim.slice_preview_commands.contains("M "));
+    // A seta inclui múltiplos segmentos L
+    let line_segments = vm_trim.slice_preview_commands.matches(" L ").count();
+    assert!(
+        line_segments >= 3,
+        "Trim preview should contain normal arrow segments"
+    );
+
+    // Escape cancela o corte
+    assert!(bridge.route_shortcut("Escape", false, false, false));
+    assert!(bridge.slice_anchor.is_none());
+}
+
+#[test]
+fn test_uv_seam_shortcut_u() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    // Seleciona domínio de aresta e uma aresta
+    bridge.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+    {
+        let mesh = bridge.state.project.active_mesh_mut().unwrap();
+        mesh.selected_edges.clear();
+        mesh.selected_edges.insert((0, 1));
+    }
+
+    // Tecla 'u' alterna costura da aresta selecionada
+    assert!(bridge.route_shortcut("u", false, false, false));
+    let mesh = bridge.state.project.active_mesh().unwrap();
+    assert!(mesh.uv_seams.contains(&(0, 1)) || mesh.uv_seams.contains(&(1, 0)));
+
+    // Pressionar 'u' novamente remove a costura
+    assert!(bridge.route_shortcut("u", false, false, false));
+    let mesh = bridge.state.project.active_mesh().unwrap();
+    assert!(!mesh.uv_seams.contains(&(0, 1)) && !mesh.uv_seams.contains(&(1, 0)));
+}

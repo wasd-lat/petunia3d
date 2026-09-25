@@ -71,6 +71,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>T</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |
@@ -83,7 +84,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 
 ## Perfis Especializados em Disco
 
-### Perfil: `3ds-max` (47 atalhos)
+### Perfil: `3ds-max` (48 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -120,12 +121,13 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.select_edge` | <kbd>2</kbd> |
 | `model.select_face` | <kbd>4</kbd> |
 | `model.select_linked` | <kbd>L</kbd> |
-| `model.select_object` | <kbd>0</kbd> |
+| `model.select_object` | <kbd>4</kbd> |
 | `model.select_vertex` | <kbd>1</kbd> |
 | `model.slice` | <kbd>Shift+K</kbd> |
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>W</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |
@@ -135,7 +137,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `blender` (47 atalhos)
+### Perfil: `blender` (48 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -172,12 +174,13 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.select_edge` | <kbd>2</kbd> |
 | `model.select_face` | <kbd>3</kbd> |
 | `model.select_linked` | <kbd>L</kbd> |
-| `model.select_object` | <kbd>0</kbd> |
+| `model.select_object` | <kbd>4</kbd> |
 | `model.select_vertex` | <kbd>1</kbd> |
 | `model.slice` | <kbd>Shift+K</kbd> |
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>G</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |
@@ -187,7 +190,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `blender-notebook` (47 atalhos)
+### Perfil: `blender-notebook` (48 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -224,12 +227,13 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.select_edge` | <kbd>2</kbd> |
 | `model.select_face` | <kbd>3</kbd> |
 | `model.select_linked` | <kbd>L</kbd> |
-| `model.select_object` | <kbd>0</kbd> |
+| `model.select_object` | <kbd>4</kbd> |
 | `model.select_vertex` | <kbd>1</kbd> |
 | `model.slice` | <kbd>Shift+K</kbd> |
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>G</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |
@@ -239,7 +243,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `cinema-4d` (47 atalhos)
+### Perfil: `cinema-4d` (48 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -276,12 +280,13 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.select_edge` | <kbd>2</kbd> |
 | `model.select_face` | <kbd>3</kbd> |
 | `model.select_linked` | <kbd>L</kbd> |
-| `model.select_object` | <kbd>0</kbd> |
+| `model.select_object` | <kbd>4</kbd> |
 | `model.select_vertex` | <kbd>1</kbd> |
 | `model.slice` | <kbd>Shift+K</kbd> |
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>E</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |
@@ -291,7 +296,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `maya` (47 atalhos)
+### Perfil: `maya` (48 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -334,6 +339,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>W</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |
@@ -343,7 +349,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `petunia-notebook` (47 atalhos)
+### Perfil: `petunia-notebook` (48 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -386,6 +392,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>G</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |
@@ -395,7 +402,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `window.command_palette` | <kbd>Ctrl+P</kbd> |
 | `window.reference_manager` | <kbd>Shift+R</kbd> |
 
-### Perfil: `petunia-simple` (47 atalhos)
+### Perfil: `petunia-simple` (48 atalhos)
 
 | Ação | Atalho |
 | :--- | :---: |
@@ -438,6 +445,7 @@ description: Referência canônica dos perfis de teclado e atalhos configurávei
 | `model.subdivide` | <kbd>W</kbd> |
 | `model.transform` | <kbd>T</kbd> |
 | `paint.paint` | <kbd>B</kbd> |
+| `uv.toggle_seam` | <kbd>U</kbd> |
 | `view.frame_all` | <kbd>Home</kbd> |
 | `view.frame_selection` | <kbd>F</kbd> |
 | `view.reset_camera` | <kbd>Shift+Home</kbd> |

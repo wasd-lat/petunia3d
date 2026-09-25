@@ -396,16 +396,31 @@ impl PetuniaViewport for Software3dViewport {
                     };
                     let colors = tri.map(|i| {
                         let uv_coord = face.uv.get(i).copied().unwrap_or_default();
-                        let checker_mult = if state.show_uv_checker {
+                        let (checker_r, checker_g, checker_b) = if state.show_uv_checker {
                             let u_cell = (uv_coord[0] * 16.0).floor() as i32;
                             let v_cell = (uv_coord[1] * 16.0).floor() as i32;
-                            if (u_cell + v_cell).rem_euclid(2) == 0 {
-                                1.0
+                            let is_even = (u_cell + v_cell).rem_euclid(2) == 0;
+                            let u_macro = u_cell.rem_euclid(8) == 0;
+                            let v_macro = v_cell.rem_euclid(8) == 0;
+                            if is_even {
+                                if u_macro {
+                                    (1.0, 0.65, 0.55)
+                                } else if v_macro {
+                                    (0.55, 0.80, 1.0)
+                                } else {
+                                    (1.0, 1.0, 1.0)
+                                }
                             } else {
-                                0.3
+                                if u_macro {
+                                    (0.45, 0.22, 0.20)
+                                } else if v_macro {
+                                    (0.20, 0.30, 0.45)
+                                } else {
+                                    (0.3, 0.3, 0.3)
+                                }
                             }
                         } else {
-                            1.0
+                            (1.0, 1.0, 1.0)
                         };
                         std::array::from_fn(|channel| {
                             let vertex = &mesh.verts[face.verts[i] as usize];
@@ -421,8 +436,14 @@ impl PetuniaViewport for Software3dViewport {
                             } else {
                                 0.0
                             };
+                            let ch_mult = match channel {
+                                0 => checker_r,
+                                1 => checker_g,
+                                2 => checker_b,
+                                _ => 1.0,
+                            };
                             base[channel]
-                                * checker_mult
+                                * ch_mult
                                 * paint
                                 * (ambient + diffuse * lambert * light_color[channel])
                                 + emission

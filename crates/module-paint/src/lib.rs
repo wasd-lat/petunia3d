@@ -747,6 +747,48 @@ impl PaintModule {
         }
     }
 
+    /// Expande (dilata) a cor pintada em direção aos pixels vazios adjacentes (alpha == 0)
+    /// para evitar frestas e artefatos de costura no mapeamento UV (UV bleed).
+    pub fn dilate_canvas(canvas: &mut Canvas, color: [u8; 4], bleed: usize) {
+        let w = canvas.w as i32;
+        let h = canvas.h as i32;
+        for _ in 0..bleed {
+            let mut to_fill = Vec::new();
+            for y in 0..h {
+                for x in 0..w {
+                    if let Some(px) = canvas.get(x as u32, y as u32) {
+                        if px[3] == 0 {
+                            let neighbors = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)];
+                            let has_colored_neighbor = neighbors.iter().any(|&(nx, ny)| {
+                                if nx >= 0 && nx < w && ny >= 0 && ny < h {
+                                    if let Some(np) = canvas.get(nx as u32, ny as u32) {
+                                        np[3] > 0
+                                            && np[0] == color[0]
+                                            && np[1] == color[1]
+                                            && np[2] == color[2]
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            });
+                            if has_colored_neighbor {
+                                to_fill.push((x as u32, y as u32));
+                            }
+                        }
+                    }
+                }
+            }
+            if to_fill.is_empty() {
+                break;
+            }
+            for (x, y) in to_fill {
+                canvas.set(x, y, color);
+            }
+        }
+    }
+
     /// Preenche o canvas respeitando o `FillScope` (uma semente, algoritmos distintos).
     ///
     /// `face_hint` é a face sob o cursor, quando existe: sem ela os escopos por
@@ -835,6 +877,9 @@ impl PaintModule {
                     }
                     for polygon in &polygons {
                         Self::fill_uv_polygon(cv, polygon, color);
+                    }
+                    if matches!(scope, petunia_core::FillScope::UvIsland) {
+                        Self::dilate_canvas(cv, color, 2);
                     }
                 }
             }
@@ -1638,5 +1683,30 @@ mod tests {
         stack_inv.add_layer(PaintLayer::new_effect("Invert", PaintEffect::Invert));
         stack_inv.composite(&mut base_inv);
         assert_eq!(base_inv.get(0, 0), Some([0, 255, 155, 255]));
+    }
+
+    #[test]
+    fn test_dilate_canvas_uv_island() {
+        let mut cv = Canvas::new(16, 16, [0, 0, 0, 0]);
+        let color = [255, 100, 50, 255];
+        // Pinta um pixel isolado em (5, 5)
+        cv.set(5, 5, color);
+
+        // Dilata 2 passos
+        PaintModule::dilate_canvas(&mut cv, color, 2);
+
+        // O pixel original permanece pintado
+        assert_eq!(cv.get(5, 5), Some(color));
+        // O vizinho imediato (distância 1) foi preenchido
+        assert_eq!(cv.get(5, 4), Some(color));
+        assert_eq!(cv.get(5, 6), Some(color));
+        assert_eq!(cv.get(4, 5), Some(color));
+        assert_eq!(cv.get(6, 5), Some(color));
+        // O vizinho a 2 pixels de distância (distância 2) também foi preenchido
+        assert_eq!(cv.get(5, 3), Some(color));
+        assert_eq!(cv.get(5, 7), Some(color));
+        // Pixels a 3 ou mais pixels de distância permanecem transparentes
+        assert_eq!(cv.get(5, 2), Some([0, 0, 0, 0]));
+        assert_eq!(cv.get(0, 0), Some([0, 0, 0, 0]));
     }
 }

@@ -1294,12 +1294,17 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     pub fn apply_viewport_gesture(&mut self, gesture: ViewportGesture) {
         if self.mouse_navigation_suspended() {
-            if let ViewportGesture::Zoom { delta } = gesture
-                && self.tool_modal.is_some()
-            {
-                let step = if delta > 0.0 { -40.0 } else { 40.0 };
-                self.scrub_tool_modal(step, false);
-                self.state.mark_dirty();
+            if let ViewportGesture::Zoom { delta } = gesture {
+                if self.tool_modal.is_some() {
+                    let step = if delta > 0.0 { -40.0 } else { 40.0 };
+                    self.scrub_tool_modal(step, false);
+                    self.state.mark_dirty();
+                } else if self.state.session.tools.active_tool == "loop_cut"
+                    || self.loop_cut.is_some()
+                {
+                    self.scroll_loop_cut_count(delta);
+                    self.state.mark_dirty();
+                }
             }
             return;
         }
@@ -1324,6 +1329,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                             false,
                         );
                     }
+                } else if self.state.session.tools.active_tool == "loop_cut"
+                    || self.loop_cut.is_some()
+                {
+                    self.scroll_loop_cut_count(delta);
                 } else if self.tool_modal.is_some() {
                     let step = if delta > 0.0 { -40.0 } else { 40.0 };
                     self.scrub_tool_modal(step, false);
@@ -1657,7 +1666,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.operation_hud_lines = lines;
             vm.operation_hud_subject = format!(
                 "{} · {}",
-                if self.state.selection_domain() == petunia_core::SelectionDomain::Object {
+                if self.state.session.edit_pivot {
+                    "pivot"
+                } else if self.state.selection_domain() == petunia_core::SelectionDomain::Object {
                     "object"
                 } else {
                     "selection"
@@ -1672,6 +1683,29 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             );
             vm.operation_hud_hint = "Enter Confirm   Esc Cancel   Shift Precision".to_string();
             vm.context_hint = format!("{title} · {}", vm.operation_hud_hint);
+            return;
+        }
+
+        if self.state.session.edit_pivot {
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = "Edit Pivot Mode".to_string();
+            vm.operation_hud_subject = "Pivot".to_string();
+            vm.operation_hud_lines = vec!["Moving object pivot point".to_string()];
+            vm.operation_hud_hint =
+                "D / Insert or Esc to exit · Geometry remains fixed".to_string();
+            vm.context_hint =
+                "Edit Pivot Mode · D / Insert or Esc to exit · Geometry remains fixed".to_string();
+            return;
+        }
+
+        if let Some(session) = &self.state.session.primitive_session {
+            let name = session.descriptor.kind().default_name();
+            vm.operation_hud_active = true;
+            vm.operation_hud_title = format!("Add {name}");
+            vm.operation_hud_subject = "Primitive".to_string();
+            vm.operation_hud_lines = vec!["Adjust parameters in panel".to_string()];
+            vm.operation_hud_hint = "Enter Confirm · Esc Cancel".to_string();
+            vm.context_hint = format!("Add {name} · Enter Confirm · Esc Cancel");
             return;
         }
 
@@ -2961,10 +2995,15 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     /// Atualiza o plano de corte enquanto o ponteiro se move.
     pub fn update_viewport_slice(&mut self, x: f32, y: f32) -> bool {
+        self.update_viewport_slice_modified(x, y, false)
+    }
+
+    /// Atualiza o plano de corte com suporte a snap angular (ex.: 15° ao segurar Ctrl/snap).
+    pub fn update_viewport_slice_modified(&mut self, x: f32, y: f32, snap: bool) -> bool {
         if self.slice_anchor.is_none() {
             return false;
         }
-        self.update_slice(x, y)
+        self.update_slice_modified(x, y, snap)
     }
 
     /// Inicia uma transformação modal por arrasto na viewport.
@@ -4837,9 +4876,33 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
     /// Atualiza a pré-visualização do plano de corte.
     pub fn update_slice(&mut self, x: f32, y: f32) -> bool {
+        self.update_slice_modified(x, y, false)
+    }
+
+    /// Atualiza a pré-visualização do plano de corte com restrição angular quando `snap` é verdadeiro.
+    pub fn update_slice_modified(&mut self, x: f32, y: f32, snap: bool) -> bool {
         let Some(anchor) = self.slice_anchor else {
             return false;
         };
+        let (target_x, target_y) = if snap {
+            let dx = x - anchor[0];
+            let dy = y - anchor[1];
+            let dist = dx.hypot(dy);
+            if dist > 1e-4 {
+                let angle = dy.atan2(dx);
+                let step = std::f32::consts::PI / 12.0; // 15 graus
+                let snapped = (angle / step).round() * step;
+                (
+                    anchor[0] + dist * snapped.cos(),
+                    anchor[1] + dist * snapped.sin(),
+                )
+            } else {
+                (x, y)
+            }
+        } else {
+            (x, y)
+        };
+        self.pointer_position = [target_x, target_y];
         let viewport = petunia_core::LogicalRect::from_min_max(
             [0.0, 0.0],
             [self.viewport_size[0], self.viewport_size[1]],
@@ -4850,9 +4913,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Some(session) = self.state.session.tools.cut_session.as_ref() else {
             return false;
         };
-        let Some(sliced) =
-            session.compute_slice(&self.state.session.camera, anchor, [x, y], viewport)
-        else {
+        let Some(sliced) = session.compute_slice(
+            &self.state.session.camera,
+            anchor,
+            [target_x, target_y],
+            viewport,
+        ) else {
             return false;
         };
         if let Some(active) = self.state.project.active_mesh_mut() {
@@ -6110,6 +6176,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if self.cancel_transform() {
             return true;
         }
+        if self.state.session.edit_pivot {
+            self.state.session.edit_pivot = false;
+            self.state.mark_dirty();
+            self.state.set_status("Edit Pivot exited");
+            return true;
+        }
         if let Some(entry) = self.overlays.esc() {
             self.hide_overlay(entry.id);
             true
@@ -6256,7 +6328,14 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if text == "Enter" && !ctrl && !alt {
             return self.confirm_active_operation();
         }
-        if text == "Insert" && !ctrl && !alt && !shift {
+        if (text == "Insert" || text.eq_ignore_ascii_case("d"))
+            && !ctrl
+            && !alt
+            && !shift
+            && self.state.session.tools.modal.is_none()
+            && self.drag.is_none()
+            && self.rename_draft.is_none()
+        {
             self.apply(UiIntent::ToggleEditPivot);
             return true;
         }
@@ -6268,6 +6347,50 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             && self.drag.is_none()
         {
             return self.toggle_micro_inspector();
+        }
+        if text.eq_ignore_ascii_case("u")
+            && !ctrl
+            && !alt
+            && !shift
+            && self.state.session.tools.modal.is_none()
+            && self.drag.is_none()
+            && self.rename_draft.is_none()
+        {
+            if self.state.workspace == Workspace::Uv
+                || self.state.session.selection_domain == SelectionDomain::Edge
+            {
+                if self.toggle_selected_uv_seams() {
+                    return true;
+                }
+            }
+        }
+        if self.state.workspace == Workspace::Model
+            && self.state.session.tools.modal.is_none()
+            && self.drag.is_none()
+            && self.rename_draft.is_none()
+            && !ctrl
+            && !alt
+            && !shift
+        {
+            match text {
+                "1" => {
+                    self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Vertex));
+                    return true;
+                }
+                "2" => {
+                    self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Edge));
+                    return true;
+                }
+                "3" => {
+                    self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Face));
+                    return true;
+                }
+                "4" | "0" => {
+                    self.apply(UiIntent::SetSelectionDomain(SelectionDomain::Object));
+                    return true;
+                }
+                _ => {}
+            }
         }
         if self.state.session.tools.modal.is_some() && !ctrl && !alt {
             if let Some(axis) = ["x", "y", "z"]
@@ -7287,10 +7410,35 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         vm.slice_trim = self.slice_trim;
         if let Some(anchor) = self.slice_anchor {
-            let cmd = format!(
+            let mut cmd = format!(
                 "M {:.2} {:.2} L {:.2} {:.2}",
                 anchor[0], anchor[1], self.pointer_position[0], self.pointer_position[1]
             );
+            if self.slice_trim {
+                let dx = self.pointer_position[0] - anchor[0];
+                let dy = self.pointer_position[1] - anchor[1];
+                let len = dx.hypot(dy);
+                if len > 4.0 {
+                    let dir_x = dx / len;
+                    let dir_y = dy / len;
+                    let nx = dir_y;
+                    let ny = -dir_x;
+                    let mid_x = (anchor[0] + self.pointer_position[0]) * 0.5;
+                    let mid_y = (anchor[1] + self.pointer_position[1]) * 0.5;
+                    let arrow_x = mid_x + nx * 24.0;
+                    let arrow_y = mid_y + ny * 24.0;
+                    let w1_x = arrow_x - nx * 7.0 + dir_x * 5.0;
+                    let w1_y = arrow_y - ny * 7.0 + dir_y * 5.0;
+                    let w2_x = arrow_x - nx * 7.0 - dir_x * 5.0;
+                    let w2_y = arrow_y - ny * 7.0 - dir_y * 5.0;
+                    cmd.push_str(&format!(
+                        " M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2}",
+                        mid_x, mid_y, arrow_x, arrow_y,
+                        arrow_x, arrow_y, w1_x, w1_y,
+                        arrow_x, arrow_y, w2_x, w2_y
+                    ));
+                }
+            }
             vm.operation_preview_commands = cmd.clone();
             vm.slice_preview_visible = true;
             vm.slice_preview_commands = cmd;

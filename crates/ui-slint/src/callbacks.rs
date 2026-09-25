@@ -1479,7 +1479,7 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_viewport_transform_update(move |x, y, fine, snap| {
         if let Ok(mut bridge) = transform_drag_bridge.lock() {
             bridge.pointer_position = [x, y];
-            if bridge.update_viewport_slice(x, y) {
+            if bridge.update_viewport_slice_modified(x, y, snap) {
                 let vm = bridge.view_model();
                 let new_frame = bridge.render_viewport();
                 if let Some(window) = window_weak.upgrade() {
