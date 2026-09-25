@@ -4907,3 +4907,36 @@ fn wheel_scrubbing_adjusts_active_tool_modal() {
     bridge.apply_viewport_gesture(ViewportGesture::Zoom { delta: -1.0 });
     assert!(bridge.tool_modal_value != initial_value);
 }
+
+#[test]
+fn transform_fine_precision_and_snap_modifiers_effect() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.pointer_position = [400.0, 300.0];
+
+    // Inicia rotação com double-tap R e trava no eixo Z
+    assert!(bridge.route_shortcut("R", false, false, false));
+    assert!(bridge.route_shortcut("R", false, false, false));
+    assert!(bridge.view_model().transform_instant_active);
+    assert!(bridge.route_shortcut("Z", false, false, false));
+
+    // Com snap: true (Ctrl pressionado), a rotação em torno de Z é quantizada em passos de 15 graus
+    assert!(bridge.update_viewport_transform_modified(450.0, 300.0, false, true));
+    let angle_snapped = bridge.rotation[2].value();
+    assert_eq!((angle_snapped % 15.0).abs() < 1e-4, true);
+
+    assert!(bridge.cancel_transform());
+
+    // Inicia movimento com double-tap G a partir de [400.0, 300.0]
+    bridge.pointer_position = [400.0, 300.0];
+    assert!(bridge.route_shortcut("G", false, false, false));
+    assert!(bridge.route_shortcut("G", false, false, false));
+
+    // Com fine: true (Shift pressionado), a precisão é 10x maior (passo virtual de 0.1)
+    assert!(bridge.update_viewport_transform_modified(410.0, 300.0, true, false));
+    let drag = bridge.drag.as_ref().unwrap();
+    // 400.0 + (410.0 - 400.0) * 0.1 = 401.0
+    assert!((drag.virtual_pointer[0] - 401.0).abs() < 1e-4);
+    assert!(bridge.cancel_transform());
+}
+
