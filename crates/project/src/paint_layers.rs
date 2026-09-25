@@ -335,16 +335,48 @@ impl PaintLayerStack {
 
         let upper = self.layers.remove(pos);
         let lower = &mut self.layers[lower_idx];
-        if let Some(lower_cv) = lower.canvas_mut() {
-            if upper.visible && upper.opacity > 0.0 {
-                match &upper.kind {
-                    LayerKind::Raster(upper_cv) => {
-                        let blend_w = lower_cv.w.min(upper_cv.w);
-                        let blend_h = lower_cv.h.min(upper_cv.h);
-                        for y in 0..blend_h {
-                            for x in 0..blend_w {
+        if let Some(lower_cv) = lower.canvas_mut()
+            && upper.visible
+            && upper.opacity > 0.0
+        {
+            match &upper.kind {
+                LayerKind::Raster(upper_cv) => {
+                    let blend_w = lower_cv.w.min(upper_cv.w);
+                    let blend_h = lower_cv.h.min(upper_cv.h);
+                    for y in 0..blend_h {
+                        for x in 0..blend_w {
+                            if let (Some(dst), Some(src)) = (lower_cv.get(x, y), upper_cv.get(x, y))
+                            {
+                                let blended = blend_pixels(dst, src, upper.opacity, upper.blend);
+                                lower_cv.set(x, y, blended);
+                            }
+                        }
+                    }
+                }
+                LayerKind::Decal(decal) => {
+                    let blend_w = lower_cv.w;
+                    let blend_h = lower_cv.h;
+                    let cos_rot = (-decal.rotation_rad).cos();
+                    let sin_rot = (-decal.rotation_rad).sin();
+                    for y in 0..blend_h {
+                        for x in 0..blend_w {
+                            let u = (x as f32 + 0.5) / blend_w as f32;
+                            let v = (y as f32 + 0.5) / blend_h as f32;
+                            let dx = u - decal.center_uv[0];
+                            let dy = v - decal.center_uv[1];
+                            let rx = dx * cos_rot - dy * sin_rot;
+                            let ry = dx * sin_rot + dy * cos_rot;
+                            let decal_u = rx / decal.scale_uv[0] + 0.5;
+                            let decal_v = ry / decal.scale_uv[1] + 0.5;
+                            if (0.0..=1.0).contains(&decal_u) && (0.0..=1.0).contains(&decal_v) {
+                                let sx = (decal_u * decal.image.w as f32)
+                                    .clamp(0.0, decal.image.w as f32 - 1.0)
+                                    as u32;
+                                let sy = (decal_v * decal.image.h as f32)
+                                    .clamp(0.0, decal.image.h as f32 - 1.0)
+                                    as u32;
                                 if let (Some(dst), Some(src)) =
-                                    (lower_cv.get(x, y), upper_cv.get(x, y))
+                                    (lower_cv.get(x, y), decal.image.get(sx, sy))
                                 {
                                     let blended =
                                         blend_pixels(dst, src, upper.opacity, upper.blend);
@@ -353,59 +385,25 @@ impl PaintLayerStack {
                             }
                         }
                     }
-                    LayerKind::Decal(decal) => {
-                        let blend_w = lower_cv.w;
-                        let blend_h = lower_cv.h;
-                        let cos_rot = (-decal.rotation_rad).cos();
-                        let sin_rot = (-decal.rotation_rad).sin();
-                        for y in 0..blend_h {
-                            for x in 0..blend_w {
-                                let u = (x as f32 + 0.5) / blend_w as f32;
-                                let v = (y as f32 + 0.5) / blend_h as f32;
-                                let dx = u - decal.center_uv[0];
-                                let dy = v - decal.center_uv[1];
-                                let rx = dx * cos_rot - dy * sin_rot;
-                                let ry = dx * sin_rot + dy * cos_rot;
-                                let decal_u = rx / decal.scale_uv[0] + 0.5;
-                                let decal_v = ry / decal.scale_uv[1] + 0.5;
-                                if (0.0..=1.0).contains(&decal_u) && (0.0..=1.0).contains(&decal_v)
+                }
+                LayerKind::Effect(effect) => {
+                    if upper.opacity >= 1.0 {
+                        apply_effect(lower_cv, effect);
+                    } else {
+                        let before = lower_cv.clone();
+                        apply_effect(lower_cv, effect);
+                        for y in 0..lower_cv.h {
+                            for x in 0..lower_cv.w {
+                                if let (Some(dst), Some(src)) =
+                                    (before.get(x, y), lower_cv.get(x, y))
                                 {
-                                    let sx = (decal_u * decal.image.w as f32)
-                                        .clamp(0.0, decal.image.w as f32 - 1.0)
-                                        as u32;
-                                    let sy = (decal_v * decal.image.h as f32)
-                                        .clamp(0.0, decal.image.h as f32 - 1.0)
-                                        as u32;
-                                    if let (Some(dst), Some(src)) =
-                                        (lower_cv.get(x, y), decal.image.get(sx, sy))
-                                    {
-                                        let blended =
-                                            blend_pixels(dst, src, upper.opacity, upper.blend);
-                                        lower_cv.set(x, y, blended);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    LayerKind::Effect(effect) => {
-                        if upper.opacity >= 1.0 {
-                            apply_effect(lower_cv, effect);
-                        } else {
-                            let before = lower_cv.clone();
-                            apply_effect(lower_cv, effect);
-                            for y in 0..lower_cv.h {
-                                for x in 0..lower_cv.w {
-                                    if let (Some(dst), Some(src)) =
-                                        (before.get(x, y), lower_cv.get(x, y))
-                                    {
-                                        let blended = blend_pixels(
-                                            dst,
-                                            src,
-                                            upper.opacity,
-                                            LayerBlendMode::Normal,
-                                        );
-                                        lower_cv.set(x, y, blended);
-                                    }
+                                    let blended = blend_pixels(
+                                        dst,
+                                        src,
+                                        upper.opacity,
+                                        LayerBlendMode::Normal,
+                                    );
+                                    lower_cv.set(x, y, blended);
                                 }
                             }
                         }

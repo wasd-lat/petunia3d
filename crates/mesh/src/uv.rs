@@ -23,11 +23,11 @@ impl Mesh {
             let idx: Vec<u32> = self.faces[fi].verts.clone();
             let mut uv = Vec::new();
             for (c_idx, &vi) in idx.iter().enumerate() {
-                if self.uv_pinned.contains(&(fi, c_idx)) {
-                    if let Some(&existing) = self.faces[fi].uv.get(c_idx) {
-                        uv.push(existing);
-                        continue;
-                    }
+                if self.uv_pinned.contains(&(fi, c_idx))
+                    && let Some(&existing) = self.faces[fi].uv.get(c_idx)
+                {
+                    uv.push(existing);
+                    continue;
                 }
                 let p = self.verts[vi as usize].vec();
                 let q = (p - bb_min) / size;
@@ -68,11 +68,11 @@ impl Mesh {
             let idx: Vec<u32> = self.faces[fi].verts.clone();
             let mut uv = Vec::with_capacity(idx.len());
             for (c_idx, &vi) in idx.iter().enumerate() {
-                if self.uv_pinned.contains(&(fi, c_idx)) {
-                    if let Some(&existing) = self.faces[fi].uv.get(c_idx) {
-                        uv.push(existing);
-                        continue;
-                    }
+                if self.uv_pinned.contains(&(fi, c_idx))
+                    && let Some(&existing) = self.faces[fi].uv.get(c_idx)
+                {
+                    uv.push(existing);
+                    continue;
                 }
                 let p = self.verts[vi as usize].vec();
                 let q = (p - bb_min) / size;

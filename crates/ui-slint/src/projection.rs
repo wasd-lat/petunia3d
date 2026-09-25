@@ -1336,7 +1336,7 @@ pub(crate) fn compute_protractor(
             let py = cy + R * th.sin();
             let _ = write!(wedge_commands, "L {:.2} {:.2} ", px, py);
         }
-        wedge_commands.push_str("Z");
+        wedge_commands.push('Z');
     } else {
         let px = cx + R * theta0.cos();
         let py = cy + R * theta0.sin();

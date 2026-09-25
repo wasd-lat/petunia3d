@@ -803,26 +803,26 @@ impl PaintModule {
             let mut to_fill = Vec::new();
             for y in 0..h {
                 for x in 0..w {
-                    if let Some(px) = canvas.get(x as u32, y as u32) {
-                        if px[3] == 0 {
-                            let neighbors = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)];
-                            let has_colored_neighbor = neighbors.iter().any(|&(nx, ny)| {
-                                if nx >= 0 && nx < w && ny >= 0 && ny < h {
-                                    if let Some(np) = canvas.get(nx as u32, ny as u32) {
-                                        np[3] > 0
-                                            && np[0] == color[0]
-                                            && np[1] == color[1]
-                                            && np[2] == color[2]
-                                    } else {
-                                        false
-                                    }
+                    if let Some(px) = canvas.get(x as u32, y as u32)
+                        && px[3] == 0
+                    {
+                        let neighbors = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)];
+                        let has_colored_neighbor = neighbors.iter().any(|&(nx, ny)| {
+                            if nx >= 0 && nx < w && ny >= 0 && ny < h {
+                                if let Some(np) = canvas.get(nx as u32, ny as u32) {
+                                    np[3] > 0
+                                        && np[0] == color[0]
+                                        && np[1] == color[1]
+                                        && np[2] == color[2]
                                 } else {
                                     false
                                 }
-                            });
-                            if has_colored_neighbor {
-                                to_fill.push((x as u32, y as u32));
+                            } else {
+                                false
                             }
+                        });
+                        if has_colored_neighbor {
+                            to_fill.push((x as u32, y as u32));
                         }
                     }
                 }
@@ -1151,10 +1151,10 @@ impl PaintModule {
             }
 
             for p_sym in sym_points {
-                if let Some(uv_sym) = Self::find_mesh_uv_at_pos(state, p_sym, isolate_selection) {
-                    if let Some((px_sym, py_sym)) = Self::uv_to_px(state, uv_sym) {
-                        Self::canvas_brush_with_settings(state, px_sym, py_sym, s);
-                    }
+                if let Some(uv_sym) = Self::find_mesh_uv_at_pos(state, p_sym, isolate_selection)
+                    && let Some((px_sym, py_sym)) = Self::uv_to_px(state, uv_sym)
+                {
+                    Self::canvas_brush_with_settings(state, px_sym, py_sym, s);
                 }
             }
         }
@@ -1340,6 +1340,7 @@ pub fn barycentric_uv(
 }
 
 /// Calcula interpolação baricêntrica de coordenadas UV com tolerância customizada.
+#[allow(clippy::too_many_arguments)]
 pub fn barycentric_uv_tolerant(
     p: Vec3,
     a: Vec3,

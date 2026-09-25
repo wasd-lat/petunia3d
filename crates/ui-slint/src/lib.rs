@@ -6606,29 +6606,25 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             && self.state.session.tools.modal.is_none()
             && self.drag.is_none()
             && self.rename_draft.is_none()
+            && (self.state.workspace == Workspace::Uv
+                || self.state.session.selection_domain == SelectionDomain::Edge)
+            && self.toggle_selected_uv_seams()
         {
-            if self.state.workspace == Workspace::Uv
-                || self.state.session.selection_domain == SelectionDomain::Edge
-            {
-                if self.toggle_selected_uv_seams() {
-                    return true;
-                }
-            }
+            return true;
         }
         if text.eq_ignore_ascii_case("p")
             && !ctrl
             && self.state.session.tools.modal.is_none()
             && self.drag.is_none()
             && self.rename_draft.is_none()
+            && self.state.workspace == Workspace::Uv
         {
-            if self.state.workspace == Workspace::Uv {
-                if alt {
-                    if self.clear_all_uv_pins() {
-                        return true;
-                    }
-                } else if self.toggle_selected_uv_pins() {
+            if alt {
+                if self.clear_all_uv_pins() {
                     return true;
                 }
+            } else if self.toggle_selected_uv_pins() {
+                return true;
             }
         }
         if self.state.workspace == Workspace::Model
