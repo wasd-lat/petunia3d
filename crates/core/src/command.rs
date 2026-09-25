@@ -2866,6 +2866,7 @@ impl Command for InsetFacesCmd {
 pub struct BevelCmd {
     pub amount: f32,
     pub segments: u32,
+    pub clamp_overlap: bool,
 }
 
 impl Default for BevelCmd {
@@ -2873,6 +2874,7 @@ impl Default for BevelCmd {
         Self {
             amount: 0.1,
             segments: 1,
+            clamp_overlap: true,
         }
     }
 }
@@ -2911,11 +2913,7 @@ impl Command for BevelCmd {
         if mesh.selected_edges.is_empty() {
             return Err(CommandError::EmptySelection);
         }
-        let (v_count, f_count) = if segments > 1 {
-            mesh.bevel_selected_segments(amount, segments)
-        } else {
-            mesh.bevel_selected(amount)
-        };
+        let (v_count, f_count) = mesh.bevel_selected_full(amount, segments, self.clamp_overlap);
         state.set_status(format!("Beveled (+{} verts, +{} faces)", v_count, f_count));
         Ok(())
     }

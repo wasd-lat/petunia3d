@@ -1,6 +1,6 @@
 //! UV islands, packing, texel density and diagnostics (UV0 only).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::{Mesh, edge_key};
 
@@ -184,6 +184,107 @@ impl Mesh {
                 uv[1] = 0.5 + (uv[1] - 0.5) * s;
             }
         }
+    }
+
+    /// Equaliza a densidade de texels individualmente entre as ilhas UV,
+    /// garantindo que ilhas com proporções diferentes alcancem o mesmo ratio UV/3D.
+    pub fn equalize_texel_density(&mut self, selected_faces: &HashSet<usize>) -> usize {
+        let islands = self.uv_islands();
+        if islands.is_empty() {
+            return 0;
+        }
+
+        let has_sel = !selected_faces.is_empty();
+        let target_indices: Vec<usize> = if has_sel {
+            islands
+                .iter()
+                .enumerate()
+                .filter(|(_, isl)| isl.faces.iter().any(|f| selected_faces.contains(f)))
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            (0..islands.len()).collect()
+        };
+
+        if target_indices.is_empty() {
+            return 0;
+        }
+
+        let mut island_metrics = Vec::new();
+        let mut total_3d = 0.0f32;
+        let mut total_uv = 0.0f32;
+
+        for &idx in &target_indices {
+            let isl = &islands[idx];
+            let mut area_3d = 0.0f32;
+            let mut area_uv = 0.0f32;
+            let mut center_uv = [0.0f32; 2];
+            let mut uv_count = 0;
+
+            for &fi in &isl.faces {
+                let face = &self.faces[fi];
+                for corners in self.face_triangle_corners(fi) {
+                    let [p0, p1, p2] = corners.map(|i| self.verts[face.verts[i] as usize].vec());
+                    let tri_3d = (p1 - p0).cross(p2 - p0).length() * 0.5;
+                    area_3d += tri_3d;
+
+                    if face.uv.len() >= face.verts.len() {
+                        let uv0 = face.uv[corners[0]];
+                        let uv1 = face.uv[corners[1]];
+                        let uv2 = face.uv[corners[2]];
+                        let tri_uv = ((uv1[0] - uv0[0]) * (uv2[1] - uv0[1])
+                            - (uv2[0] - uv0[0]) * (uv1[1] - uv0[1]))
+                            .abs()
+                            * 0.5;
+                        area_uv += tri_uv;
+                    }
+                }
+                for uv in &face.uv {
+                    center_uv[0] += uv[0];
+                    center_uv[1] += uv[1];
+                    uv_count += 1;
+                }
+            }
+
+            if uv_count > 0 {
+                center_uv[0] /= uv_count as f32;
+                center_uv[1] /= uv_count as f32;
+            }
+
+            if area_3d > 1e-6 && area_uv > 1e-8 {
+                total_3d += area_3d;
+                total_uv += area_uv;
+            }
+            island_metrics.push((idx, area_3d, area_uv, center_uv));
+        }
+
+        if total_3d <= 1e-6 || total_uv <= 1e-8 {
+            return 0;
+        }
+
+        let target_density = (total_uv / total_3d).sqrt();
+        let mut modified = 0;
+
+        for (idx, area_3d, area_uv, center_uv) in island_metrics {
+            if area_3d <= 1e-6 || area_uv <= 1e-8 {
+                continue;
+            }
+            let current_density = (area_uv / area_3d).sqrt();
+            let scale_factor = (target_density / current_density).clamp(0.05, 20.0);
+            if (scale_factor - 1.0).abs() < 1e-4 {
+                continue;
+            }
+
+            for &fi in &islands[idx].faces {
+                for uv in &mut self.faces[fi].uv {
+                    uv[0] = center_uv[0] + (uv[0] - center_uv[0]) * scale_factor;
+                    uv[1] = center_uv[1] + (uv[1] - center_uv[1]) * scale_factor;
+                }
+            }
+            modified += 1;
+        }
+
+        modified
     }
 
     pub fn project_from_view(

@@ -495,6 +495,7 @@ pub struct ToolState {
     pub inset_factor: f32,
     pub bevel_amount: f32,
     pub bevel_segments: u32,
+    pub bevel_clamp_overlap: bool,
     pub subdivide_cuts: u32,
     pub revolve_segments: u32,
     pub revolve_angle: f32,
@@ -568,6 +569,7 @@ impl ToolState {
             inset_factor: 0.3,
             bevel_amount: 0.15,
             bevel_segments: 1,
+            bevel_clamp_overlap: true,
             subdivide_cuts: 1,
             revolve_segments: 16,
             revolve_angle: 360.0,
@@ -2822,6 +2824,7 @@ impl AppState {
                 self.dispatch(&crate::command::BevelCmd {
                     amount: self.tools.bevel_amount,
                     segments: self.tools.bevel_segments,
+                    clamp_overlap: self.tools.bevel_clamp_overlap,
                 })
             }
             "model.scale" | "model.scale_selection" => {

@@ -1201,12 +1201,21 @@ pub(crate) fn pick_face_hit(
     origin: glam::Vec3,
     direction: glam::Vec3,
 ) -> Option<(usize, glam::Vec3)> {
+    pick_face_hit_cull(state, origin, direction, true)
+}
+
+pub(crate) fn pick_face_hit_cull(
+    state: &AppState,
+    origin: glam::Vec3,
+    direction: glam::Vec3,
+    cull_backfaces: bool,
+) -> Option<(usize, glam::Vec3)> {
     let mesh = state.project.active_mesh()?;
     let mut best = None;
     for (face_index, face) in mesh.faces.iter().enumerate() {
         for corners in mesh.face_triangle_corners(face_index) {
             let [p0, p1, p2] = corners.map(|i| mesh.verts[face.verts[i] as usize].vec());
-            if let Some(distance) = ray_triangle(origin, direction, p0, p1, p2)
+            if let Some(distance) = ray_triangle_cull(origin, direction, p0, p1, p2, cull_backfaces)
                 && best.is_none_or(|(_, current)| distance < current)
             {
                 best = Some((face_index, distance));
@@ -1216,6 +1225,7 @@ pub(crate) fn pick_face_hit(
     best.map(|(face, distance)| (face, origin + direction * distance))
 }
 
+#[allow(dead_code)]
 pub(crate) fn ray_triangle(
     origin: glam::Vec3,
     direction: glam::Vec3,
@@ -1223,11 +1233,26 @@ pub(crate) fn ray_triangle(
     p1: glam::Vec3,
     p2: glam::Vec3,
 ) -> Option<f32> {
+    ray_triangle_cull(origin, direction, p0, p1, p2, false)
+}
+
+pub(crate) fn ray_triangle_cull(
+    origin: glam::Vec3,
+    direction: glam::Vec3,
+    p0: glam::Vec3,
+    p1: glam::Vec3,
+    p2: glam::Vec3,
+    cull_backfaces: bool,
+) -> Option<f32> {
     let edge1 = p1 - p0;
     let edge2 = p2 - p0;
     let pvec = direction.cross(edge2);
     let det = edge1.dot(pvec);
-    if det.abs() < 1e-7 {
+    if cull_backfaces {
+        if det < 1e-7 {
+            return None;
+        }
+    } else if det.abs() < 1e-7 {
         return None;
     }
     let inv = 1.0 / det;

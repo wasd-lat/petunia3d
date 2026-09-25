@@ -2808,6 +2808,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> slice-preview-visible: false;
     in-out property <string> slice-preview-commands: "";
     in-out property <bool> slice-trim: false;
+    in-out property <bool> bevel-clamp-overlap: true;
 
     callback workspace-changed(string);
     callback save-requested;
@@ -2901,6 +2902,7 @@ export component PetuniaSlintShell inherits Window {
     callback uv-rotated(float);
     callback uv-seam-toggled;
     callback uv-seams-cleared;
+    callback uv-equalize-texel-density;
     callback boolean-operand-cleared;
     callback boolean-operand-set(string);
     callback boolean-keep-parts-set(bool);
@@ -2933,6 +2935,7 @@ export component PetuniaSlintShell inherits Window {
     callback primitive-confirm;
     callback primitive-cancel;
     callback slice-trim-set(bool);
+    callback toggle-bevel-clamp-overlap;
     callback inspector-width-changed(float);
     callback asset-library-height-changed(float);
     callback rename-committed(string);
@@ -4617,7 +4620,7 @@ export component PetuniaSlintShell inherits Window {
                         Text { text: "Enter confirm · Esc cancel"; color: DesignTokens.text-muted; font-size: 9px; }
                     }
 
-                    if !tool-modal-active && !loop-cut-active && !loop-cut-armed && !profile-active && !operation-hud-active && !primitive-active && (root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale" || root.active-tool == "knife" || root.active-tool == "slice" || root.active-tool == "cursor" || root.active-tool == "cursor_3d"): ToolCard {
+                    if !tool-modal-active && !loop-cut-active && !loop-cut-armed && !profile-active && !operation-hud-active && !primitive-active && (root.active-tool == "move" || root.active-tool == "rotate" || root.active-tool == "scale" || root.active-tool == "knife" || root.active-tool == "slice" || root.active-tool == "bevel" || root.active-tool == "cursor" || root.active-tool == "cursor_3d"): ToolCard {
                         x: 14px;
                         y: 58px;
                         title: root.tool-options-title != "" ? root.tool-options-title : "Tool Options";
@@ -4852,6 +4855,30 @@ export component PetuniaSlintShell inherits Window {
                                 }
                             }
                             Text { text: "Drag mouse across mesh · Esc cancel"; color: DesignTokens.text-muted; font-size: 9px; }
+                        }
+
+                        if root.active-tool == "bevel": VerticalLayout {
+                            spacing: 6px;
+                            Text { text: "Round Edge (Bevel) Options"; color: DesignTokens.text-secondary; font-size: 10px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                height: 26px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: root.bevel-clamp-overlap ? DesignTokens.accent.transparentize(0.8) : DesignTokens.surface-raised;
+                                    border-width: 1px;
+                                    border-color: root.bevel-clamp-overlap ? DesignTokens.accent : DesignTokens.border;
+                                    Text {
+                                        text: root.bevel-clamp-overlap ? "✓ Clamp Overlap (Active)" : "Clamp Overlap (Off)";
+                                        color: root.bevel-clamp-overlap ? DesignTokens.accent : DesignTokens.text-primary;
+                                        font-size: 10px;
+                                        font-weight: root.bevel-clamp-overlap ? 700 : 400;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { root.toggle-bevel-clamp-overlap(); } }
+                                }
+                            }
                         }
 
                         if root.active-tool == "cursor" || root.active-tool == "cursor_3d": VerticalLayout {
@@ -7054,6 +7081,21 @@ export component PetuniaSlintShell inherits Window {
                                             accessible-role: button;
                                             accessible-label: "Clear all seams";
                                             TouchArea { clicked => { root.uv-seams-cleared(); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        height: 28px;
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Equalize Texel Density"; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Equalize texel density across UV islands";
+                                            TouchArea { clicked => { root.uv-equalize-texel-density(); } }
                                         }
                                     }
                                 }

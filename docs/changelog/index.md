@@ -17,6 +17,10 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 - Perfil 2D (Draw Profile) com ângulo de revolução (Lathe/Revolve) customizável (`Mesh::revolve_angle`) para geração de setores parciais com fechamento automático de tampas de extremidade e snap magnético ampliado para 0.25.
 - Operações Booleanas (Fuse, Cut, Intersect) com inferência automática de operando secundário quando o projeto possui exatamente dois objetos.
 - Overlay visual do raio de influência da Edição Proporcional (Soft Selection): círculo pontilhado projetado em tempo real na viewport (`compute_proportional_circle`) durante transformações modais, atualizando dinamicamente com o redimensionamento por roda do mouse.
+- Ferramenta Round Edge (Bevel) com opção de Clamp Overlap (`bevel_clamp_overlap`): previne autointerseções e achatamentos ao limitar a distância do chanfro à metade da aresta adjacente mais curta, com alternância no ToolCard da viewport.
+- Pintura 3D com descarte de polígonos invertidos (Backface / Angle Culling): algoritmo `pick_face_hit_cull` e `ray_triangle_cull` desconsiderando normais voltadas para longe da câmera, impedindo que o pincel 3D vaze ou suje superfícies opostas.
+- Equalização da densidade de texels nas ilhas UV (`Mesh::equalize_texel_density`): normaliza as escalas das ilhas em torno de seus centróides UV com base na média geométrica da densidade global ($\sqrt{\sum A_{UV} / \sum A_{3D}}$), com ação direta no painel de ferramentas UV.
+- Desbloqueio e retomada da documentação contínua: sincronização automática do site VitePress e do caderno canônico (`docs/bible/`) via xtask sem travas de lockfile estático.
 
 ### Módulos independentes do Inspector: ancorar, flutuar e fixar (24/09/2026, ADR 005)
 - Cada módulo do Inspector direito (Parts, Transform, Material, Object, Modifiers, Quick Actions) tem estado próprio: ancorado ou flutuante, posição, "manter aberto" e asset fixado, com persistência individual por módulo.

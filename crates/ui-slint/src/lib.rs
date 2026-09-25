@@ -5002,6 +5002,31 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
     }
 
+    pub fn toggle_bevel_clamp_overlap(&mut self) -> bool {
+        self.state.tools.bevel_clamp_overlap = !self.state.tools.bevel_clamp_overlap;
+        let enabled = self.state.tools.bevel_clamp_overlap;
+        self.state.set_status(if enabled {
+            "Bevel: Clamp Overlap ativado"
+        } else {
+            "Bevel: Clamp Overlap desativado"
+        });
+        self.state.render.mark_dirty();
+        enabled
+    }
+
+    pub fn uv_equalize_texel_density(&mut self) -> bool {
+        match petunia_module_uv::UvModule::equalize_texel_density(&mut self.state) {
+            Ok(_) => {
+                self.state.render.mark_dirty();
+                true
+            }
+            Err(e) => {
+                self.state.set_status(format!("Texel density: {e}"));
+                false
+            }
+        }
+    }
+
     pub fn update_primitive_param_float(&mut self, param: &str, value: f32) -> bool {
         let Some(session) = &self.state.session.primitive_session else {
             return false;
@@ -6338,6 +6363,10 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         match id {
             "uv.unwrap" => self.state.dispatch_command("uv.unwrap_auto"),
             "uv.pack_islands" => self.state.dispatch_command("uv.pack_islands"),
+            "uv.equalize_texel_density" => {
+                self.uv_equalize_texel_density();
+                Ok(())
+            }
             "model.frame_selection" => self.state.dispatch_command("view.frame_selection"),
             other => self.state.dispatch_command(other),
         }
@@ -7444,6 +7473,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.profile_preview_commands = self.profile_preview_commands();
         }
         vm.slice_trim = self.slice_trim;
+        vm.bevel_clamp_overlap = self.state.tools.bevel_clamp_overlap;
         if let Some(anchor) = self.slice_anchor {
             let mut cmd = format!(
                 "M {:.2} {:.2} L {:.2} {:.2}",

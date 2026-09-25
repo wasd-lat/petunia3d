@@ -145,6 +145,21 @@ impl UvModule {
             .unwrap_or(0))
     }
 
+    /// Equaliza a densidade de texels entre as ilhas UV (ou ilhas selecionadas).
+    pub fn equalize_texel_density(state: &mut AppState) -> Result<usize, String> {
+        state.checkpoint("equalize texel density");
+        let modified = if let Some(m) = state.project.active_mesh_mut() {
+            let count = m.equalize_texel_density(&state.session.uv_selected);
+            state.mark_dirty();
+            count
+        } else {
+            0
+        };
+        state.emit_mesh_changed();
+        state.set_status(format!("Equalized texel density on {modified} island(s)"));
+        Ok(modified)
+    }
+
     pub fn project_from_view(state: &mut AppState) -> Result<(), String> {
         state
             .dispatch(&petunia_core::UvProjectFromViewCmd)

@@ -901,11 +901,21 @@ impl Mesh {
 
     /// Chanfra uma aresta convexa manifold com extremidades trivalentes (1 segmento padrão).
     pub fn bevel_selected(&mut self, amount: f32) -> (usize, usize) {
-        self.bevel_selected_segments(amount, 1)
+        self.bevel_selected_full(amount, 1, true)
     }
 
     /// Chanfra uma aresta convexa manifold com suporte a multi-segmentos para filetagem arredondada.
     pub fn bevel_selected_segments(&mut self, amount: f32, segments: u32) -> (usize, usize) {
+        self.bevel_selected_full(amount, segments, true)
+    }
+
+    /// Chanfra uma aresta convexa manifold com multi-segmentos e clamp de overlap opcional (P3D-044).
+    pub fn bevel_selected_full(
+        &mut self,
+        amount: f32,
+        segments: u32,
+        clamp_overlap: bool,
+    ) -> (usize, usize) {
         let count = self.selected_edges.len();
         if count == 0 {
             return (0, 0);
@@ -916,7 +926,8 @@ impl Mesh {
         let Some(&(a, b)) = self.selected_edges.iter().next() else {
             return (0, 0);
         };
-        match crate::bevel::bevel_edge_segments(self, a, b, amount, segments) {
+        match crate::bevel::bevel_edge_segments_clamped(self, a, b, amount, segments, clamp_overlap)
+        {
             Some(mesh) => {
                 *self = mesh;
                 (1, 0)

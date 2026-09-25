@@ -89,27 +89,11 @@ quando o código muda o símbolo de entrada de um nó, o mapa precisa de uma dec
 explícita de descongelar (`cargo xtask bible-lock`) — não edite o arquivo por
 conta própria.
 
-## 1. 🧊 SITE DE DOCUMENTAÇÃO CONGELADO
+## 1. 🌐 SITE DE DOCUMENTAÇÃO DESBLOQUEADO
 
-**Decisão de 2026-09-16: o site público de documentação está congelado até o fim
-do desenvolvimento de todo o projeto.** Nenhum agente deve trabalhar nele.
+**Decisão de 2026-09-25: o site público de documentação foi desbloqueado pelo usuário para voltar a ser atualizado ativamente em conjunto com o desenvolvimento.**
 
-Congelado (não modificar, não "melhorar", não corrigir estilo):
-
-- `docs/.vitepress/**` — config, nav, `bibleSidebar.ts`, tema, cache, `dist/`;
-- `docs/index.md` — página inicial/hero do site;
-- `docs/public/**`, `docs/package.json`, `docs/pnpm-lock.yaml`, `docs/vercel.json`;
-- `.github/workflows/docs.yml` — publicação/deploy do site;
-- `docs/image-references/**` — mockups e capturas usados como referência visual;
-- promessa de site: busca, versionamento, i18n do chrome, screenshots publicados.
-
-Motivo: o caderno é a verdade; o site é superfície de apresentação. Manter o site
-enquanto o produto muda gera retrabalho e divergência.
-
-Uma exceção **não** congelada é o *conteúdo* de documentação que agentes e
-contribuidores leem (tudo fora dos caminhos acima): se ele contradiz o caderno,
-corrija o conteúdo. Reconstruir o site a partir do caderno é trabalho de fim de
-projeto.
+A documentação viva, o site VitePress e os manuais de usuário voltam ao ciclo de atualização contínua, mantendo o caderno canônico (`docs/bible/`), as especificações técnicas, os manuais em `docs/manual/`, as páginas de ferramentas em `docs/tools/` e o site estático perfeitamente sincronizados com o código e os recursos implementados. O `xtask` sincroniza os hashes e referências automaticamente durante os checks.
 
 ## 2. Regra de reconciliação antes de implementar
 

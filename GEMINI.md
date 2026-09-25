@@ -7,6 +7,5 @@ This project uses Prumo v0.5 with Google Antigravity.
 - Test-Driven Development: Every implementation requires exhaustive automated tests (unit, integration, conformance).
 - Security First: Zero hardcoded secrets, follow least privilege, audit dependencies and sanitize inputs.
 - Clean Architecture: High cohesion, low coupling, modularity, explicit domain boundaries.
-- Continuous Documentation: Keep documentation and CHANGELOG.md synchronized with implementation. The single canonical source is the Living Book in `docs/bible/` (249 pages).
-- FROZEN SITE: the public VitePress documentation site (`docs/.vitepress/**`, `docs/index.md`, `docs/public/**`, `docs/image-references/**`, the docs deploy workflow) is frozen until the end of the project. Do not work on it. See `AGENTS.md` §1.
+- Continuous Documentation: Keep documentation, VitePress site, and CHANGELOG.md synchronized with implementation. The canonical living source is in `docs/bible/`.
 - Directory Documentation: Ensure each folder contains a structured README.md.

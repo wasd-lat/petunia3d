@@ -5728,3 +5728,40 @@ fn test_proportional_editing_visual_circle_overlay() {
     bridge.state.cancel_modal();
     assert!(bridge.view_model().proportional_circle_commands.is_empty());
 }
+
+#[test]
+fn test_toggle_bevel_clamp_overlap() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    // Padrão é clamp overlap ativado (true)
+    assert!(bridge.state.tools.bevel_clamp_overlap);
+    assert!(bridge.view_model().bevel_clamp_overlap);
+
+    // Alterna para false
+    assert!(!bridge.toggle_bevel_clamp_overlap());
+    assert!(!bridge.state.tools.bevel_clamp_overlap);
+    assert!(!bridge.view_model().bevel_clamp_overlap);
+
+    // Alterna de volta para true
+    assert!(bridge.toggle_bevel_clamp_overlap());
+    assert!(bridge.state.tools.bevel_clamp_overlap);
+    assert!(bridge.view_model().bevel_clamp_overlap);
+}
+
+#[test]
+fn test_uv_equalize_texel_density() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.state.switch_workspace(petunia_core::Workspace::Uv);
+
+    let mesh = bridge.state.project.active_mesh_mut().unwrap();
+    let f0_verts = mesh.faces[0].verts.clone();
+    for i in 0..f0_verts.len() {
+        let v0 = f0_verts[i];
+        let v1 = f0_verts[(i + 1) % f0_verts.len()];
+        mesh.mark_seam(v0, v1);
+    }
+    mesh.faces[0].uv = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    mesh.faces[1].uv = vec![[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.0, 0.2]];
+
+    assert!(bridge.uv_equalize_texel_density());
+    assert!(bridge.state.project.undo.can_undo());
+}

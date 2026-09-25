@@ -7,16 +7,29 @@ use crate::{Face, Mesh};
 /// Não publica geometria parcial: rejeita topologias sem solução implementada.
 #[allow(dead_code)]
 pub(crate) fn bevel_edge(mesh: &Mesh, a: u32, b: u32, amount: f32) -> Option<Mesh> {
-    bevel_edge_segments(mesh, a, b, amount, 1)
+    bevel_edge_segments_clamped(mesh, a, b, amount, 1, true)
 }
 
 /// Chanfro transacional com suporte a multi-segmentos para filetagem arredondada.
+#[allow(dead_code)]
 pub(crate) fn bevel_edge_segments(
     mesh: &Mesh,
     a: u32,
     b: u32,
     amount: f32,
     segments: u32,
+) -> Option<Mesh> {
+    bevel_edge_segments_clamped(mesh, a, b, amount, segments, true)
+}
+
+/// Chanfro transacional com suporte a multi-segmentos e clamp overlap opcional.
+pub(crate) fn bevel_edge_segments_clamped(
+    mesh: &Mesh,
+    a: u32,
+    b: u32,
+    amount: f32,
+    segments: u32,
+    clamp_overlap: bool,
 ) -> Option<Mesh> {
     if mesh.verts.iter().any(|v| !v.vec().is_finite())
         || mesh.faces.iter().any(|face| {
@@ -91,7 +104,8 @@ pub(crate) fn bevel_edge_segments(
             if !length.is_finite() || length <= 1e-6 {
                 return None;
             }
-            let t = (amount / length).min(0.45);
+            let max_t = if clamp_overlap { 0.45 } else { 0.95 };
+            let t = (amount / length).min(max_t);
             vertex.pos = vertex.vec().lerp(target.vec(), t).to_array();
             for (color, target_color) in vertex.color.iter_mut().zip(target.color) {
                 *color += (target_color - *color) * t;

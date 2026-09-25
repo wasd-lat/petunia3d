@@ -489,6 +489,25 @@ mod tests {
     }
 
     #[test]
+    fn bevel_clamp_overlap_option() {
+        let mut m_clamped = Mesh::cube(2.0);
+        m_clamped.selected_edges.insert((0, 1));
+        let (ok1, skip1) = m_clamped.bevel_selected_full(1.8, 1, true);
+        assert_eq!(ok1, 1);
+        assert_eq!(skip1, 0);
+
+        let mut m_unclamped = Mesh::cube(2.0);
+        m_unclamped.selected_edges.insert((0, 1));
+        let (ok2, skip2) = m_unclamped.bevel_selected_full(1.8, 1, false);
+        assert_eq!(ok2, 1);
+        assert_eq!(skip2, 0);
+
+        let pos_clamped = m_clamped.verts.last().unwrap().pos;
+        let pos_unclamped = m_unclamped.verts.last().unwrap().pos;
+        assert_ne!(pos_clamped, pos_unclamped);
+    }
+
+    #[test]
     fn extrude_keeps_uv_invariant() {
         let mut m = Mesh::cube(2.0);
         m.select_all();
@@ -682,5 +701,25 @@ mod tests {
         m.selected_edges.insert(internal_edge.unwrap());
         m.dissolve_selected();
         assert_eq!(m.faces.len(), faces_before - 1);
+    }
+
+    #[test]
+    fn equalize_texel_density_scales_islands() {
+        use std::collections::HashSet;
+        let mut m1 = Mesh::plane(2.0);
+        let mut m2 = Mesh::plane(2.0);
+        m1.faces[0].uv = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        m2.faces[0].uv = vec![[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.0, 0.5]];
+        m2.translate_selected([10.0, 0.0, 0.0]);
+        m1.join(&m2);
+        assert_eq!(m1.faces.len(), 2);
+        assert_eq!(m1.uv_islands().len(), 2);
+
+        let count = m1.equalize_texel_density(&HashSet::new());
+        assert!(count >= 1);
+        let islands = m1.uv_islands();
+        let area0 = islands[0].area();
+        let area1 = islands[1].area();
+        assert!((area0 - area1).abs() < 0.1, "area0={area0}, area1={area1}");
     }
 }

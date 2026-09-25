@@ -439,7 +439,9 @@ impl AppState {
             ModalKind::ExtrudeIndividual if value != 0.0 => mesh.extrude_individual(value),
             ModalKind::Inset if value != 0.0 => mesh.inset_selected(value),
             ModalKind::Bevel if value != 0.0 => {
-                let (applied, skipped) = mesh.bevel_selected(value);
+                let segs = self.tools.bevel_segments.clamp(1, 4);
+                let clamp = self.tools.bevel_clamp_overlap;
+                let (applied, skipped) = mesh.bevel_selected_full(value, segs, clamp);
                 if applied == 0 || skipped > 0 {
                     return Err(ModalError::UnsupportedTopology);
                 }

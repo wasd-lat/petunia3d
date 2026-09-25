@@ -770,6 +770,7 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_primitive_cap_bottom(vm.primitive_cap_bottom);
     window.set_primitive_fill_disc(vm.primitive_fill_disc);
     window.set_slice_trim(vm.slice_trim);
+    window.set_bevel_clamp_overlap(vm.bevel_clamp_overlap);
 
     theme::apply_theme(window, &vm.current_theme);
 }
@@ -2572,6 +2573,22 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
         }
     });
 
+    let uv_equalize_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_uv_equalize_texel_density(move || {
+        if let Ok(mut bridge) = uv_equalize_bridge.lock() {
+            bridge.uv_equalize_texel_density();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
     // Painel de camadas do PAINT: cada ação recompoe o raster canônico.
     let paint_layer_bridge = Arc::clone(&bridge);
     let window_weak = window.as_weak();
@@ -2987,6 +3004,18 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_slice_trim_set(move |trim| {
         if let Ok(mut bridge) = slice_trim_bridge.lock() {
             bridge.slice_trim = trim;
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let bevel_clamp_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_bevel_clamp_overlap(move || {
+        if let Ok(mut bridge) = bevel_clamp_bridge.lock() {
+            bridge.toggle_bevel_clamp_overlap();
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);
