@@ -139,6 +139,8 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
         link_active,
     );
     window.set_drag_link_commands(drag_link.as_str().into());
+    let prop_circle = compute_proportional_circle(&bridge.state, width, height, link_active);
+    window.set_proportional_circle_commands(prop_circle.as_str().into());
 
     let axis_guide = compute_axis_guide(&bridge.state, width, height);
     window.set_axis_guide_visible(axis_guide.visible);
@@ -207,6 +209,7 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_gizmo_center_hover(vm.gizmo_center_hover);
     window.set_operation_preview_commands(vm.operation_preview_commands.as_str().into());
     window.set_drag_link_commands(vm.drag_link_commands.as_str().into());
+    window.set_proportional_circle_commands(vm.proportional_circle_commands.as_str().into());
     window.set_operation_hud_active(vm.operation_hud_active);
     window.set_operation_hud_title(vm.operation_hud_title.as_str().into());
     window.set_operation_hud_subject(vm.operation_hud_subject.as_str().into());

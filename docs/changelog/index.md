@@ -16,6 +16,7 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 - Mesclagem de camadas de pintura ("Merge Down") no workspace PAINT com composição determinística de Raster, Decalques projetados e Efeitos, botão dedicado na UI Slint e seleção ativa atualizada.
 - Perfil 2D (Draw Profile) com ângulo de revolução (Lathe/Revolve) customizável (`Mesh::revolve_angle`) para geração de setores parciais com fechamento automático de tampas de extremidade e snap magnético ampliado para 0.25.
 - Operações Booleanas (Fuse, Cut, Intersect) com inferência automática de operando secundário quando o projeto possui exatamente dois objetos.
+- Overlay visual do raio de influência da Edição Proporcional (Soft Selection): círculo pontilhado projetado em tempo real na viewport (`compute_proportional_circle`) durante transformações modais, atualizando dinamicamente com o redimensionamento por roda do mouse.
 
 ### Módulos independentes do Inspector: ancorar, flutuar e fixar (24/09/2026, ADR 005)
 - Cada módulo do Inspector direito (Parts, Transform, Material, Object, Modifiers, Quick Actions) tem estado próprio: ancorado ou flutuante, posição, "manter aberto" e asset fixado, com persistência individual por módulo.

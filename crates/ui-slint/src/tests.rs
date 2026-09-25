@@ -5691,3 +5691,40 @@ fn test_boolean_op_auto_operand_with_two_objects() {
     assert!(bridge.boolean_op("model.fuse"));
     assert_eq!(bridge.state.project.assets.len(), 1);
 }
+
+#[test]
+fn test_proportional_editing_visual_circle_overlay() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.viewport_size = [800.0, 600.0];
+
+    // Desabilitado por padrão -> sem comandos de círculo
+    assert!(!bridge.view_model().proportional_editing);
+    assert!(bridge.view_model().proportional_circle_commands.is_empty());
+
+    // Habilita proportional editing
+    bridge.apply(UiIntent::ToggleProportionalEditing);
+    assert!(bridge.view_model().proportional_editing);
+
+    // Sem modal/arrasto ativo -> sem comandos de círculo
+    assert!(bridge.view_model().proportional_circle_commands.is_empty());
+
+    // Inicia modal de Move -> círculo pontilhado gerado
+    bridge
+        .state
+        .begin_modal(petunia_core::ModalKind::Move)
+        .unwrap();
+    let vm = bridge.view_model();
+    assert!(!vm.proportional_circle_commands.is_empty());
+    assert!(vm.proportional_circle_commands.contains("M "));
+    assert!(vm.proportional_circle_commands.contains("L "));
+
+    // Ajuste do raio via gesture de Zoom atualiza a geometria do círculo
+    let prev_cmds = vm.proportional_circle_commands.clone();
+    bridge.apply_viewport_gesture(ViewportGesture::Zoom { delta: 1.0 });
+    let new_vm = bridge.view_model();
+    assert_ne!(prev_cmds, new_vm.proportional_circle_commands);
+
+    // Cancelar modal remove o overlay do círculo
+    bridge.state.cancel_modal();
+    assert!(bridge.view_model().proportional_circle_commands.is_empty());
+}

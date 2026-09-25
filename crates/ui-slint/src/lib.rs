@@ -6935,6 +6935,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.pointer_position,
             link_active,
         );
+        vm.proportional_circle_commands = compute_proportional_circle(
+            &self.state,
+            self.viewport_size[0],
+            self.viewport_size[1],
+            link_active,
+        );
         if let Some(anchor) = self.slice_anchor {
             let dx = self.pointer_position[0] - anchor[0];
             let dy = self.pointer_position[1] - anchor[1];

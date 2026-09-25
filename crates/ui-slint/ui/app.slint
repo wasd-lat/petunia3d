@@ -2412,6 +2412,8 @@ export component PetuniaSlintShell inherits Window {
     // Cordão pontilhado pivô→mouse da ferramenta de manipulação ativa.
     // Só existe durante a sessão (arrasto/modal); fora dela é "" e some.
     in-out property <string> drag-link-commands: "";
+    // Círculo pontilhado de raio de influência para Proportional Editing (Soft Selection).
+    in-out property <string> proportional-circle-commands: "";
     // Phase 4: Feedback Visual em Tempo Real
     in-out property <bool> hud-pill-visible: false;
     in-out property <length> hud-pill-x: 0px;
@@ -3498,6 +3500,15 @@ export component PetuniaSlintShell inherits Window {
                         commands: root.drag-link-commands;
                         fill: transparent;
                         stroke: DesignTokens.selection-active;
+                        stroke-width: 1.5px;
+                    }
+
+                    // Círculo pontilhado do raio de influência para Proportional Editing
+                    if root.proportional-circle-commands != "": Path {
+                        fit: ImageFit.preserve;
+                        commands: root.proportional-circle-commands;
+                        fill: transparent;
+                        stroke: #E0E0E0;
                         stroke-width: 1.5px;
                     }
 

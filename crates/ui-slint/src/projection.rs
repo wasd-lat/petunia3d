@@ -516,6 +516,63 @@ pub(crate) fn compute_drag_link(
     dotted_link_commands(base, target)
 }
 
+/// Círculo pontilhado do raio de influência do Proportional Editing (Soft Selection).
+pub(crate) fn compute_proportional_circle(
+    state: &AppState,
+    width: f32,
+    height: f32,
+    active: bool,
+) -> String {
+    if !active || !state.session.proportional_editing || width <= 1.0 || height <= 1.0 {
+        return String::new();
+    }
+    let radius = state.session.proportional_settings.radius;
+    if radius <= 1e-4 {
+        return String::new();
+    }
+    let view_proj = state.session.camera.view_proj();
+    let fb = state.current_tool_feedback();
+    let pivot = fb
+        .as_ref()
+        .map(|f| f.origin)
+        .unwrap_or_else(|| state.calculate_pivot(state.session.pivot_point));
+    let clip = view_proj * pivot.extend(1.0);
+    if clip.w <= 0.05 {
+        return String::new();
+    }
+    let inv_w = 1.0 / clip.w;
+    let cx = (clip.x * inv_w * 0.5 + 0.5) * width;
+    let cy = (1.0 - (clip.y * inv_w * 0.5 + 0.5)) * height;
+
+    let edge_3d = pivot + state.session.camera.right() * radius;
+    let clip_e = view_proj * edge_3d.extend(1.0);
+    if clip_e.w <= 0.05 {
+        return String::new();
+    }
+    let inv_e = 1.0 / clip_e.w;
+    let ex = (clip_e.x * inv_e * 0.5 + 0.5) * width;
+    let ey = (1.0 - (clip_e.y * inv_e * 0.5 + 0.5)) * height;
+
+    let r = (ex - cx).hypot(ey - cy);
+    if r < 2.0 {
+        return String::new();
+    }
+
+    let mut commands = String::new();
+    use std::fmt::Write as _;
+    let segments = 36;
+    for i in 0..segments {
+        let theta_start = (i as f32) * std::f32::consts::TAU / (segments as f32);
+        let theta_mid = ((i as f32) + 0.55) * std::f32::consts::TAU / (segments as f32);
+        let p1x = cx + r * theta_start.cos();
+        let p1y = cy + r * theta_start.sin();
+        let p2x = cx + r * theta_mid.cos();
+        let p2y = cy + r * theta_mid.sin();
+        let _ = write!(commands, "M {:.2} {:.2} L {:.2} {:.2} ", p1x, p1y, p2x, p2y);
+    }
+    commands
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AxisGuideModel {
     pub visible: bool,
