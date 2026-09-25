@@ -253,6 +253,7 @@ pub enum UiIntent {
     SetPaintColor([f32; 3]),
     SetBrushSize(f32),
     SetBrushOpacity(f32),
+    SetBrushHardness(f32),
     SetActiveTool(String),
     OpenCommandSearch,
     OpenSettings,
@@ -933,6 +934,9 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             UiIntent::SetBrushOpacity(opacity) => {
                 self.state.session.tools.paint_strength = opacity.clamp(0.0, 1.0);
+            }
+            UiIntent::SetBrushHardness(hardness) => {
+                self.state.session.tools.brush_hardness = hardness.clamp(0.0, 1.0);
             }
             UiIntent::SetActiveTool(tool) => {
                 if self.state.session.tools.active_tool == "draw_profile"
@@ -6450,6 +6454,78 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 _ => {}
             }
         }
+        if self.state.workspace == Workspace::Paint
+            && self.state.session.tools.modal.is_none()
+            && self.drag.is_none()
+            && self.rename_draft.is_none()
+            && !ctrl
+            && !alt
+        {
+            if text == "[" || text == "{" {
+                if shift {
+                    self.adjust_brush_hardness(-0.1);
+                } else {
+                    self.adjust_brush_size(-0.2);
+                }
+                return true;
+            }
+            if text == "]" || text == "}" {
+                if shift {
+                    self.adjust_brush_hardness(0.1);
+                } else {
+                    self.adjust_brush_size(0.2);
+                }
+                return true;
+            }
+        }
+        if self.state.session.tools.modal.is_none()
+            && self.drag.is_none()
+            && self.rename_draft.is_none()
+            && !alt
+        {
+            match text {
+                "Left" | "Right" | "Up" | "Down" => {
+                    if self.state.workspace == Workspace::Model {
+                        let step = if shift {
+                            0.01
+                        } else if ctrl {
+                            1.0
+                        } else {
+                            0.1
+                        };
+                        let (dx, dy, dz) = match text {
+                            "Left" => (-step, 0.0, 0.0),
+                            "Right" => (step, 0.0, 0.0),
+                            "Up" => (0.0, step, 0.0),
+                            "Down" => (0.0, -step, 0.0),
+                            _ => (0.0, 0.0, 0.0),
+                        };
+                        if self.nudge_selection(dx, dy, dz) {
+                            return true;
+                        }
+                    } else if self.state.workspace == Workspace::Uv {
+                        let step = if shift {
+                            0.002
+                        } else if ctrl {
+                            0.05
+                        } else {
+                            0.01
+                        };
+                        let (du, dv) = match text {
+                            "Left" => (-step, 0.0),
+                            "Right" => (step, 0.0),
+                            "Up" => (0.0, step),
+                            "Down" => (0.0, -step),
+                            _ => (0.0, 0.0),
+                        };
+                        if self.uv_move_selected(du, dv) {
+                            return true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         if self.state.session.tools.modal.is_some() && !ctrl && !alt {
             if let Some(axis) = ["x", "y", "z"]
                 .iter()
@@ -6728,11 +6804,55 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         self.state.set_status(format!("Brush size: {next:.2}"));
     }
 
-    fn adjust_brush_hardness(&mut self, delta: f32) {
-        let next = (self.state.session.tools.brush_hardness + delta).clamp(0.0, 1.0);
-        self.state.session.tools.brush_hardness = next;
+    pub fn set_brush_hardness(&mut self, val: f32) -> bool {
+        self.apply(UiIntent::SetBrushHardness(val));
         self.state.mark_dirty();
-        self.state.set_status(format!("Brush hardness: {next:.2}"));
+        self.state.set_status(format!(
+            "Brush hardness: {:.0}%",
+            self.state.session.tools.brush_hardness * 100.0
+        ));
+        true
+    }
+
+    pub fn adjust_brush_hardness(&mut self, delta: f32) {
+        let next = (self.state.session.tools.brush_hardness + delta).clamp(0.0, 1.0);
+        self.set_brush_hardness(next);
+    }
+
+    pub fn nudge_selection(&mut self, dx: f32, dy: f32, dz: f32) -> bool {
+        if self.state.workspace == Workspace::Uv {
+            return self.uv_move_selected(dx, dy);
+        }
+        if self.state.workspace != Workspace::Model {
+            return false;
+        }
+        let delta = glam::Vec3::new(dx, dy, dz);
+        if delta.length_squared() < 1e-8 {
+            return false;
+        }
+        self.state.checkpoint("nudge");
+        if self.state.session.edit_mode() == petunia_core::EditMode::Edit {
+            if let Some(mesh) = self.state.project.active_mesh_mut() {
+                mesh.translate_selected(delta.to_array());
+                self.state.emit_mesh_changed();
+                self.state.mark_dirty();
+                self.state
+                    .set_status(format!("Nudge [{dx:+.2}, {dy:+.2}, {dz:+.2}]"));
+                return true;
+            }
+        } else if let Some(mesh) = self.state.project.active_mesh_mut() {
+            for v in &mut mesh.verts {
+                v.pos[0] += dx;
+                v.pos[1] += dy;
+                v.pos[2] += dz;
+            }
+            self.state.emit_mesh_changed();
+            self.state.mark_dirty();
+            self.state
+                .set_status(format!("Nudge [{dx:+.2}, {dy:+.2}, {dz:+.2}]"));
+            return true;
+        }
+        false
     }
 
     pub fn scrub_transform(

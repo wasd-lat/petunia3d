@@ -233,6 +233,7 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     ));
     window.set_brush_size(vm.brush_size);
     window.set_brush_opacity(vm.brush_opacity);
+    window.set_brush_hardness(vm.brush_hardness);
 
     window.set_pos_x(vm.position[0]);
     window.set_pos_y(vm.position[1]);
@@ -3307,6 +3308,18 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_brush_opacity_changed(move |opacity| {
         if let Ok(mut bridge) = opacity_bridge.lock() {
             bridge.apply(UiIntent::SetBrushOpacity(opacity));
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let hardness_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_brush_hardness_changed(move |hardness| {
+        if let Ok(mut bridge) = hardness_bridge.lock() {
+            bridge.apply(UiIntent::SetBrushHardness(hardness));
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);

@@ -5765,3 +5765,61 @@ fn test_uv_equalize_texel_density() {
     assert!(bridge.uv_equalize_texel_density());
     assert!(bridge.state.project.undo.can_undo());
 }
+
+#[test]
+fn test_paint_brush_hardness_and_shortcuts() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Paint));
+
+    // Hardness inicial é 0.0
+    assert_eq!(bridge.view_model().brush_hardness, 0.0);
+
+    // Ajusta dureza via método e via intent
+    bridge.set_brush_hardness(0.5);
+    assert_eq!(bridge.state.session.tools.brush_hardness, 0.5);
+    assert_eq!(bridge.view_model().brush_hardness, 0.5);
+
+    // Atalhos de colchetes: '[' diminui tamanho, ']' aumenta tamanho
+    let prev_size = bridge.state.session.tools.paint_radius;
+    assert!(bridge.route_shortcut("]", false, false, false));
+    assert!(bridge.state.session.tools.paint_radius > prev_size);
+
+    // Shift + '[' diminui dureza, Shift + ']' aumenta dureza
+    assert!(bridge.route_shortcut("]", false, true, false));
+    assert!(bridge.state.session.tools.brush_hardness > 0.5);
+    assert!(bridge.route_shortcut("[", false, true, false));
+    assert_eq!(bridge.state.session.tools.brush_hardness, 0.5);
+}
+
+#[test]
+fn test_nudge_selection_with_arrow_keys() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+
+    // 1. No modo Objeto: setas movem todos os vértices do asset ativo
+    let vx_before = bridge.state.project.active_mesh().unwrap().verts[0].pos[0];
+    assert!(bridge.route_shortcut("Right", false, false, false));
+    let vx_after = bridge.state.project.active_mesh().unwrap().verts[0].pos[0];
+    assert!((vx_after - (vx_before + 0.1)).abs() < 1e-4);
+
+    // Shift reduz o passo para 0.01 (modo de precisão)
+    assert!(bridge.route_shortcut("Left", false, true, false));
+    let vx_fine = bridge.state.project.active_mesh().unwrap().verts[0].pos[0];
+    assert!((vx_fine - (vx_after - 0.01)).abs() < 1e-4);
+
+    // 2. No modo Edição: setas movem os vértices selecionados
+    bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+    bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+    bridge.state.sync_selection();
+    let vy_before = bridge.state.project.active_mesh().unwrap().verts[0].pos[1];
+    assert!(bridge.route_shortcut("Up", false, false, false));
+    let vy_after = bridge.state.project.active_mesh().unwrap().verts[0].pos[1];
+    assert!((vy_after - (vy_before + 0.1)).abs() < 1e-4);
+
+    // 3. No workspace UV: setas movem as faces selecionadas no espaço UV
+    bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Uv));
+    bridge.state.session.uv_selected.insert(0);
+    let u_before = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][0];
+    assert!(bridge.route_shortcut("Right", false, false, false));
+    let u_after = bridge.state.project.active_mesh().unwrap().faces[0].uv[0][0];
+    assert!((u_after - (u_before + 0.01)).abs() < 1e-4);
+}

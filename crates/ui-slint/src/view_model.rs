@@ -80,6 +80,7 @@ pub struct ShellViewModel {
     pub paint_color: [f32; 3],
     pub brush_size: f32,
     pub brush_opacity: f32,
+    pub brush_hardness: f32,
     pub status_message: String,
     /// Resumo persistente da seleção para a pill da viewport
     /// ("2 objects selected", "Selected: 3 points · 1 edge", "No selection").
@@ -821,6 +822,7 @@ impl ShellViewModel {
             paint_color: state.paint_color,
             brush_size: state.session.tools.paint_radius,
             brush_opacity: state.session.tools.paint_strength,
+            brush_hardness: state.session.tools.brush_hardness,
             status_message,
             selection_summary: format_selection_summary(state),
             position: [0.0, 0.0, 0.0],

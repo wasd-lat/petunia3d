@@ -2400,6 +2400,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <color> paint-color: #b58cff;
     in-out property <float> brush-size: 0.8;
     in-out property <float> brush-opacity: 1.0;
+    in-out property <float> brush-hardness: 0.0;
     in-out property <bool> asset-library-visible: false;
     in-out property <bool> is-orthographic: false;
     in-out property <bool> is-wireframe: false;
@@ -2981,6 +2982,7 @@ export component PetuniaSlintShell inherits Window {
     callback paint-color-changed(float, float, float);
     callback brush-size-changed(float);
     callback brush-opacity-changed(float);
+    callback brush-hardness-changed(float);
     callback shortcut-requested(string, bool, bool, bool);
     callback toggle-face-orientation;
     callback toggle-uv-checker;
@@ -3059,7 +3061,7 @@ export component PetuniaSlintShell inherits Window {
             }
             if !root.command-search-visible && !root.settings-visible && event.text != Key.Tab {
                 root.shortcut-requested(
-                    event.text == Key.Return ? "Enter" : event.text == Key.Backspace ? "Backspace" : event.text == Key.Delete ? "Delete" : event.text == Key.Home ? "Home" : event.text,
+                    event.text == Key.Return ? "Enter" : event.text == Key.Backspace ? "Backspace" : event.text == Key.Delete ? "Delete" : event.text == Key.Home ? "Home" : event.text == Key.UpArrow ? "Up" : event.text == Key.DownArrow ? "Down" : event.text == Key.LeftArrow ? "Left" : event.text == Key.RightArrow ? "Right" : event.text,
                     event.modifiers.control, event.modifiers.shift, event.modifiers.alt);
                 return accept;
             }
@@ -6781,6 +6783,33 @@ export component PetuniaSlintShell inherits Window {
                                             background: DesignTokens.surface-raised;
                                             Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                                             TouchArea { clicked => { root.brush-opacity-changed(Math.min(1.0, root.brush-opacity + 0.1)); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "Hardness: \{Math.round(root.brush-hardness * 100)}%";
+                                            color: DesignTokens.text-secondary;
+                                            font-size: 11px;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            Text { text: "-"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.brush-hardness-changed(Math.max(0.0, root.brush-hardness - 0.1)); } }
+                                        }
+                                        Rectangle { width: 4px; }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.brush-hardness-changed(Math.min(1.0, root.brush-hardness + 0.1)); } }
                                         }
                                     }
                                 }
