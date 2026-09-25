@@ -2763,6 +2763,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <int> loop-cut-cuts: 1;
     in-out property <string> loop-cut-preview-commands: "";
     in-out property <bool> loop-cut-armed: false;
+    in-out property <bool> loop-cut-balanced: false;
     in-out property <string> pivot-id: "median";
     in-out property <string> pivot-label: "";
     in-out property <string> pivot-median-label: "";
@@ -2935,6 +2936,7 @@ export component PetuniaSlintShell inherits Window {
     callback loop-cut-apply;
     callback loop-cut-cancel;
     callback loop-cut-place;
+    callback toggle-loop-cut-balanced();
     callback pivot-set(string);
     callback pivot-menu-toggled(bool);
     callback profile-close;
@@ -4362,6 +4364,27 @@ export component PetuniaSlintShell inherits Window {
                                 border-color: DesignTokens.border;
                                 Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                                 TouchArea { clicked => { root.loop-cut-count-committed("\{root.loop-cut-cuts + 1}"); } }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            height: 28px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 4px;
+                                background: root.loop-cut-balanced ? DesignTokens.accent : DesignTokens.surface;
+                                border-width: 1px;
+                                border-color: root.loop-cut-balanced ? DesignTokens.accent : DesignTokens.border;
+                                Text {
+                                    text: root.loop-cut-balanced ? "Dual Balanced: ON" : "Dual Balanced: OFF";
+                                    color: root.loop-cut-balanced ? DesignTokens.canvas : DesignTokens.text-primary;
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                TouchArea { clicked => { root.toggle-loop-cut-balanced(); } }
                             }
                         }
 

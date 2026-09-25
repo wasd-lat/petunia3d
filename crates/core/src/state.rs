@@ -2844,10 +2844,12 @@ impl AppState {
             "model.loop_cut" => {
                 let cuts = intent.args.first().copied().unwrap_or(1.0) as u32;
                 let even = intent.args.get(1).copied().unwrap_or(1.0) >= 0.5;
+                let balanced = intent.args.get(2).copied().unwrap_or(0.0) >= 0.5;
                 self.dispatch(&crate::command::LoopCutCmd {
                     cuts: cuts.clamp(1, 32),
                     even,
                     slide: 0.0,
+                    balanced,
                 })
             }
             "uv.unwrap_auto" => self.dispatch(&crate::command::UnwrapAutoCmd),

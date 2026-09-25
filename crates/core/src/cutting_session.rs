@@ -30,6 +30,8 @@ pub struct CutSession {
     pub sliding: bool,
     /// Se verdadeiro, remove a metade negativa do corte e fecha a tampa (Trim).
     pub fill_cap: bool,
+    /// Se verdadeiro, insere cortes simétricos equilibrados (Dual Balanced Loop Rings).
+    pub balanced: bool,
 }
 
 impl CutSession {
@@ -44,6 +46,7 @@ impl CutSession {
             segments: 0,
             sliding: false,
             fill_cap: false,
+            balanced: false,
         }
     }
 
@@ -109,7 +112,11 @@ impl CutSession {
     /// Gera os segmentos de reta 3D correspondentes às linhas de pré-visualização do loop cut.
     pub fn preview_loop_lines(&self, slide: f32) -> Result<Vec<[Vec3; 2]>, LoopCutError> {
         if let Some(ring) = &self.ring {
-            ring.preview(&self.source, self.cuts, slide)
+            if self.balanced {
+                ring.preview_balanced(&self.source, self.cuts, slide)
+            } else {
+                ring.preview(&self.source, self.cuts, slide)
+            }
         } else {
             Ok(Vec::new())
         }
@@ -118,7 +125,11 @@ impl CutSession {
     /// Aplica a inserção do anel de loop na malha original com o fator de deslizamento especificado.
     pub fn apply_loop_cut(&self, slide: f32) -> Result<Mesh, LoopCutError> {
         if let Some(ring) = &self.ring {
-            ring.apply(&self.source, self.cuts, slide)
+            if self.balanced {
+                ring.apply_balanced(&self.source, self.cuts, slide)
+            } else {
+                ring.apply(&self.source, self.cuts, slide)
+            }
         } else {
             Err(LoopCutError::InvalidEdge)
         }

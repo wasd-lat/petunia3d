@@ -428,6 +428,7 @@ pub struct ShellViewModel {
     pub loop_cut_cuts: i32,
     pub loop_cut_preview_commands: String,
     pub loop_cut_armed: bool,
+    pub loop_cut_balanced: bool,
     pub profile_active: bool,
     pub pivot_id: String,
     pub pivot_label: String,
@@ -1172,6 +1173,7 @@ impl ShellViewModel {
             loop_cut_cuts: 1,
             loop_cut_preview_commands: String::new(),
             loop_cut_armed: false,
+            loop_cut_balanced: false,
             profile_active: false,
             pivot_id: pivot_id(state.session.pivot_point).to_string(),
             pivot_label: state.t_id(match state.session.pivot_point {

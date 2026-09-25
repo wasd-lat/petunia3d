@@ -521,6 +521,7 @@ pub struct SlintUiBridge<V: PetuniaViewport> {
     /// Snapshot usado para a prévia por hover; commit só ocorre após click.
     pub loop_cut_hover_source: Option<petunia_core::Mesh>,
     pub loop_cut_hover_cuts: usize,
+    pub loop_cut_balanced: bool,
     pub active_material_slot: i32,
     /// Autosave rotativo do shell (P3D-002). Nunca sobrescreve o arquivo oficial.
     pub autosave: petunia_core::AutosaveService,
@@ -662,6 +663,7 @@ pub struct LoopCutSessionState {
     pub ring: petunia_core::LoopRing,
     pub cuts: usize,
     pub slide: f32,
+    pub balanced: bool,
     /// Malha anterior ao preview: toda reconstrução parte daqui, nunca do preview.
     pub source: petunia_core::Mesh,
 }
@@ -700,6 +702,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             loop_cut_hover_ring: None,
             loop_cut_hover_source: None,
             loop_cut_hover_cuts: 1,
+            loop_cut_balanced: false,
             active_material_slot: 0,
             shading_popover_open: false,
             pointer_position: [512.0, 384.0],
@@ -2045,7 +2048,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         else {
             return String::new();
         };
-        let Ok(segments) = ring.preview(source, self.loop_cut_hover_cuts, 0.0) else {
+        let Ok(segments) = (if self.loop_cut_balanced {
+            ring.preview_balanced(source, self.loop_cut_hover_cuts, 0.0)
+        } else {
+            ring.preview(source, self.loop_cut_hover_cuts, 0.0)
+        }) else {
             return String::new();
         };
         let mut commands = String::new();
@@ -4828,10 +4835,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         mesh: petunia_core::Mesh,
         cuts: usize,
     ) -> bool {
+        let initial_cuts = if self.loop_cut_balanced && cuts < 2 {
+            2
+        } else {
+            cuts.clamp(1, 32)
+        };
         self.loop_cut = Some(LoopCutSessionState {
             ring,
-            cuts: cuts.clamp(1, 32),
+            cuts: initial_cuts,
             slide: 0.0,
+            balanced: self.loop_cut_balanced,
             source: mesh,
         });
         self.state.session.tools.active_tool = "loop_cut".to_string();
@@ -4841,6 +4854,52 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         self.state
             .set_status("Loop Cut: drag to slide, Enter confirms, Esc cancels");
+        true
+    }
+
+    /// Alterna o modo de corte simétrico / equilibrado (Dual Balanced Loop Rings).
+    pub fn toggle_loop_cut_balanced(&mut self) -> bool {
+        self.loop_cut_balanced = !self.loop_cut_balanced;
+        let balanced = self.loop_cut_balanced;
+        if balanced && self.loop_cut_hover_cuts < 2 {
+            self.loop_cut_hover_cuts = 2;
+        }
+        if let Some(session) = self.loop_cut.as_mut() {
+            session.balanced = balanced;
+            if balanced && session.cuts < 2 {
+                session.cuts = 2;
+            }
+        }
+        if self.loop_cut.is_some() {
+            self.apply_loop_cut_preview();
+        }
+        self.state.set_status(if balanced {
+            "Loop Cut: Dual Balanced ativado"
+        } else {
+            "Loop Cut: Dual Balanced desativado"
+        });
+        self.state.mark_dirty();
+        balanced
+    }
+
+    pub fn set_loop_cut_balanced(&mut self, balanced: bool) -> bool {
+        if self.loop_cut_balanced == balanced {
+            return false;
+        }
+        self.loop_cut_balanced = balanced;
+        if balanced && self.loop_cut_hover_cuts < 2 {
+            self.loop_cut_hover_cuts = 2;
+        }
+        if let Some(session) = self.loop_cut.as_mut() {
+            session.balanced = balanced;
+            if balanced && session.cuts < 2 {
+                session.cuts = 2;
+            }
+        }
+        if self.loop_cut.is_some() {
+            self.apply_loop_cut_preview();
+        }
+        self.state.mark_dirty();
         true
     }
 
@@ -4918,10 +4977,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let Some(session) = self.loop_cut.as_ref() else {
             return false;
         };
-        match session
-            .ring
-            .apply(&session.source, session.cuts, session.slide)
-        {
+        let res = if session.balanced {
+            session
+                .ring
+                .apply_balanced(&session.source, session.cuts, session.slide)
+        } else {
+            session
+                .ring
+                .apply(&session.source, session.cuts, session.slide)
+        };
+        match res {
             Ok(mesh) => {
                 if let Some(active) = self.state.project.active_mesh_mut() {
                     *active = mesh;
@@ -4948,10 +5013,15 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if let Some(active) = self.state.project.active_mesh_mut() {
             *active = session.source.clone();
         }
-        let Ok(cut) = session
-            .ring
-            .apply(&session.source, session.cuts, session.slide)
-        else {
+        let Ok(cut) = (if session.balanced {
+            session
+                .ring
+                .apply_balanced(&session.source, session.cuts, session.slide)
+        } else {
+            session
+                .ring
+                .apply(&session.source, session.cuts, session.slide)
+        }) else {
             self.state
                 .set_status("Loop Cut: topology refused at commit");
             self.state.emit_mesh_changed();
@@ -4963,8 +5033,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         self.state.sync_selection();
         self.state.emit_mesh_changed();
-        self.state
-            .set_status(format!("Loop cut ({})", session.cuts));
+        self.state.set_status(format!(
+            "Loop cut ({}{})",
+            session.cuts,
+            if session.balanced { " balanced" } else { "" }
+        ));
         true
     }
 
@@ -7739,10 +7812,17 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             vm.loop_cut_active = true;
             vm.loop_cut_slide = session.slide;
             vm.loop_cut_cuts = session.cuts as i32;
-            if let Ok(segments) = session
-                .ring
-                .preview(&session.source, session.cuts, session.slide)
-            {
+            vm.loop_cut_balanced = session.balanced;
+            let preview_res = if session.balanced {
+                session
+                    .ring
+                    .preview_balanced(&session.source, session.cuts, session.slide)
+            } else {
+                session
+                    .ring
+                    .preview(&session.source, session.cuts, session.slide)
+            };
+            if let Ok(segments) = preview_res {
                 let mut commands = String::new();
                 for [a, b] in segments {
                     project_preview_segment(
@@ -7758,6 +7838,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         } else if self.state.session.tools.active_tool == "loop_cut" {
             vm.loop_cut_armed = true;
             vm.loop_cut_cuts = self.loop_cut_hover_cuts as i32;
+            vm.loop_cut_balanced = self.loop_cut_balanced;
             vm.loop_cut_preview_commands = self.loop_cut_hover_preview_commands();
         }
         vm.profile_active = self.state.session.tools.active_tool == "draw_profile";

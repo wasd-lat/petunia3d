@@ -3352,12 +3352,13 @@ impl Command for ToggleHelpCmd {
     }
 }
 
-/// Even Loop Cut on the first selected edge (uniform spacing when `even`).
+/// Even Loop Cut on the first selected edge (uniform spacing when `even`, symmetric when `balanced`).
 #[derive(Debug, Clone)]
 pub struct LoopCutCmd {
     pub cuts: u32,
     pub even: bool,
     pub slide: f32,
+    pub balanced: bool,
 }
 
 impl Default for LoopCutCmd {
@@ -3366,6 +3367,7 @@ impl Default for LoopCutCmd {
             cuts: 1,
             even: true,
             slide: 0.0,
+            balanced: false,
         }
     }
 }
@@ -3397,15 +3399,24 @@ impl Command for LoopCutCmd {
             .ok_or(CommandError::EmptySelection)?;
         let ring = petunia_mesh::loop_cut::LoopRing::discover(mesh, seed)
             .map_err(|e| CommandError::Execution(e.to_string()))?;
-        let next = ring
-            .apply_even(mesh, cuts, self.slide, self.even)
-            .map_err(|e| CommandError::Execution(e.to_string()))?;
+        let next = if self.balanced {
+            ring.apply_balanced(mesh, cuts, self.slide)
+        } else {
+            ring.apply_even(mesh, cuts, self.slide, self.even)
+        }
+        .map_err(|e| CommandError::Execution(e.to_string()))?;
         if let Some(dst) = state.project.active_mesh_mut() {
             *dst = next;
         }
         state.set_status(format!(
             "Loop cut ({cuts}{})",
-            if self.even { " even" } else { "" }
+            if self.balanced {
+                " balanced"
+            } else if self.even {
+                " even"
+            } else {
+                ""
+            }
         ));
         Ok(())
     }

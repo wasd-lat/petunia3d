@@ -1916,6 +1916,58 @@ fn loop_cut_session_slides_previews_and_commits_one_undo_entry() {
 }
 
 #[test]
+fn test_dual_balanced_loop_cut_session_and_toggle() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+    let original = bridge.state.project.active_mesh().unwrap().clone();
+
+    // Select an edge on the cube
+    let _seed = {
+        let mesh = bridge.state.project.active_mesh_mut().unwrap();
+        let face = mesh.faces[0].verts.clone();
+        let edge = (face[0], face[1]);
+        mesh.selected_edges.insert(edge);
+        edge
+    };
+
+    // Toggle balanced mode
+    assert!(!bridge.loop_cut_balanced);
+    assert!(bridge.toggle_loop_cut_balanced());
+    assert!(bridge.loop_cut_balanced);
+    assert_eq!(bridge.loop_cut_hover_cuts, 2);
+
+    assert!(bridge.begin_loop_cut());
+    let session = bridge.loop_cut.as_ref().unwrap();
+    assert!(session.balanced);
+    assert_eq!(session.cuts, 2);
+
+    // Slide balanced cuts
+    assert!(bridge.set_loop_cut_slide(0.5));
+    let vm = bridge.view_model();
+    assert!(vm.loop_cut_balanced);
+    assert_eq!(vm.loop_cut_cuts, 2);
+    assert_eq!(vm.loop_cut_slide, 0.5);
+    assert!(!vm.loop_cut_preview_commands.is_empty());
+
+    // Commit balanced loop cut
+    assert!(bridge.commit_loop_cut());
+    assert!(bridge.loop_cut.is_none());
+    assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+
+    let modified = bridge.state.project.active_mesh().unwrap();
+    // Cube started with 6 faces. Dual loop cut on a 4-quad ring adds 2 * 4 = 8 faces -> 14 faces total.
+    assert_eq!(modified.faces.len(), 14);
+    assert!(modified.validate_topology().is_closed);
+    assert!(modified.validate_topology().is_manifold);
+
+    // Undo restores the exact original mesh
+    assert!(bridge.state.undo());
+    let restored = bridge.state.project.active_mesh().unwrap();
+    assert_eq!(restored.verts.len(), original.verts.len());
+    assert_eq!(restored.faces.len(), original.faces.len());
+}
+
+#[test]
 fn loop_cut_cancel_restores_the_exact_original_mesh() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     bridge.state.set_edit_mode(petunia_core::EditMode::Edit);

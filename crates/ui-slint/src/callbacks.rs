@@ -583,6 +583,7 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_loop_cut_cuts(vm.loop_cut_cuts);
     window.set_loop_cut_preview_commands(vm.loop_cut_preview_commands.as_str().into());
     window.set_loop_cut_armed(vm.loop_cut_armed);
+    window.set_loop_cut_balanced(vm.loop_cut_balanced);
     window.set_pivot_id(vm.pivot_id.as_str().into());
     window.set_pivot_label(vm.pivot_label.as_str().into());
     window.set_pivot_median_label(vm.pivot_median_label.as_str().into());
@@ -2968,6 +2969,22 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_loop_cut_cancel(move || {
         if let Ok(mut bridge) = loop_cancel_bridge.lock() {
             bridge.cancel_loop_cut();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let loop_balanced_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_loop_cut_balanced(move || {
+        if let Ok(mut bridge) = loop_balanced_bridge.lock() {
+            bridge.toggle_loop_cut_balanced();
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {

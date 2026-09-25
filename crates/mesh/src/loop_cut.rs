@@ -52,6 +52,17 @@ pub struct LoopRing {
     closed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopDistribution {
+    /// Uniform slide: all cuts shift in the same direction (+ slide).
+    Uniform,
+    /// Even: cuts are uniformly distributed regardless of slide.
+    Even,
+    /// Balanced / Symmetric: cuts are placed symmetrically mirrored around the center (0.5).
+    /// Sliding expands outward (slide > 0) or pinches inward (slide < 0) symmetrically.
+    Balanced,
+}
+
 fn key((a, b): Edge) -> Edge {
     (a.min(b), a.max(b))
 }
@@ -194,8 +205,29 @@ impl LoopRing {
         cuts: usize,
         slide: f32,
     ) -> Result<Vec<[Vec3; 2]>, LoopCutError> {
+        self.preview_mode(mesh, cuts, slide, LoopDistribution::Uniform)
+    }
+
+    /// Preview balanced loop cuts mirrored symmetrically around the quad center.
+    pub fn preview_balanced(
+        &self,
+        mesh: &Mesh,
+        cuts: usize,
+        slide: f32,
+    ) -> Result<Vec<[Vec3; 2]>, LoopCutError> {
+        self.preview_mode(mesh, cuts, slide, LoopDistribution::Balanced)
+    }
+
+    /// Preview loop cut lines using the specified distribution mode.
+    pub fn preview_mode(
+        &self,
+        mesh: &Mesh,
+        cuts: usize,
+        slide: f32,
+        mode: LoopDistribution,
+    ) -> Result<Vec<[Vec3; 2]>, LoopCutError> {
         self.validate(mesh)?;
-        let fractions = fractions(cuts, slide)?;
+        let fractions = fractions_distribution(cuts, slide, mode)?;
         let oriented: HashMap<_, _> = self.edges.iter().map(|&edge| (key(edge), edge)).collect();
         let mut lines = Vec::with_capacity(self.faces.len() * cuts);
         for face in &self.faces {
@@ -214,7 +246,7 @@ impl LoopRing {
     /// Splits each ring quad into strips, sharing every new boundary vertex.
     /// Existing face UV seams are preserved through independent interpolation.
     pub fn apply(&self, mesh: &Mesh, cuts: usize, slide: f32) -> Result<Mesh, LoopCutError> {
-        self.apply_even(mesh, cuts, slide, false)
+        self.apply_mode(mesh, cuts, slide, LoopDistribution::Uniform)
     }
 
     /// Even Loop Cut: equal spacing along the ring, independent of slide.
@@ -225,8 +257,34 @@ impl LoopRing {
         slide: f32,
         even: bool,
     ) -> Result<Mesh, LoopCutError> {
+        let mode = if even {
+            LoopDistribution::Even
+        } else {
+            LoopDistribution::Uniform
+        };
+        self.apply_mode(mesh, cuts, slide, mode)
+    }
+
+    /// Balanced / Symmetric Loop Cut: pairs of cuts are placed symmetrically mirrored around 0.5.
+    pub fn apply_balanced(
+        &self,
+        mesh: &Mesh,
+        cuts: usize,
+        slide: f32,
+    ) -> Result<Mesh, LoopCutError> {
+        self.apply_mode(mesh, cuts, slide, LoopDistribution::Balanced)
+    }
+
+    /// General Loop Cut application with the given distribution mode.
+    pub fn apply_mode(
+        &self,
+        mesh: &Mesh,
+        cuts: usize,
+        slide: f32,
+        mode: LoopDistribution,
+    ) -> Result<Mesh, LoopCutError> {
         self.validate(mesh)?;
-        let fractions = fractions_mode(cuts, slide, even)?;
+        let fractions = fractions_distribution(cuts, slide, mode)?;
         let mut result = mesh.clone();
         result.deselect_all();
         let mut splits = HashMap::new();
@@ -291,22 +349,61 @@ impl LoopRing {
     }
 }
 
-fn fractions(cuts: usize, slide: f32) -> Result<Vec<f32>, LoopCutError> {
-    fractions_mode(cuts, slide, false)
+pub fn fractions(cuts: usize, slide: f32) -> Result<Vec<f32>, LoopCutError> {
+    fractions_distribution(cuts, slide, LoopDistribution::Uniform)
 }
 
 /// Uniform (even) distribution ignores slide so strips have equal length.
-fn fractions_mode(cuts: usize, slide: f32, even: bool) -> Result<Vec<f32>, LoopCutError> {
+pub fn fractions_mode(cuts: usize, slide: f32, even: bool) -> Result<Vec<f32>, LoopCutError> {
+    let mode = if even {
+        LoopDistribution::Even
+    } else {
+        LoopDistribution::Uniform
+    };
+    fractions_distribution(cuts, slide, mode)
+}
+
+/// General fraction distribution calculation for Loop Cuts.
+pub fn fractions_distribution(
+    cuts: usize,
+    slide: f32,
+    mode: LoopDistribution,
+) -> Result<Vec<f32>, LoopCutError> {
     if !(1..=32).contains(&cuts) || !slide.is_finite() || !(-1.0..=1.0).contains(&slide) {
         return Err(LoopCutError::InvalidParameters);
     }
-    if even {
-        return Ok((1..=cuts).map(|i| i as f32 / (cuts + 1) as f32).collect());
+    match mode {
+        LoopDistribution::Even => Ok((1..=cuts).map(|i| i as f32 / (cuts + 1) as f32).collect()),
+        LoopDistribution::Uniform => {
+            let slide = slide.clamp(-0.999, 0.999);
+            Ok((1..=cuts)
+                .map(|i| (i as f32 + slide) / (cuts + 1) as f32)
+                .collect())
+        }
+        LoopDistribution::Balanced => {
+            if cuts == 1 {
+                return Ok(vec![0.5 + slide.clamp(-0.499, 0.499)]);
+            }
+            let mut fracs = vec![0.0; cuts];
+            let half = cuts / 2;
+            for i in 0..half {
+                let p_i = (i + 1) as f32 / (cuts + 1) as f32;
+                let delta_0 = 0.5 - p_i;
+                let delta = if slide >= 0.0 {
+                    delta_0 + slide * (0.499 - delta_0)
+                } else {
+                    let min_delta = 0.002 * (half - i) as f32;
+                    delta_0 + slide * (delta_0 - min_delta)
+                };
+                fracs[i] = (0.5 - delta).clamp(0.0001, 0.4999);
+                fracs[cuts - 1 - i] = (0.5 + delta).clamp(0.5001, 0.9999);
+            }
+            if cuts % 2 == 1 {
+                fracs[half] = 0.5;
+            }
+            Ok(fracs)
+        }
     }
-    let slide = slide.clamp(-0.999, 0.999);
-    Ok((1..=cuts)
-        .map(|i| (i as f32 + slide) / (cuts + 1) as f32)
-        .collect())
 }
 
 fn interpolate(mesh: &Mesh, edge: Edge, fraction: f32) -> Vec3 {
@@ -325,6 +422,43 @@ fn ordered_split(
         Ok(points.clone())
     } else {
         Ok(points.iter().rev().map(|&(id, t)| (id, 1.0 - t)).collect())
+    }
+}
+
+impl Mesh {
+    /// Insere anéis de corte regulares (Loop Cut) ao longo do anel de quads contendo a aresta semente.
+    pub fn loop_cut(
+        &mut self,
+        seed: (u32, u32),
+        cuts: usize,
+        slide: f32,
+    ) -> Result<(), LoopCutError> {
+        let ring = LoopRing::discover(self, seed)?;
+        *self = ring.apply(self, cuts, slide)?;
+        Ok(())
+    }
+
+    /// Insere anéis de corte equilibrados e simétricos (Dual / Balanced Loop Rings)
+    /// ao longo do anel de quads contendo a aresta semente.
+    pub fn loop_cut_balanced(
+        &mut self,
+        seed: (u32, u32),
+        cuts: usize,
+        slide: f32,
+    ) -> Result<(), LoopCutError> {
+        let ring = LoopRing::discover(self, seed)?;
+        *self = ring.apply_balanced(self, cuts, slide)?;
+        Ok(())
+    }
+
+    /// Insere um par de cortes simétricos equilibrados (Dual Balanced Loop Ring)
+    /// equidistantes do centro com o parâmetro de afastamento/slide indicado.
+    pub fn loop_cut_dual_balanced(
+        &mut self,
+        seed: (u32, u32),
+        slide: f32,
+    ) -> Result<(), LoopCutError> {
+        self.loop_cut_balanced(seed, 2, slide)
     }
 }
 
@@ -491,5 +625,66 @@ mod tests {
             LoopRing::discover(&mesh, seed),
             Err(LoopCutError::NonManifold)
         ));
+    }
+
+    #[test]
+    fn test_dual_balanced_loop_cut_fractions_symmetry() {
+        for slide in [-1.0, -0.75, -0.5, 0.0, 0.25, 0.5, 0.8, 1.0] {
+            let fracs = fractions_distribution(2, slide, LoopDistribution::Balanced).unwrap();
+            assert_eq!(fracs.len(), 2);
+            assert!(
+                fracs[0] > 0.0 && fracs[0] < 0.5,
+                "fracs[0] was {}",
+                fracs[0]
+            );
+            assert!(
+                fracs[1] > 0.5 && fracs[1] < 1.0,
+                "fracs[1] was {}",
+                fracs[1]
+            );
+            let dist_left = 0.5 - fracs[0];
+            let dist_right = fracs[1] - 0.5;
+            assert!(
+                (dist_left - dist_right).abs() < 1e-5,
+                "Slide {slide} lost symmetry: left {dist_left}, right {dist_right}"
+            );
+        }
+
+        // Test with 4 cuts (2 pairs)
+        for slide in [-0.8, 0.0, 0.6] {
+            let fracs = fractions_distribution(4, slide, LoopDistribution::Balanced).unwrap();
+            assert_eq!(fracs.len(), 4);
+            assert!(fracs[0] < fracs[1] && fracs[1] < fracs[2] && fracs[2] < fracs[3]);
+            let dist_outer_left = 0.5 - fracs[0];
+            let dist_outer_right = fracs[3] - 0.5;
+            let dist_inner_left = 0.5 - fracs[1];
+            let dist_inner_right = fracs[2] - 0.5;
+            assert!((dist_outer_left - dist_outer_right).abs() < 1e-5);
+            assert!((dist_inner_left - dist_inner_right).abs() < 1e-5);
+        }
+
+        // Test with 3 cuts (1 pair + center)
+        let fracs = fractions_distribution(3, 0.4, LoopDistribution::Balanced).unwrap();
+        assert_eq!(fracs.len(), 3);
+        assert_eq!(fracs[1], 0.5);
+        assert!((0.5 - fracs[0] - (fracs[2] - 0.5)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_dual_balanced_loop_cut_on_cube() {
+        let mut mesh = Mesh::cube(2.0);
+        let seed = (mesh.faces[0].verts[0], mesh.faces[0].verts[1]);
+        mesh.loop_cut_dual_balanced(seed, 0.5).unwrap();
+
+        // Cube has 6 faces. Ring cuts 4 side quads into 3 strips each (4 * 3 = 12 quads).
+        // 2 end faces remain untouched. Total faces = 12 + 2 = 14.
+        assert_eq!(mesh.faces.len(), 14);
+        assert!(mesh.validate_topology().is_closed);
+        assert!(mesh.validate_topology().is_manifold);
+
+        // Preview balanced lines
+        let ring = LoopRing::discover(&Mesh::cube(2.0), seed).unwrap();
+        let lines = ring.preview_balanced(&Mesh::cube(2.0), 2, 0.5).unwrap();
+        assert_eq!(lines.len(), 8); // 4 faces * 2 cuts
     }
 }
