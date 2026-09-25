@@ -24,16 +24,18 @@ impl UvModule {
         state.emit_mesh_changed();
     }
 
-    /// Move UVs das faces selecionadas (ou todas se vazio).
+    /// Move UVs das faces selecionadas (ou todas se vazio), preservando vértices fixados (pinned).
     pub fn move_selected(state: &mut AppState, du: f32, dv: f32) {
         let sel_empty = state.session.uv_selected.is_empty();
         let uv_selected = &state.session.uv_selected;
         if let Some(m) = state.project.active_mesh_mut() {
             for (fi, f) in m.faces.iter_mut().enumerate() {
                 if sel_empty || uv_selected.contains(&fi) {
-                    for uv in &mut f.uv {
-                        uv[0] += du;
-                        uv[1] += dv;
+                    for (c_idx, uv) in f.uv.iter_mut().enumerate() {
+                        if !m.uv_pinned.contains(&(fi, c_idx)) {
+                            uv[0] += du;
+                            uv[1] += dv;
+                        }
                     }
                 }
             }
@@ -41,7 +43,7 @@ impl UvModule {
         }
     }
 
-    /// Escala UVs selecionadas em torno do centroide.
+    /// Escala UVs selecionadas em torno do centroide, preservando vértices fixados (pinned).
     pub fn scale_selected(state: &mut AppState, s: f32) {
         let sel_empty = state.session.uv_selected.is_empty();
         let uv_selected = &state.session.uv_selected;
@@ -64,9 +66,11 @@ impl UvModule {
             c[1] /= n as f32;
             for (fi, f) in m.faces.iter_mut().enumerate() {
                 if sel_empty || uv_selected.contains(&fi) {
-                    for uv in &mut f.uv {
-                        uv[0] = c[0] + (uv[0] - c[0]) * s;
-                        uv[1] = c[1] + (uv[1] - c[1]) * s;
+                    for (c_idx, uv) in f.uv.iter_mut().enumerate() {
+                        if !m.uv_pinned.contains(&(fi, c_idx)) {
+                            uv[0] = c[0] + (uv[0] - c[0]) * s;
+                            uv[1] = c[1] + (uv[1] - c[1]) * s;
+                        }
                     }
                 }
             }
@@ -74,7 +78,7 @@ impl UvModule {
         }
     }
 
-    /// Rotaciona UVs selecionadas em torno do centroide em radianos (P3D-064).
+    /// Rotaciona UVs selecionadas em torno do centroide em radianos, preservando vértices fixados (pinned).
     pub fn rotate_selected(state: &mut AppState, angle_rad: f32) {
         let sel_empty = state.session.uv_selected.is_empty();
         let uv_selected = &state.session.uv_selected;
@@ -100,16 +104,57 @@ impl UvModule {
 
             for (fi, f) in m.faces.iter_mut().enumerate() {
                 if sel_empty || uv_selected.contains(&fi) {
-                    for uv in &mut f.uv {
-                        let du = uv[0] - c[0];
-                        let dv = uv[1] - c[1];
-                        uv[0] = c[0] + du * cos_a - dv * sin_a;
-                        uv[1] = c[1] + du * sin_a + dv * cos_a;
+                    for (c_idx, uv) in f.uv.iter_mut().enumerate() {
+                        if !m.uv_pinned.contains(&(fi, c_idx)) {
+                            let du = uv[0] - c[0];
+                            let dv = uv[1] - c[1];
+                            uv[0] = c[0] + du * cos_a - dv * sin_a;
+                            uv[1] = c[1] + du * sin_a + dv * cos_a;
+                        }
                     }
                 }
             }
             state.mark_dirty();
         }
+    }
+
+    /// Fixa (pin) todos os vértices UV das faces selecionadas.
+    pub fn pin_selected(state: &mut AppState) {
+        state.checkpoint("pin uv");
+        if let Some(m) = state.project.active_mesh_mut() {
+            m.pin_selected_faces_uv(&state.session.uv_selected);
+        }
+        state.emit_mesh_changed();
+    }
+
+    /// Desfixa (unpin) todos os vértices UV das faces selecionadas.
+    pub fn unpin_selected(state: &mut AppState) {
+        state.checkpoint("unpin uv");
+        if let Some(m) = state.project.active_mesh_mut() {
+            m.unpin_selected_faces_uv(&state.session.uv_selected);
+        }
+        state.emit_mesh_changed();
+    }
+
+    /// Alterna estado de fixação (pin/unpin) das faces selecionadas.
+    pub fn toggle_pin_selected(state: &mut AppState) -> bool {
+        state.checkpoint("toggle pin uv");
+        let res = if let Some(m) = state.project.active_mesh_mut() {
+            m.toggle_pin_selected_faces_uv(&state.session.uv_selected)
+        } else {
+            false
+        };
+        state.emit_mesh_changed();
+        res
+    }
+
+    /// Limpa todas as fixações de UV da malha ativa.
+    pub fn clear_all_pins(state: &mut AppState) {
+        state.checkpoint("clear all uv pins");
+        if let Some(m) = state.project.active_mesh_mut() {
+            m.clear_all_pins();
+        }
+        state.emit_mesh_changed();
     }
 
     /// Executa projeção cúbica (Box Mapping) sobre o asset ativo (P3D-064).
@@ -369,5 +414,37 @@ mod tests {
                 .iter()
                 .all(|f| f.uv.iter().all(|uv| uv[0].is_finite() && uv[1].is_finite()))
         );
+    }
+
+    #[test]
+    fn test_uv_pinning_in_transforms() {
+        let mut state = AppState::new("en");
+        let active = state.project.active;
+        state.project.assets[active].mesh = petunia_mesh::Mesh::cube(2.0);
+        UvModule::project_cube(&mut state);
+
+        let uv0_orig = state.project.active_mesh().unwrap().faces[0].uv[0];
+        let uv1_orig = state.project.active_mesh().unwrap().faces[0].uv[1];
+
+        // Fixa apenas o canto (0, 0)
+        state.project.active_mesh_mut().unwrap().pin_uv(0, 0);
+
+        // Move todas as UVs da malha em (0.5, 0.5)
+        UvModule::move_selected(&mut state, 0.5, 0.5);
+
+        let mesh = state.project.active_mesh().unwrap();
+        // Canto fixado não moveu
+        assert_eq!(mesh.faces[0].uv[0], uv0_orig);
+        // Canto não fixado moveu
+        assert!((mesh.faces[0].uv[1][0] - (uv1_orig[0] + 0.5)).abs() < 1e-4);
+        assert!((mesh.faces[0].uv[1][1] - (uv1_orig[1] + 0.5)).abs() < 1e-4);
+
+        // Teste de pin_selected e clear_all_pins
+        state.session.uv_selected.insert(1);
+        UvModule::pin_selected(&mut state);
+        assert!(state.project.active_mesh().unwrap().is_uv_pinned(1, 0));
+
+        UvModule::clear_all_pins(&mut state);
+        assert_eq!(state.project.active_mesh().unwrap().uv_pinned.len(), 0);
     }
 }

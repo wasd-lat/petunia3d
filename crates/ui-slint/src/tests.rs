@@ -5822,6 +5822,33 @@ fn test_paint_symmetry_toggles_and_view_model() {
 }
 
 #[test]
+fn test_uv_pinning_bridge_and_shortcuts() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Uv));
+
+    // Seleciona a face 0 em UV
+    bridge.state.session.uv_selected.insert(0);
+
+    // Inicialmente sem pins
+    assert_eq!(bridge.view_model().uv_editor.pinned_count, 0);
+
+    // Atalho P alterna fixação (pin)
+    assert!(bridge.route_shortcut("p", false, false, false));
+    assert!(bridge.view_model().uv_editor.pinned_count > 0);
+    assert!(!bridge.view_model().uv_editor.pinned_commands.is_empty());
+
+    // Atalho Alt+P limpa todas as fixações
+    assert!(bridge.route_shortcut("p", false, false, true));
+    assert_eq!(bridge.view_model().uv_editor.pinned_count, 0);
+
+    // Método direto do bridge
+    assert!(bridge.toggle_selected_uv_pins());
+    assert!(bridge.view_model().uv_editor.pinned_count > 0);
+    assert!(bridge.clear_all_uv_pins());
+    assert_eq!(bridge.view_model().uv_editor.pinned_count, 0);
+}
+
+#[test]
 fn test_nudge_selection_with_arrow_keys() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
 

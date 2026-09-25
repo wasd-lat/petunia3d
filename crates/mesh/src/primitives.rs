@@ -165,6 +165,7 @@ impl Mesh {
             ],
             selected_edges: HashSet::new(),
             uv_seams: HashSet::new(),
+            uv_pinned: HashSet::new(),
         };
         m.project_planar();
         m
@@ -185,6 +186,7 @@ impl Mesh {
             )],
             selected_edges: HashSet::new(),
             uv_seams: HashSet::new(),
+            uv_pinned: HashSet::new(),
         };
         m.project_planar();
         m
@@ -300,6 +302,7 @@ impl Mesh {
             ],
             selected_edges: HashSet::new(),
             uv_seams: HashSet::new(),
+            uv_pinned: HashSet::new(),
         };
         m.project_planar();
         m
@@ -331,6 +334,7 @@ impl Mesh {
             ],
             selected_edges: HashSet::new(),
             uv_seams: HashSet::new(),
+            uv_pinned: HashSet::new(),
         };
         m.project_planar();
         m

@@ -22,7 +22,13 @@ impl Mesh {
             let n = self.face_normal(fi).abs();
             let idx: Vec<u32> = self.faces[fi].verts.clone();
             let mut uv = Vec::new();
-            for &vi in &idx {
+            for (c_idx, &vi) in idx.iter().enumerate() {
+                if self.uv_pinned.contains(&(fi, c_idx)) {
+                    if let Some(&existing) = self.faces[fi].uv.get(c_idx) {
+                        uv.push(existing);
+                        continue;
+                    }
+                }
                 let p = self.verts[vi as usize].vec();
                 let q = (p - bb_min) / size;
                 // eixo dominante vira o descartado
@@ -61,7 +67,13 @@ impl Mesh {
 
             let idx: Vec<u32> = self.faces[fi].verts.clone();
             let mut uv = Vec::with_capacity(idx.len());
-            for &vi in &idx {
+            for (c_idx, &vi) in idx.iter().enumerate() {
+                if self.uv_pinned.contains(&(fi, c_idx)) {
+                    if let Some(&existing) = self.faces[fi].uv.get(c_idx) {
+                        uv.push(existing);
+                        continue;
+                    }
+                }
                 let p = self.verts[vi as usize].vec();
                 let q = (p - bb_min) / size;
                 let t = if nx >= ny && nx >= nz {

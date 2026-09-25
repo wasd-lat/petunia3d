@@ -4051,6 +4051,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let mut commands = String::new();
         let mut seam_commands = String::new();
         let mut selected_commands = String::new();
+        let mut pinned_commands = String::new();
 
         for (face_idx, face) in mesh.faces.iter().enumerate().take(MAX_FACES) {
             if face.uv.len() < 3 {
@@ -4090,6 +4091,28 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 selected_commands.push_str("Z ");
             }
 
+            // Pinned UV corners / Vértices UV fixados
+            for (c_idx, uv) in face.uv.iter().enumerate() {
+                if mesh.uv_pinned.contains(&(face_idx, c_idx))
+                    && uv[0].is_finite()
+                    && uv[1].is_finite()
+                {
+                    let cx = uv[0] * BOX;
+                    let cy = (1.0 - uv[1]) * BOX;
+                    pinned_commands.push_str(&format!(
+                        "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z ",
+                        cx - 3.0,
+                        cy,
+                        cx,
+                        cy - 3.0,
+                        cx + 3.0,
+                        cy,
+                        cx,
+                        cy + 3.0
+                    ));
+                }
+            }
+
             // Highlighted seam edges / Arestas de costura destacadas
             let n = face.verts.len();
             for i in 0..n {
@@ -4119,6 +4142,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             layout_commands: commands,
             seam_commands,
             selected_commands,
+            pinned_commands,
+            pinned_count: mesh.uv_pinned.len(),
             island_count: islands.len(),
             face_count,
             selected_face: mesh
@@ -4297,6 +4322,58 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             mesh.uv_seams.clear();
         }
         self.state.set_status("UV: all seams cleared");
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Alterna a fixação (pin/unpin) dos vértices UV das faces selecionadas.
+    pub fn toggle_selected_uv_pins(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh() else {
+            return false;
+        };
+        let has_sel_faces =
+            mesh.faces.iter().any(|f| f.selected) || !self.state.session.uv_selected.is_empty();
+        if !has_sel_faces {
+            self.state.set_status("UV: select face(s) to pin/unpin");
+            return false;
+        }
+
+        self.state.checkpoint("toggle uv pin");
+        let Some(mesh) = self.state.project.active_mesh_mut() else {
+            return false;
+        };
+
+        let mut faces_to_toggle = self.state.session.uv_selected.clone();
+        for (fi, f) in mesh.faces.iter().enumerate() {
+            if f.selected {
+                faces_to_toggle.insert(fi);
+            }
+        }
+
+        mesh.toggle_pin_selected_faces_uv(&faces_to_toggle);
+        let count = mesh.uv_pinned.len();
+        self.state
+            .set_status(format!("UV pins toggled ({count} pinned corners total)"));
+        self.state.emit_mesh_changed();
+        self.state.mark_dirty();
+        true
+    }
+
+    /// Limpa todas as fixações de UV da malha ativa.
+    pub fn clear_all_uv_pins(&mut self) -> bool {
+        let Some(mesh) = self.state.project.active_mesh() else {
+            return false;
+        };
+        if mesh.uv_pinned.is_empty() {
+            self.state.set_status("UV: there are no pins to clear");
+            return false;
+        }
+        self.state.checkpoint("clear all uv pins");
+        if let Some(mesh) = self.state.project.active_mesh_mut() {
+            mesh.clear_all_pins();
+        }
+        self.state.set_status("UV: all pinned vertices cleared");
         self.state.emit_mesh_changed();
         self.state.mark_dirty();
         true
@@ -6461,6 +6538,22 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 || self.state.session.selection_domain == SelectionDomain::Edge
             {
                 if self.toggle_selected_uv_seams() {
+                    return true;
+                }
+            }
+        }
+        if text.eq_ignore_ascii_case("p")
+            && !ctrl
+            && self.state.session.tools.modal.is_none()
+            && self.drag.is_none()
+            && self.rename_draft.is_none()
+        {
+            if self.state.workspace == Workspace::Uv {
+                if alt {
+                    if self.clear_all_uv_pins() {
+                        return true;
+                    }
+                } else if self.toggle_selected_uv_pins() {
                     return true;
                 }
             }

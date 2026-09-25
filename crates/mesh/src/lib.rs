@@ -82,6 +82,9 @@ pub struct Mesh {
     /// UV0 seams: undirected edges that split charts (ch. 15).
     #[serde(default)]
     pub uv_seams: HashSet<(u32, u32)>,
+    /// Vértices UV fixados (pinned): pares (face_idx, corner_idx) estáticos em projeções/unwraps.
+    #[serde(default)]
+    pub uv_pinned: HashSet<(usize, usize)>,
 }
 
 pub fn edge_key(a: u32, b: u32) -> (u32, u32) {

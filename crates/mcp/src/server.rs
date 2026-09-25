@@ -124,7 +124,8 @@ impl PetuniaMcp {
     }
 
     fn intent_well_formed(command: &str, asset_id: Option<&str>, args: &[f64]) -> bool {
-        let asset_ok = asset_id.is_none_or(|id| uuid::Uuid::parse_str(id).is_ok());
+        let asset_ok = asset_id
+            .is_none_or(|id| uuid::Uuid::parse_str(id).is_ok() || PrimitiveKind::parse(id).is_ok());
         !command.is_empty()
             && command.len() <= 64
             && command

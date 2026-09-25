@@ -531,6 +531,7 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_asset_library_height(vm.asset_library_height);
     window.set_uv_layout_commands(vm.uv_editor.layout_commands.as_str().into());
     window.set_uv_seam_commands(vm.uv_editor.seam_commands.as_str().into());
+    window.set_uv_pinned_commands(vm.uv_editor.pinned_commands.as_str().into());
     window.set_uv_selected_commands(vm.uv_editor.selected_commands.as_str().into());
     window.set_uv_island_count(vm.uv_editor.island_count as i32);
     window.set_uv_face_count(vm.uv_editor.face_count as i32);
@@ -2575,6 +2576,38 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_uv_seams_cleared(move || {
         if let Ok(mut bridge) = uv_clear_bridge.lock() {
             bridge.clear_all_uv_seams();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let uv_pin_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_toggle_uv_pins(move || {
+        if let Ok(mut bridge) = uv_pin_bridge.lock() {
+            bridge.toggle_selected_uv_pins();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let uv_clear_pins_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_clear_all_uv_pins(move || {
+        if let Ok(mut bridge) = uv_clear_pins_bridge.lock() {
+            bridge.clear_all_uv_pins();
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {

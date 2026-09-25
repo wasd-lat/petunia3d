@@ -1274,6 +1274,9 @@ pub struct UvEditorModel {
     pub seam_commands: String,
     /// SVG-like Path commands for selected UV faces / Comandos SVG-like para faces UV selecionadas
     pub selected_commands: String,
+    /// SVG-like Path commands for pinned UV vertices / Comandos SVG-like para vértices UV fixados
+    pub pinned_commands: String,
+    pub pinned_count: usize,
     pub island_count: usize,
     pub face_count: usize,
     pub selected_face: i32,

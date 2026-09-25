@@ -54,6 +54,75 @@ impl Mesh {
         }
     }
 
+    pub fn pin_uv(&mut self, face_idx: usize, corner_idx: usize) {
+        self.uv_pinned.insert((face_idx, corner_idx));
+    }
+
+    pub fn unpin_uv(&mut self, face_idx: usize, corner_idx: usize) {
+        self.uv_pinned.remove(&(face_idx, corner_idx));
+    }
+
+    pub fn toggle_pin_uv(&mut self, face_idx: usize, corner_idx: usize) {
+        if !self.uv_pinned.remove(&(face_idx, corner_idx)) {
+            self.uv_pinned.insert((face_idx, corner_idx));
+        }
+    }
+
+    pub fn is_uv_pinned(&self, face_idx: usize, corner_idx: usize) -> bool {
+        self.uv_pinned.contains(&(face_idx, corner_idx))
+    }
+
+    pub fn clear_all_pins(&mut self) {
+        self.uv_pinned.clear();
+    }
+
+    pub fn pin_selected_faces_uv(&mut self, uv_selected: &HashSet<usize>) {
+        let all = uv_selected.is_empty();
+        for (fi, face) in self.faces.iter().enumerate() {
+            if all || uv_selected.contains(&fi) {
+                for c in 0..face.uv.len() {
+                    self.uv_pinned.insert((fi, c));
+                }
+            }
+        }
+    }
+
+    pub fn unpin_selected_faces_uv(&mut self, uv_selected: &HashSet<usize>) {
+        let all = uv_selected.is_empty();
+        for (fi, face) in self.faces.iter().enumerate() {
+            if all || uv_selected.contains(&fi) {
+                for c in 0..face.uv.len() {
+                    self.uv_pinned.remove(&(fi, c));
+                }
+            }
+        }
+    }
+
+    pub fn toggle_pin_selected_faces_uv(&mut self, uv_selected: &HashSet<usize>) -> bool {
+        let all = uv_selected.is_empty();
+        let mut any_pinned = false;
+        for (fi, face) in self.faces.iter().enumerate() {
+            if all || uv_selected.contains(&fi) {
+                for c in 0..face.uv.len() {
+                    if self.uv_pinned.contains(&(fi, c)) {
+                        any_pinned = true;
+                        break;
+                    }
+                }
+            }
+            if any_pinned {
+                break;
+            }
+        }
+
+        if any_pinned {
+            self.unpin_selected_faces_uv(uv_selected);
+        } else {
+            self.pin_selected_faces_uv(uv_selected);
+        }
+        true
+    }
+
     /// Faces sharing a non-seam UV edge form an island.
     pub fn uv_islands(&self) -> Vec<UvIsland> {
         let mut adj: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -398,4 +467,53 @@ fn minmax(v: &[f32]) -> (f32, f32) {
 
 fn aabb_overlap(amin: [f32; 2], amax: [f32; 2], bmin: [f32; 2], bmax: [f32; 2]) -> bool {
     amin[0] < bmax[0] && amax[0] > bmin[0] && amin[1] < bmax[1] && amax[1] > bmin[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uv_pinning_methods() {
+        let mut m = Mesh::cube(2.0);
+        assert!(!m.is_uv_pinned(0, 0));
+        assert_eq!(m.uv_pinned.len(), 0);
+
+        m.pin_uv(0, 0);
+        assert!(m.is_uv_pinned(0, 0));
+        assert_eq!(m.uv_pinned.len(), 1);
+
+        m.unpin_uv(0, 0);
+        assert!(!m.is_uv_pinned(0, 0));
+
+        m.toggle_pin_uv(0, 1);
+        assert!(m.is_uv_pinned(0, 1));
+        m.toggle_pin_uv(0, 1);
+        assert!(!m.is_uv_pinned(0, 1));
+
+        let mut sel = HashSet::new();
+        sel.insert(0);
+        m.pin_selected_faces_uv(&sel);
+        assert_eq!(m.uv_pinned.len(), m.faces[0].uv.len());
+
+        m.clear_all_pins();
+        assert_eq!(m.uv_pinned.len(), 0);
+    }
+
+    #[test]
+    fn test_uv_pinning_preserves_projection() {
+        let mut m = Mesh::cube(2.0);
+        m.project_cube();
+
+        // Altera artificialmente o UV do canto (0, 0) para [0.42, 0.42] e fixa ele
+        m.faces[0].uv[0] = [0.42, 0.42];
+        m.pin_uv(0, 0);
+
+        // Re-projeta cúbico e planar
+        m.project_cube();
+        assert_eq!(m.faces[0].uv[0], [0.42, 0.42]);
+
+        m.project_planar();
+        assert_eq!(m.faces[0].uv[0], [0.42, 0.42]);
+    }
 }

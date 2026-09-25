@@ -31,7 +31,11 @@ pub fn draw(
         }) {
             return false;
         }
-        state.cut_session = Some(CutSession::new(mesh));
+        let mut session = CutSession::new(mesh);
+        if tool == "slice" {
+            session.fill_cap = true;
+        }
+        state.cut_session = Some(session);
     }
 
     let Some(mut session) = state.cut_session.take() else {

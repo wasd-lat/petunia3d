@@ -2731,6 +2731,7 @@ export component PetuniaSlintShell inherits Window {
     in-out property <string> rename-value: "";
     in-out property <string> uv-layout-commands: "";
     in-out property <string> uv-seam-commands: "";
+    in-out property <string> uv-pinned-commands: "";
     in-out property <string> uv-selected-commands: "";
     in-out property <int> uv-island-count: 0;
     in-out property <int> uv-face-count: 0;
@@ -2910,6 +2911,8 @@ export component PetuniaSlintShell inherits Window {
     callback uv-rotated(float);
     callback uv-seam-toggled;
     callback uv-seams-cleared;
+    callback toggle-uv-pins;
+    callback clear-all-uv-pins;
     callback uv-equalize-texel-density;
     callback boolean-operand-cleared;
     callback boolean-operand-set(string);
@@ -7005,6 +7008,14 @@ export component PetuniaSlintShell inherits Window {
                                             commands: root.uv-seam-commands;
                                         }
 
+                                        // Pinned UV vertices / Vértices UV fixados
+                                        Path {
+                                            fill: #ff3344;
+                                            stroke: #ffffff;
+                                            stroke-width: 1px;
+                                            commands: root.uv-pinned-commands;
+                                        }
+
                                         TouchArea {
                                             property <bool> extend: false;
                                             pointer-event(event) => {
@@ -7192,6 +7203,33 @@ export component PetuniaSlintShell inherits Window {
                                             accessible-role: button;
                                             accessible-label: "Clear all seams";
                                             TouchArea { clicked => { root.uv-seams-cleared(); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        height: 28px;
+                                        spacing: 6px;
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Pin/Unpin (P)"; color: DesignTokens.text-primary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Pin or unpin UV vertices of the selected faces";
+                                            TouchArea { clicked => { root.toggle-uv-pins(); } }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            border-radius: 4px;
+                                            background: DesignTokens.surface-raised;
+                                            border-width: 1px;
+                                            border-color: DesignTokens.border;
+                                            Text { text: "Clear Pins"; color: DesignTokens.danger; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                                            accessible-role: button;
+                                            accessible-label: "Clear all UV pins";
+                                            TouchArea { clicked => { root.clear-all-uv-pins(); } }
                                         }
                                     }
 

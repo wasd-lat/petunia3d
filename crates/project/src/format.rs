@@ -235,6 +235,7 @@ mod tests {
             }],
             selected_edges: Default::default(),
             uv_seams: Default::default(),
+            uv_pinned: Default::default(),
         };
         let bad = super::super::Project {
             id: uuid::Uuid::new_v4(),
