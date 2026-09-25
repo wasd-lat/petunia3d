@@ -2401,6 +2401,9 @@ export component PetuniaSlintShell inherits Window {
     in-out property <float> brush-size: 0.8;
     in-out property <float> brush-opacity: 1.0;
     in-out property <float> brush-hardness: 0.0;
+    in-out property <bool> paint-symmetry-x: false;
+    in-out property <bool> paint-symmetry-y: false;
+    in-out property <bool> paint-symmetry-z: false;
     in-out property <bool> asset-library-visible: false;
     in-out property <bool> is-orthographic: false;
     in-out property <bool> is-wireframe: false;
@@ -2988,6 +2991,9 @@ export component PetuniaSlintShell inherits Window {
     callback brush-size-changed(float);
     callback brush-opacity-changed(float);
     callback brush-hardness-changed(float);
+    callback paint-symmetry-x-toggled;
+    callback paint-symmetry-y-toggled;
+    callback paint-symmetry-z-toggled;
     callback shortcut-requested(string, bool, bool, bool);
     callback toggle-face-orientation;
     callback toggle-uv-checker;
@@ -6850,6 +6856,42 @@ export component PetuniaSlintShell inherits Window {
                                             background: DesignTokens.surface-raised;
                                             Text { text: "+"; color: DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                                             TouchArea { clicked => { root.brush-hardness-changed(Math.min(1.0, root.brush-hardness + 0.1)); } }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "Symmetry:";
+                                            color: DesignTokens.text-secondary;
+                                            font-size: 11px;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: root.paint-symmetry-x ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            Text { text: "X"; color: root.paint-symmetry-x ? #ffffff : DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.paint-symmetry-x-toggled(); } }
+                                        }
+                                        Rectangle { width: 4px; }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: root.paint-symmetry-y ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            Text { text: "Y"; color: root.paint-symmetry-y ? #ffffff : DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.paint-symmetry-y-toggled(); } }
+                                        }
+                                        Rectangle { width: 4px; }
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: root.paint-symmetry-z ? DesignTokens.accent : DesignTokens.surface-raised;
+                                            Text { text: "Z"; color: root.paint-symmetry-z ? #ffffff : DesignTokens.text-primary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.paint-symmetry-z-toggled(); } }
                                         }
                                     }
                                 }

@@ -623,6 +623,53 @@ impl PaintModule {
         }
     }
 
+    /// Pinta no canvas 2D aplicando simetria em tempo real nos eixos X e Y se habilitados.
+    pub fn canvas_brush_with_symmetry(
+        state: &mut AppState,
+        x: u32,
+        y: u32,
+        settings: BrushSettings,
+    ) {
+        Self::canvas_brush_with_settings(state, x, y, settings);
+
+        let sym_x = state.session.tools.paint_symmetry_x;
+        let sym_y = state.session.tools.paint_symmetry_y;
+
+        if !sym_x && !sym_y {
+            return;
+        }
+
+        let (width, height) = match state
+            .project
+            .assets
+            .get(state.project.active)
+            .and_then(|a| a.texture.as_ref())
+        {
+            Some(t) => (t.w, t.h),
+            None => (256, 256),
+        };
+
+        if sym_x {
+            let sx = (width - 1).saturating_sub(x);
+            if sx != x {
+                Self::canvas_brush_with_settings(state, sx, y, settings);
+            }
+        }
+        if sym_y {
+            let sy = (height - 1).saturating_sub(y);
+            if sy != y {
+                Self::canvas_brush_with_settings(state, x, sy, settings);
+            }
+        }
+        if sym_x && sym_y {
+            let sx = (width - 1).saturating_sub(x);
+            let sy = (height - 1).saturating_sub(y);
+            if sx != x && sy != y {
+                Self::canvas_brush_with_settings(state, sx, sy, settings);
+            }
+        }
+    }
+
     fn dab_dirty_tiles(x: u32, y: u32, radius: u32, canvas_w: u32) -> Vec<u32> {
         use petunia_project::paint_layers::TILE_SIZE;
         let tiles_x = canvas_w.div_ceil(TILE_SIZE).max(1);
@@ -978,6 +1025,56 @@ impl PaintModule {
         ))
     }
 
+    /// Encontra as coordenadas UV na malha para uma posição tridimensional arbitrária
+    /// varrendo as faces (e triângulos gerados para render/picking).
+    pub fn find_mesh_uv_at_pos(
+        state: &AppState,
+        pos: Vec3,
+        isolate_selection: bool,
+    ) -> Option<[f32; 2]> {
+        let active_asset = state.project.assets.get(state.project.active)?;
+        let mesh = &active_asset.mesh;
+
+        // 1ª passada: teste exato/tolerante padrão em cada face
+        for (fi, _) in mesh.faces.iter().enumerate() {
+            if let Some(uv) = Self::face_hit_uv(state, fi, pos, isolate_selection) {
+                return Some(uv);
+            }
+        }
+
+        // 2ª passada: tolerância ampliada (para pequenas variações de ponto flutuante em malhas curvas)
+        for (fi, face) in mesh.faces.iter().enumerate() {
+            if isolate_selection {
+                let has_selected_faces = mesh.faces.iter().any(|f| f.selected);
+                if has_selected_faces && !face.selected {
+                    continue;
+                }
+            }
+            let m = face.verts.len();
+            if m < 3 || face.uv.len() < m {
+                continue;
+            }
+            for [a, b, c] in mesh.face_triangle_corners(fi) {
+                let idx0 = face.verts[a] as usize;
+                let idx1 = face.verts[b] as usize;
+                let idx2 = face.verts[c] as usize;
+                if idx0 < mesh.verts.len() && idx1 < mesh.verts.len() && idx2 < mesh.verts.len() {
+                    let v0 = mesh.verts[idx0].vec();
+                    let v1 = mesh.verts[idx1].vec();
+                    let v2 = mesh.verts[idx2].vec();
+                    let uv0 = face.uv[a];
+                    let uv1 = face.uv[b];
+                    let uv2 = face.uv[c];
+                    if let Some(uv) = barycentric_uv_tolerant(pos, v0, v1, v2, uv0, uv1, uv2, -0.05)
+                    {
+                        return Some(uv);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Pinta na textura 2D do modelo projetando o ponto de impacto 3D nas
     /// coordenadas UV da face (API legado → descriptor canônico).
     pub fn paint_mesh_3d(
@@ -1023,6 +1120,45 @@ impl PaintModule {
         };
 
         Self::canvas_brush_with_settings(state, px, py, s);
+
+        // Simetria de pintura 3D em tempo real nos eixos X, Y e Z
+        let sym_x = state.session.tools.paint_symmetry_x;
+        let sym_y = state.session.tools.paint_symmetry_y;
+        let sym_z = state.session.tools.paint_symmetry_z;
+
+        if sym_x || sym_y || sym_z {
+            let mut sym_points = Vec::with_capacity(7);
+            if sym_x {
+                sym_points.push(Vec3::new(-hit_pos.x, hit_pos.y, hit_pos.z));
+            }
+            if sym_y {
+                sym_points.push(Vec3::new(hit_pos.x, -hit_pos.y, hit_pos.z));
+            }
+            if sym_z {
+                sym_points.push(Vec3::new(hit_pos.x, hit_pos.y, -hit_pos.z));
+            }
+            if sym_x && sym_y {
+                sym_points.push(Vec3::new(-hit_pos.x, -hit_pos.y, hit_pos.z));
+            }
+            if sym_x && sym_z {
+                sym_points.push(Vec3::new(-hit_pos.x, hit_pos.y, -hit_pos.z));
+            }
+            if sym_y && sym_z {
+                sym_points.push(Vec3::new(hit_pos.x, -hit_pos.y, -hit_pos.z));
+            }
+            if sym_x && sym_y && sym_z {
+                sym_points.push(Vec3::new(-hit_pos.x, -hit_pos.y, -hit_pos.z));
+            }
+
+            for p_sym in sym_points {
+                if let Some(uv_sym) = Self::find_mesh_uv_at_pos(state, p_sym, isolate_selection) {
+                    if let Some((px_sym, py_sym)) = Self::uv_to_px(state, uv_sym) {
+                        Self::canvas_brush_with_settings(state, px_sym, py_sym, s);
+                    }
+                }
+            }
+        }
+
         true
     }
 
@@ -1197,6 +1333,47 @@ pub fn barycentric_uv(
     if u >= eps && v >= eps && w >= eps {
         let interpolated_u = u * uv_a[0] + v * uv_b[0] + w * uv_c[0];
         let interpolated_v = u * uv_a[1] + v * uv_b[1] + w * uv_c[1];
+        Some([interpolated_u, interpolated_v])
+    } else {
+        None
+    }
+}
+
+/// Calcula interpolação baricêntrica de coordenadas UV com tolerância customizada.
+pub fn barycentric_uv_tolerant(
+    p: Vec3,
+    a: Vec3,
+    b: Vec3,
+    c: Vec3,
+    uv_a: [f32; 2],
+    uv_b: [f32; 2],
+    uv_c: [f32; 2],
+    eps: f32,
+) -> Option<[f32; 2]> {
+    let v0 = b - a;
+    let v1 = c - a;
+    let v2 = p - a;
+
+    let d00 = v0.dot(v0);
+    let d01 = v0.dot(v1);
+    let d11 = v1.dot(v1);
+    let d20 = v2.dot(v0);
+    let d21 = v2.dot(v1);
+
+    let denom = d00 * d11 - d01 * d01;
+    if denom.abs() < 1e-8 {
+        return None;
+    }
+
+    let v = (d11 * d20 - d01 * d21) / denom;
+    let w = (d00 * d21 - d01 * d20) / denom;
+    let u = 1.0 - v - w;
+
+    if u >= eps && v >= eps && w >= eps {
+        let interpolated_u =
+            u.clamp(0.0, 1.0) * uv_a[0] + v.clamp(0.0, 1.0) * uv_b[0] + w.clamp(0.0, 1.0) * uv_c[0];
+        let interpolated_v =
+            u.clamp(0.0, 1.0) * uv_a[1] + v.clamp(0.0, 1.0) * uv_b[1] + w.clamp(0.0, 1.0) * uv_c[1];
         Some([interpolated_u, interpolated_v])
     } else {
         None
@@ -1708,5 +1885,91 @@ mod tests {
         // Pixels a 3 ou mais pixels de distância permanecem transparentes
         assert_eq!(cv.get(5, 2), Some([0, 0, 0, 0]));
         assert_eq!(cv.get(0, 0), Some([0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn test_paint_3d_symmetry_x_and_find_mesh_uv() {
+        let mut state = AppState::new("en");
+        let active = state.project.active;
+        let asset = state.project.assets.get_mut(active).unwrap();
+        asset.mesh = petunia_mesh::Mesh::cube(2.0);
+        asset.texture = Some(Canvas::new(64, 64, [0, 0, 0, 255]));
+
+        // Cubo tem faces em x = +1.0 e x = -1.0.
+        // Testa busca de UV por posição no espaço 3D
+        let hit_pos = Vec3::new(1.0, 0.0, 0.0);
+        let uv = PaintModule::find_mesh_uv_at_pos(&state, hit_pos, false);
+        assert!(uv.is_some(), "deve encontrar UV na face x = +1.0");
+
+        let sym_pos = Vec3::new(-1.0, 0.0, 0.0);
+        let sym_uv = PaintModule::find_mesh_uv_at_pos(&state, sym_pos, false);
+        assert!(
+            sym_uv.is_some(),
+            "deve encontrar UV na face simétrica x = -1.0"
+        );
+
+        // Habilita simetria no eixo X
+        state.session.tools.paint_symmetry_x = true;
+        state.paint_color = [1.0, 0.0, 0.0];
+
+        let settings = BrushSettings {
+            kind: BrushType::Pixel,
+            size_px: 2.0,
+            hardness: 1.0,
+            strength: 1.0,
+            flow: 1.0,
+            spacing: 0.1,
+        };
+
+        // Identifica qual face tem x = +1.0
+        let fi = state.project.assets[active]
+            .mesh
+            .faces
+            .iter()
+            .position(|f| {
+                f.verts.iter().all(|&vi| {
+                    (state.project.assets[active].mesh.verts[vi as usize].pos[0] - 1.0).abs() < 1e-4
+                })
+            })
+            .unwrap();
+
+        let ok = PaintModule::paint_mesh_3d_with_settings(&mut state, fi, hit_pos, settings, false);
+        assert!(ok);
+
+        let canvas = state.project.assets[active].texture.as_ref().unwrap();
+        // Converte UV do hit e UV simétrico em pixels e verifica se ambos foram pintados
+        let px_hit = PaintModule::uv_to_px(&state, uv.unwrap()).unwrap();
+        let px_sym = PaintModule::uv_to_px(&state, sym_uv.unwrap()).unwrap();
+
+        assert_eq!(canvas.get(px_hit.0, px_hit.1), Some([255, 0, 0, 255]));
+        assert_eq!(canvas.get(px_sym.0, px_sym.1), Some([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn test_canvas_brush_with_symmetry_2d() {
+        let mut state = AppState::new("en");
+        let active = state.project.active;
+        let asset = state.project.assets.get_mut(active).unwrap();
+        asset.texture = Some(Canvas::new(32, 32, [0, 0, 0, 255]));
+
+        state.session.tools.paint_symmetry_x = true;
+        state.paint_color = [0.0, 1.0, 0.0];
+
+        let settings = BrushSettings {
+            kind: BrushType::Pixel,
+            size_px: 1.0,
+            hardness: 1.0,
+            strength: 1.0,
+            flow: 1.0,
+            spacing: 0.1,
+        };
+
+        // Pinta em x = 5, y = 10
+        PaintModule::canvas_brush_with_symmetry(&mut state, 5, 10, settings);
+
+        let canvas = state.project.assets[active].texture.as_ref().unwrap();
+        assert_eq!(canvas.get(5, 10), Some([0, 255, 0, 255]));
+        // Simétrico no eixo X em 32x32: 31 - 5 = 26
+        assert_eq!(canvas.get(26, 10), Some([0, 255, 0, 255]));
     }
 }

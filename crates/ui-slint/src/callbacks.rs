@@ -239,6 +239,9 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_brush_size(vm.brush_size);
     window.set_brush_opacity(vm.brush_opacity);
     window.set_brush_hardness(vm.brush_hardness);
+    window.set_paint_symmetry_x(vm.paint_symmetry_x);
+    window.set_paint_symmetry_y(vm.paint_symmetry_y);
+    window.set_paint_symmetry_z(vm.paint_symmetry_z);
 
     window.set_pos_x(vm.position[0]);
     window.set_pos_y(vm.position[1]);
@@ -3341,6 +3344,42 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_brush_hardness_changed(move |hardness| {
         if let Ok(mut bridge) = hardness_bridge.lock() {
             bridge.apply(UiIntent::SetBrushHardness(hardness));
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let sym_x_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_symmetry_x_toggled(move || {
+        if let Ok(mut bridge) = sym_x_bridge.lock() {
+            bridge.apply(UiIntent::TogglePaintSymmetryX);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let sym_y_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_symmetry_y_toggled(move || {
+        if let Ok(mut bridge) = sym_y_bridge.lock() {
+            bridge.apply(UiIntent::TogglePaintSymmetryY);
+            let vm = bridge.view_model();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+            }
+        }
+    });
+
+    let sym_z_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_paint_symmetry_z_toggled(move || {
+        if let Ok(mut bridge) = sym_z_bridge.lock() {
+            bridge.apply(UiIntent::TogglePaintSymmetryZ);
             let vm = bridge.view_model();
             if let Some(window) = window_weak.upgrade() {
                 sync_window_properties(&window, &vm);

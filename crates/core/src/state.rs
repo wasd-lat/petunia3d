@@ -488,6 +488,10 @@ pub struct ToolState {
     pub paint_channel: petunia_project::TextureChannel,
     /// Grade de pixels no canvas 2D (contextual: só com zoom suficiente).
     pub paint_pixel_grid: bool,
+    /// Simetria de pintura em tempo real nos eixos X, Y e Z.
+    pub paint_symmetry_x: bool,
+    pub paint_symmetry_y: bool,
+    pub paint_symmetry_z: bool,
     pub transform_delta: [f32; 3],
     pub transform_rotation: [f32; 3],
     pub transform_scale: f32,
@@ -563,6 +567,9 @@ impl ToolState {
             fill_scope: crate::brush::FillScope::ConnectedPixels,
             paint_channel: petunia_project::TextureChannel::Albedo,
             paint_pixel_grid: true,
+            paint_symmetry_x: false,
+            paint_symmetry_y: false,
+            paint_symmetry_z: false,
             transform_delta: [0.0; 3],
             transform_rotation: [0.0; 3],
             transform_scale: 1.0,

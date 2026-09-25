@@ -5792,6 +5792,36 @@ fn test_paint_brush_hardness_and_shortcuts() {
 }
 
 #[test]
+fn test_paint_symmetry_toggles_and_view_model() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::SetWorkspace(petunia_core::Workspace::Paint));
+
+    assert!(!bridge.view_model().paint_symmetry_x);
+    assert!(!bridge.view_model().paint_symmetry_y);
+    assert!(!bridge.view_model().paint_symmetry_z);
+
+    // Toggle X
+    assert!(bridge.toggle_paint_symmetry_x());
+    assert!(bridge.state.session.tools.paint_symmetry_x);
+    assert!(bridge.view_model().paint_symmetry_x);
+
+    // Toggle Y
+    assert!(bridge.toggle_paint_symmetry_y());
+    assert!(bridge.state.session.tools.paint_symmetry_y);
+    assert!(bridge.view_model().paint_symmetry_y);
+
+    // Toggle Z
+    assert!(bridge.toggle_paint_symmetry_z());
+    assert!(bridge.state.session.tools.paint_symmetry_z);
+    assert!(bridge.view_model().paint_symmetry_z);
+
+    // Setters
+    bridge.set_paint_symmetry_x(false);
+    assert!(!bridge.state.session.tools.paint_symmetry_x);
+    assert!(!bridge.view_model().paint_symmetry_x);
+}
+
+#[test]
 fn test_nudge_selection_with_arrow_keys() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
 

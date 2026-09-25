@@ -254,6 +254,12 @@ pub enum UiIntent {
     SetBrushSize(f32),
     SetBrushOpacity(f32),
     SetBrushHardness(f32),
+    TogglePaintSymmetryX,
+    TogglePaintSymmetryY,
+    TogglePaintSymmetryZ,
+    SetPaintSymmetryX(bool),
+    SetPaintSymmetryY(bool),
+    SetPaintSymmetryZ(bool),
     SetActiveTool(String),
     OpenCommandSearch,
     OpenSettings,
@@ -937,6 +943,27 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             }
             UiIntent::SetBrushHardness(hardness) => {
                 self.state.session.tools.brush_hardness = hardness.clamp(0.0, 1.0);
+            }
+            UiIntent::TogglePaintSymmetryX => {
+                self.state.session.tools.paint_symmetry_x =
+                    !self.state.session.tools.paint_symmetry_x;
+            }
+            UiIntent::TogglePaintSymmetryY => {
+                self.state.session.tools.paint_symmetry_y =
+                    !self.state.session.tools.paint_symmetry_y;
+            }
+            UiIntent::TogglePaintSymmetryZ => {
+                self.state.session.tools.paint_symmetry_z =
+                    !self.state.session.tools.paint_symmetry_z;
+            }
+            UiIntent::SetPaintSymmetryX(val) => {
+                self.state.session.tools.paint_symmetry_x = val;
+            }
+            UiIntent::SetPaintSymmetryY(val) => {
+                self.state.session.tools.paint_symmetry_y = val;
+            }
+            UiIntent::SetPaintSymmetryZ(val) => {
+                self.state.session.tools.paint_symmetry_z = val;
             }
             UiIntent::SetActiveTool(tool) => {
                 if self.state.session.tools.active_tool == "draw_profile"
@@ -3444,7 +3471,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
         if let Some((px, py)) = self.paint_2d_last {
             let settings = self.state.brush_settings();
-            petunia_module_paint::PaintModule::canvas_brush_with_settings(
+            petunia_module_paint::PaintModule::canvas_brush_with_symmetry(
                 &mut self.state,
                 px,
                 py,
@@ -3516,7 +3543,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 }
                 self.state.begin_paint_stroke();
                 let settings = self.state.brush_settings();
-                petunia_module_paint::PaintModule::canvas_brush_with_settings(
+                petunia_module_paint::PaintModule::canvas_brush_with_symmetry(
                     &mut self.state,
                     px,
                     py,
@@ -3541,7 +3568,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                         ((last_x as f32 + dx * t).round() as i32).clamp(0, width as i32 - 1) as u32;
                     let iy = ((last_y as f32 + dy * t).round() as i32).clamp(0, height as i32 - 1)
                         as u32;
-                    petunia_module_paint::PaintModule::canvas_brush_with_settings(
+                    petunia_module_paint::PaintModule::canvas_brush_with_symmetry(
                         &mut self.state,
                         ix,
                         iy,
@@ -6829,6 +6856,39 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
     pub fn adjust_brush_hardness(&mut self, delta: f32) {
         let next = (self.state.session.tools.brush_hardness + delta).clamp(0.0, 1.0);
         self.set_brush_hardness(next);
+    }
+
+    pub fn toggle_paint_symmetry_x(&mut self) -> bool {
+        self.apply(UiIntent::TogglePaintSymmetryX);
+        self.state.mark_dirty();
+        self.state.session.tools.paint_symmetry_x
+    }
+
+    pub fn toggle_paint_symmetry_y(&mut self) -> bool {
+        self.apply(UiIntent::TogglePaintSymmetryY);
+        self.state.mark_dirty();
+        self.state.session.tools.paint_symmetry_y
+    }
+
+    pub fn toggle_paint_symmetry_z(&mut self) -> bool {
+        self.apply(UiIntent::TogglePaintSymmetryZ);
+        self.state.mark_dirty();
+        self.state.session.tools.paint_symmetry_z
+    }
+
+    pub fn set_paint_symmetry_x(&mut self, val: bool) {
+        self.apply(UiIntent::SetPaintSymmetryX(val));
+        self.state.mark_dirty();
+    }
+
+    pub fn set_paint_symmetry_y(&mut self, val: bool) {
+        self.apply(UiIntent::SetPaintSymmetryY(val));
+        self.state.mark_dirty();
+    }
+
+    pub fn set_paint_symmetry_z(&mut self, val: bool) {
+        self.apply(UiIntent::SetPaintSymmetryZ(val));
+        self.state.mark_dirty();
     }
 
     pub fn nudge_selection(&mut self, dx: f32, dy: f32, dz: f32) -> bool {
