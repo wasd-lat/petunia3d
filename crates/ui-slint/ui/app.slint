@@ -3779,6 +3779,7 @@ export component PetuniaSlintShell inherits Window {
                     camera-bar := Rectangle {
                         x: 14px;
                         y: 14px;
+                        width: camera-row.preferred-width + 12px;
                         height: 38px;
                         border-radius: 8px;
                         background: DesignTokens.surface-raised;
@@ -3788,22 +3789,20 @@ export component PetuniaSlintShell inherits Window {
                         drop-shadow-color: #00000055;
                         drop-shadow-offset-y: 2px;
 
-                        HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 8px;
-                            padding-top: 5px;
-                            padding-bottom: 5px;
-                            spacing: 6px;
+                        camera-row := HorizontalLayout {
+                            x: 6px;
+                            y: 5px;
+                            spacing: 4px;
                             alignment: center;
 
-                            if root.viewport-region-width >= 600: Text {
+                            Text {
                                 text: is-orthographic ? "Ortho" : "Persp";
                                 color: DesignTokens.text-primary;
                                 font-size: 11px;
                                 font-weight: 600;
                                 vertical-alignment: center;
                             }
-                            if root.viewport-region-width >= 600: Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
+                            Rectangle { width: 1px; height: 18px; background: DesignTokens.border; }
 
                             ViewportBarButton {
                                 icon: IconSet.Camera;
@@ -3811,13 +3810,13 @@ export component PetuniaSlintShell inherits Window {
                                 active: is-orthographic;
                                 clicked => { root.toggle-projection-requested(); }
                             }
-                            if root.viewport-region-width >= 600: ViewportBarButton {
+                            ViewportBarButton {
                                 icon: IconSet.Maximize2;
                                 label: "Frame";
                                 active: false;
                                 clicked => { root.command-executed("view.frame_selection"); }
                             }
-                            if root.viewport-region-width >= 600: ViewportBarButton {
+                            ViewportBarButton {
                                 icon: IconSet.RotateCcw;
                                 label: "Reset view";
                                 active: false;
