@@ -1,8 +1,10 @@
 # Ferramenta: Anotação 3D (Annotate)
 
+> **Status de Versão:** Planejada para pós-V1 (Era 1.x / Roadmap). No frontend Slint de produção da V1, o atalho `D` é dedicado a funções de navegação e manipulação de pivô, e a estrutura de dados de anotações livres em espaço 3D permanece preservada no Core/Project (`ProjectDocument.annotations`) para a expansão pós-GA.
+
 A ferramenta de **Anotação 3D** funciona como um lápis de rascunho (*grease-pencil*) tridimensional integrado, permitindo desenhar anotações e guias visuais diretamente no espaço da cena.
 
-- **Atalho de Ativação**: `D` (ou ícone do lápis na Toolbar).
+- **Atalho de Ativação**: `—` (planejado para a Era 1.x).
 - **Desenho**: Segure `D` + arraste com `LMB` (ou selecione a ferramenta e desenhe diretamente com `LMB`).
 
 ## Recursos Avançados

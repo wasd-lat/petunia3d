@@ -7383,6 +7383,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.measure_dy = measure.dy;
         vm.measure_dz = measure.dz;
         vm.measure_angle_deg = measure.angle_deg;
+        vm.measure_hud_text = measure.hud_text;
+        vm.measure_tags = measure.tags;
 
         vm.micro_inspector_open = self.micro_inspector_open;
         vm.micro_inspector_x = self.micro_inspector_pos[0];

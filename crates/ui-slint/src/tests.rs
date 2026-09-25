@@ -5561,6 +5561,65 @@ fn test_quick_measure_with_active_measurement() {
 }
 
 #[test]
+fn test_quick_measure_with_single_selected_edge() {
+    let mut state = AppState::default();
+    state.set_selection_domain(SelectionDomain::Edge);
+    if let Some(mesh) = state.project.active_mesh_mut() {
+        mesh.deselect_all();
+        mesh.selected_edges.clear();
+        mesh.selected_edges.insert((0, 1));
+    }
+
+    let measure = compute_quick_measure(&state, 800.0, 600.0);
+    assert!(measure.visible);
+    assert!(measure.distance > 0.0);
+    assert_eq!(measure.tags.len(), 1);
+    assert!(measure.tags[0].text.ends_with('m'));
+    assert!(measure.hud_text.contains('m'));
+    assert!(measure.hud_text.contains("ΔX:"));
+    assert!(measure.hud_text.contains("°"));
+}
+
+#[test]
+fn test_quick_measure_with_multiple_selected_edges() {
+    let mut state = AppState::default();
+    state.set_selection_domain(SelectionDomain::Edge);
+    if let Some(mesh) = state.project.active_mesh_mut() {
+        mesh.deselect_all();
+        mesh.selected_edges.clear();
+        mesh.selected_edges.insert((0, 1));
+        mesh.selected_edges.insert((1, 2));
+    }
+
+    let measure = compute_quick_measure(&state, 800.0, 600.0);
+    assert!(measure.visible);
+    assert!(measure.distance > 0.0);
+    assert_eq!(measure.tags.len(), 2);
+    assert!(measure.tags[0].text.ends_with('m'));
+    assert!(measure.tags[1].text.ends_with('m'));
+    assert!(measure.hud_text.contains("Total:"));
+    assert!(measure.hud_text.contains("(2 edges)"));
+    assert!(measure.hud_text.contains("Avg:"));
+    assert!(measure.hud_text.contains("Span:"));
+}
+
+#[test]
+fn test_quick_measure_view_model_fields() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    if let Some(mesh) = bridge.state.project.active_mesh_mut() {
+        mesh.deselect_all();
+        mesh.selected_edges.clear();
+        mesh.selected_edges.insert((0, 1));
+    }
+
+    let vm = bridge.view_model();
+    assert!(vm.measure_visible);
+    assert_eq!(vm.measure_tags.len(), 1);
+    assert!(vm.measure_hud_text.contains("ΔX:"));
+}
+
+#[test]
 fn test_micro_inspector_toggle_and_shortcut() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     bridge.resize_viewport(800, 600);

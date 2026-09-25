@@ -83,6 +83,12 @@ export struct ModifierEntry {
     can-move-down: bool,
 }
 
+export struct MeasureTag {
+    text: string,
+    x: float,
+    y: float,
+}
+
 /// Divisor vertical: arrasta na horizontal e devolve a largura desejada.
 component SplitterVertical inherits Rectangle {
     in property <length> value;
@@ -2451,6 +2457,8 @@ export component PetuniaSlintShell inherits Window {
     in-out property <float> measure-dy: 0.0;
     in-out property <float> measure-dz: 0.0;
     in-out property <float> measure-angle-deg: 0.0;
+    in-out property <[MeasureTag]> measure-tags: [];
+    in-out property <string> measure-hud-text: "";
     in-out property <bool> micro-inspector-open: false;
     in-out property <length> micro-inspector-x: 0px;
     in-out property <length> micro-inspector-y: 0px;
@@ -3556,8 +3564,8 @@ export component PetuniaSlintShell inherits Window {
                         fit: ImageFit.preserve;
                         commands: root.measure-commands;
                         fill: transparent;
-                        stroke: #f59e0b;
-                        stroke-width: 1.5px;
+                        stroke: #f59e0baa;
+                        stroke-width: 1.2px;
                     }
 
                     // Protractor (Transferidor Visual de Ângulo para Rotação Modal)
@@ -4051,26 +4059,57 @@ export component PetuniaSlintShell inherits Window {
                         }
                     }
 
-                    // Rótulo da Fita Métrica Rápida (Fase 6: Medição Rápida 3D)
-                    if root.measure-visible && root.measure-text != "" && active-workspace == "MODEL": Rectangle {
-                        x: root.measure-x - self.width / 2;
-                        y: root.measure-y - self.height / 2;
-                        width: measure-label.preferred-width + 16px;
-                        height: 22px;
-                        border-radius: 4px;
-                        background: #1e1e24f4;
-                        border-width: 1px;
-                        border-color: #f59e0b;
-                        drop-shadow-blur: 8px;
-                        drop-shadow-color: #000000aa;
-                        measure-label := Text {
-                            text: root.measure-text;
-                            color: #f59e0b;
-                            font-size: 10px;
-                            font-weight: 700;
-                            font-family: "monospace";
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                    // Rótulos de Medição nos Edges (Fase 6: Medição Rápida Compacta e Translúcida)
+                    if root.measure-visible && active-workspace == "MODEL": Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        for tag in root.measure-tags: Rectangle {
+                            x: tag.x * 1px - self.width / 2;
+                            y: tag.y * 1px - self.height / 2;
+                            width: tag-label.preferred-width + 10px;
+                            height: 18px;
+                            border-radius: 4px;
+                            background: #14141ecc;
+                            border-width: 1px;
+                            border-color: #f59e0b88;
+                            drop-shadow-blur: 6px;
+                            drop-shadow-color: #00000066;
+
+                            tag-label := Text {
+                                text: tag.text;
+                                color: #f59e0b;
+                                font-size: 10px;
+                                font-weight: 700;
+                                font-family: "monospace";
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        if root.measure-tags.length == 0 && root.measure-text != "": Rectangle {
+                            x: root.measure-x - self.width / 2;
+                            y: root.measure-y - self.height / 2;
+                            width: fallback-label.preferred-width + 10px;
+                            height: 18px;
+                            border-radius: 4px;
+                            background: #14141ecc;
+                            border-width: 1px;
+                            border-color: #f59e0b88;
+                            drop-shadow-blur: 6px;
+                            drop-shadow-color: #00000066;
+
+                            fallback-label := Text {
+                                text: root.measure-text;
+                                color: #f59e0b;
+                                font-size: 10px;
+                                font-weight: 700;
+                                font-family: "monospace";
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
                         }
                     }
 
@@ -4265,6 +4304,42 @@ export component PetuniaSlintShell inherits Window {
                                     active: root.proportional-editing;
                                     clicked => { root.toggle-proportional-editing(); }
                                 }
+                            }
+                        }
+                    }
+
+                    // Pílula Flutuante de Medição / Dimensões (Centro: Resumo HUD no Topo)
+                    if root.measure-visible && root.measure-hud-text != "" && active-workspace == "MODEL": Rectangle {
+                        x: (parent.width - self.width) / 2;
+                        y: 58px;
+                        height: 26px;
+                        border-radius: 6px;
+                        background: #14141ee8;
+                        border-width: 1px;
+                        border-color: #f59e0b88;
+                        drop-shadow-blur: 8px;
+                        drop-shadow-color: #00000088;
+                        drop-shadow-offset-y: 2px;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            alignment: center;
+
+                            IconDisplay {
+                                icon: IconSet.ArrowUpDown;
+                                size: 12px;
+                                stroke: #f59e0b;
+                            }
+
+                            Text {
+                                text: root.measure-hud-text;
+                                color: #f59e0b;
+                                font-size: 11px;
+                                font-weight: 700;
+                                font-family: "monospace";
+                                vertical-alignment: center;
                             }
                         }
                     }

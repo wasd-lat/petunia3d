@@ -749,6 +749,14 @@ pub(crate) fn compute_dimension_annotation(
     }
 }
 
+/// Rótulo individual de medição projetado na viewport (ex.: em uma aresta).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MeasureTagModel {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+}
+
 /// Modelo de fita métrica tridimensional e consulta dimensional rápida.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct QuickMeasureModel {
@@ -762,6 +770,8 @@ pub struct QuickMeasureModel {
     pub text: String,
     pub label_x: f32,
     pub label_y: f32,
+    pub hud_text: String,
+    pub tags: Vec<MeasureTagModel>,
 }
 
 pub(crate) fn compute_quick_measure(
@@ -773,14 +783,305 @@ pub(crate) fn compute_quick_measure(
         return QuickMeasureModel::default();
     }
 
-    // Caso 1: medição ativa explícita no ToolState
-    let (p_start, p_end) = if let Some(m) = state.session.tools.active_measurement.as_ref() {
-        (
-            glam::Vec3::from_array(m.start),
-            glam::Vec3::from_array(m.end),
-        )
-    } else if state.selection.verts.len() == 2 {
-        // Caso 2: exatamente dois vértices selecionados na malha ativa
+    use std::fmt::Write as _;
+    let view_proj = state.session.camera.view_proj();
+
+    // Helper closure para projetar ponto 3D para espaço de tela (pixels)
+    let project_pt = |p: glam::Vec3| -> Option<[f32; 2]> {
+        let clip = view_proj * p.extend(1.0);
+        if clip.w <= 0.05 {
+            return None;
+        }
+        Some([
+            (clip.x / clip.w * 0.5 + 0.5) * width,
+            (1.0 - (clip.y / clip.w * 0.5 + 0.5)) * height,
+        ])
+    };
+
+    // Helper para calcular vetor perpendicular orientado para cima/direita com offset de 24px
+    let compute_offset = |a: [f32; 2], b: [f32; 2]| -> Option<([f32; 2], [f32; 2], [f32; 2])> {
+        let screen_dx = b[0] - a[0];
+        let screen_dy = b[1] - a[1];
+        let screen_dist = screen_dx.hypot(screen_dy);
+        if screen_dist < 4.0 {
+            return None;
+        }
+        let ux = screen_dx / screen_dist;
+        let uy = screen_dy / screen_dist;
+        let mut nx = -uy;
+        let mut ny = ux;
+        // Orientação preferencial para cima ou para a direita para não colidir com a linha
+        if ny > 0.0 || (ny.abs() < 1e-4 && nx < 0.0) {
+            nx = -nx;
+            ny = -ny;
+        }
+        let tag_pos = [
+            (a[0] + b[0]) * 0.5 + nx * 24.0,
+            (a[1] + b[1]) * 0.5 + ny * 24.0,
+        ];
+        Some(([nx, ny], [ux, uy], tag_pos))
+    };
+
+    // Caso 1: medição ativa explícita no ToolState (Ferramenta Measure / Ruler)
+    if let Some(m) = state.session.tools.active_measurement.as_ref() {
+        let p_start = glam::Vec3::from_array(m.start);
+        let p_end = glam::Vec3::from_array(m.end);
+        let delta = p_end - p_start;
+        let distance = delta.length();
+        if distance < 1e-4 {
+            return QuickMeasureModel::default();
+        }
+        let dx = delta.x.abs();
+        let dy = delta.y.abs();
+        let dz = delta.z.abs();
+        let angle_deg = delta.y.atan2(delta.x).to_degrees().abs();
+
+        let (Some(a), Some(b)) = (project_pt(p_start), project_pt(p_end)) else {
+            return QuickMeasureModel::default();
+        };
+
+        let Some(([nx, ny], _, tag_pos)) = compute_offset(a, b) else {
+            return QuickMeasureModel::default();
+        };
+
+        let mut commands = String::new();
+        let _ = write!(
+            commands,
+            "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} ",
+            a[0] - nx * 6.0,
+            a[1] - ny * 6.0,
+            a[0] + nx * 6.0,
+            a[1] + ny * 6.0,
+            b[0] - nx * 6.0,
+            b[1] - ny * 6.0,
+            b[0] + nx * 6.0,
+            b[1] + ny * 6.0,
+            a[0],
+            a[1],
+            b[0],
+            b[1],
+        );
+
+        let tag_text = format!("{:.3}m", distance);
+        let hud_text = format!(
+            "{:.3}m  ·  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  ·  {:.1}°",
+            distance, dx, dy, dz, angle_deg
+        );
+        let text = format!(
+            "{:.3}m  |  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  |  {:.1}°",
+            distance, dx, dy, dz, angle_deg
+        );
+
+        let tags = vec![MeasureTagModel {
+            text: tag_text,
+            x: tag_pos[0],
+            y: tag_pos[1],
+        }];
+
+        return QuickMeasureModel {
+            visible: true,
+            commands,
+            distance,
+            dx,
+            dy,
+            dz,
+            angle_deg,
+            text,
+            label_x: tag_pos[0],
+            label_y: tag_pos[1],
+            hud_text,
+            tags,
+        };
+    }
+
+    // Caso 2: Arestas selecionadas (suporta 1 aresta e múltiplas arestas)
+    let selected_edges: Vec<(u32, u32)> = if let Some(mesh) = state.project.active_mesh() {
+        if !mesh.selected_edges.is_empty() {
+            mesh.selected_edges.iter().copied().collect()
+        } else if !state.selection.edges.is_empty() {
+            state.selection.edges.clone()
+        } else {
+            Vec::new()
+        }
+    } else if !state.selection.edges.is_empty() {
+        state.selection.edges.clone()
+    } else {
+        Vec::new()
+    };
+
+    if !selected_edges.is_empty() {
+        let Some(mesh) = state.project.active_mesh() else {
+            return QuickMeasureModel::default();
+        };
+
+        let mut sorted_edges = selected_edges;
+        sorted_edges.sort_unstable();
+        sorted_edges.dedup();
+
+        if sorted_edges.len() == 1 {
+            let (v0, v1) = sorted_edges[0];
+            let idx0 = v0 as usize;
+            let idx1 = v1 as usize;
+            if idx0 >= mesh.verts.len() || idx1 >= mesh.verts.len() || idx0 == idx1 {
+                return QuickMeasureModel::default();
+            }
+            let p0 = mesh.verts[idx0].vec();
+            let p1 = mesh.verts[idx1].vec();
+            let delta = p1 - p0;
+            let distance = delta.length();
+            if distance < 1e-4 {
+                return QuickMeasureModel::default();
+            }
+            let dx = delta.x.abs();
+            let dy = delta.y.abs();
+            let dz = delta.z.abs();
+            let angle_deg = delta.y.atan2(delta.x).to_degrees().abs();
+
+            let (Some(a), Some(b)) = (project_pt(p0), project_pt(p1)) else {
+                return QuickMeasureModel::default();
+            };
+            let Some(([nx, ny], _, tag_pos)) = compute_offset(a, b) else {
+                return QuickMeasureModel::default();
+            };
+
+            let mut commands = String::new();
+            let _ = write!(
+                commands,
+                "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} ",
+                a[0] - nx * 6.0,
+                a[1] - ny * 6.0,
+                a[0] + nx * 6.0,
+                a[1] + ny * 6.0,
+                b[0] - nx * 6.0,
+                b[1] - ny * 6.0,
+                b[0] + nx * 6.0,
+                b[1] + ny * 6.0,
+                a[0],
+                a[1],
+                b[0],
+                b[1],
+            );
+
+            let tag_text = format!("{:.3}m", distance);
+            let hud_text = format!(
+                "{:.3}m  ·  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  ·  {:.1}°",
+                distance, dx, dy, dz, angle_deg
+            );
+            let text = format!(
+                "{:.3}m  |  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  |  {:.1}°",
+                distance, dx, dy, dz, angle_deg
+            );
+            let tags = vec![MeasureTagModel {
+                text: tag_text,
+                x: tag_pos[0],
+                y: tag_pos[1],
+            }];
+
+            return QuickMeasureModel {
+                visible: true,
+                commands,
+                distance,
+                dx,
+                dy,
+                dz,
+                angle_deg,
+                text,
+                label_x: tag_pos[0],
+                label_y: tag_pos[1],
+                hud_text,
+                tags,
+            };
+        } else {
+            // Múltiplas arestas selecionadas
+            let mut total_distance = 0.0f32;
+            let mut edge_count = 0usize;
+            let mut min_pt = glam::Vec3::splat(f32::INFINITY);
+            let mut max_pt = glam::Vec3::splat(f32::NEG_INFINITY);
+            let mut commands = String::new();
+            let mut tags = Vec::new();
+
+            for &(v0, v1) in &sorted_edges {
+                let idx0 = v0 as usize;
+                let idx1 = v1 as usize;
+                if idx0 >= mesh.verts.len() || idx1 >= mesh.verts.len() || idx0 == idx1 {
+                    continue;
+                }
+                let p0 = mesh.verts[idx0].vec();
+                let p1 = mesh.verts[idx1].vec();
+                let edge_dist = (p1 - p0).length();
+                if edge_dist < 1e-4 {
+                    continue;
+                }
+                total_distance += edge_dist;
+                edge_count += 1;
+                min_pt = min_pt.min(p0).min(p1);
+                max_pt = max_pt.max(p0).max(p1);
+
+                let (Some(a), Some(b)) = (project_pt(p0), project_pt(p1)) else {
+                    continue;
+                };
+                let Some(([nx, ny], _, tag_pos)) = compute_offset(a, b) else {
+                    continue;
+                };
+                let _ = write!(
+                    commands,
+                    "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} ",
+                    a[0] - nx * 5.0,
+                    a[1] - ny * 5.0,
+                    a[0] + nx * 5.0,
+                    a[1] + ny * 5.0,
+                    b[0] - nx * 5.0,
+                    b[1] - ny * 5.0,
+                    b[0] + nx * 5.0,
+                    b[1] + ny * 5.0,
+                    a[0],
+                    a[1],
+                    b[0],
+                    b[1],
+                );
+                // Limita a exibição de tags individuais para evitar poluição visual com dezenas de arestas
+                if tags.len() < 16 {
+                    tags.push(MeasureTagModel {
+                        text: format!("{:.3}m", edge_dist),
+                        x: tag_pos[0],
+                        y: tag_pos[1],
+                    });
+                }
+            }
+
+            if edge_count == 0 {
+                return QuickMeasureModel::default();
+            }
+
+            let avg_distance = total_distance / edge_count as f32;
+            let span = (max_pt - min_pt).abs();
+            let hud_text = format!(
+                "Total: {:.3}m ({} edges)  ·  Avg: {:.3}m  ·  Span: {:.3} × {:.3} × {:.3}m",
+                total_distance, edge_count, avg_distance, span.x, span.y, span.z
+            );
+            let text = format!("Total: {:.3}m ({} edges)", total_distance, edge_count);
+            let label_x = tags.first().map(|t| t.x).unwrap_or(width * 0.5);
+            let label_y = tags.first().map(|t| t.y).unwrap_or(height * 0.5);
+
+            return QuickMeasureModel {
+                visible: true,
+                commands,
+                distance: total_distance,
+                dx: span.x,
+                dy: span.y,
+                dz: span.z,
+                angle_deg: 0.0,
+                text,
+                label_x,
+                label_y,
+                hud_text,
+                tags,
+            };
+        }
+    }
+
+    // Caso 3: exatamente dois vértices selecionados na malha ativa (quando não há arestas selecionadas)
+    if state.selection.verts.len() == 2 {
         let Some(mesh) = state.project.active_mesh() else {
             return QuickMeasureModel::default();
         };
@@ -790,90 +1091,79 @@ pub(crate) fn compute_quick_measure(
         };
         let idx0 = v0 as usize;
         let idx1 = v1 as usize;
-        if idx0 >= mesh.verts.len() || idx1 >= mesh.verts.len() {
+        if idx0 >= mesh.verts.len() || idx1 >= mesh.verts.len() || idx0 == idx1 {
             return QuickMeasureModel::default();
         }
-        (mesh.verts[idx0].vec(), mesh.verts[idx1].vec())
-    } else {
-        return QuickMeasureModel::default();
-    };
+        let p_start = mesh.verts[idx0].vec();
+        let p_end = mesh.verts[idx1].vec();
+        let delta = p_end - p_start;
+        let distance = delta.length();
+        if distance < 1e-4 {
+            return QuickMeasureModel::default();
+        }
 
-    let delta = p_end - p_start;
-    let distance = delta.length();
-    if distance < 1e-4 {
-        return QuickMeasureModel::default();
+        let dx = delta.x.abs();
+        let dy = delta.y.abs();
+        let dz = delta.z.abs();
+        let angle_deg = delta.y.atan2(delta.x).to_degrees().abs();
+
+        let (Some(a), Some(b)) = (project_pt(p_start), project_pt(p_end)) else {
+            return QuickMeasureModel::default();
+        };
+        let Some(([nx, ny], _, tag_pos)) = compute_offset(a, b) else {
+            return QuickMeasureModel::default();
+        };
+
+        let mut commands = String::new();
+        let _ = write!(
+            commands,
+            "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} ",
+            a[0] - nx * 6.0,
+            a[1] - ny * 6.0,
+            a[0] + nx * 6.0,
+            a[1] + ny * 6.0,
+            b[0] - nx * 6.0,
+            b[1] - ny * 6.0,
+            b[0] + nx * 6.0,
+            b[1] + ny * 6.0,
+            a[0],
+            a[1],
+            b[0],
+            b[1],
+        );
+
+        let tag_text = format!("{:.3}m", distance);
+        let hud_text = format!(
+            "{:.3}m  ·  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  ·  {:.1}°",
+            distance, dx, dy, dz, angle_deg
+        );
+        let text = format!(
+            "{:.3}m  |  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  |  {:.1}°",
+            distance, dx, dy, dz, angle_deg
+        );
+        let tags = vec![MeasureTagModel {
+            text: tag_text,
+            x: tag_pos[0],
+            y: tag_pos[1],
+        }];
+
+        return QuickMeasureModel {
+            visible: true,
+            commands,
+            distance,
+            dx,
+            dy,
+            dz,
+            angle_deg,
+            text,
+            label_x: tag_pos[0],
+            label_y: tag_pos[1],
+            hud_text,
+            tags,
+        };
     }
 
-    let dx = delta.x.abs();
-    let dy = delta.y.abs();
-    let dz = delta.z.abs();
-    let angle_deg = delta.y.atan2(delta.x).to_degrees().abs();
-
-    let view_proj = state.session.camera.view_proj();
-    let clip_start = view_proj * p_start.extend(1.0);
-    let clip_end = view_proj * p_end.extend(1.0);
-    if clip_start.w <= 0.05 || clip_end.w <= 0.05 {
-        return QuickMeasureModel::default();
-    }
-
-    let a = [
-        (clip_start.x / clip_start.w * 0.5 + 0.5) * width,
-        (1.0 - (clip_start.y / clip_start.w * 0.5 + 0.5)) * height,
-    ];
-    let b = [
-        (clip_end.x / clip_end.w * 0.5 + 0.5) * width,
-        (1.0 - (clip_end.y / clip_end.w * 0.5 + 0.5)) * height,
-    ];
-
-    let screen_dx = b[0] - a[0];
-    let screen_dy = b[1] - a[1];
-    let screen_dist = screen_dx.hypot(screen_dy);
-    if screen_dist < 4.0 {
-        return QuickMeasureModel::default();
-    }
-
-    let (ux, uy) = (screen_dx / screen_dist, screen_dy / screen_dist);
-    let (nx, ny) = (-uy, ux);
-
-    let mut commands = String::new();
-    use std::fmt::Write as _;
-    let _ = write!(
-        commands,
-        "M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} M {:.2} {:.2} L {:.2} {:.2} ",
-        a[0] - nx * 8.0,
-        a[1] - ny * 8.0,
-        a[0] + nx * 8.0,
-        a[1] + ny * 8.0,
-        b[0] - nx * 8.0,
-        b[1] - ny * 8.0,
-        b[0] + nx * 8.0,
-        b[1] + ny * 8.0,
-        a[0],
-        a[1],
-        b[0],
-        b[1],
-    );
-
-    let text = format!(
-        "{:.3}m  |  ΔX: {:.3}  ΔY: {:.3}  ΔZ: {:.3}  |  {:.1}°",
-        distance, dx, dy, dz, angle_deg
-    );
-
-    let label_x = (a[0] + b[0]) * 0.5 + nx * 16.0;
-    let label_y = (a[1] + b[1]) * 0.5 + ny * 16.0;
-
-    QuickMeasureModel {
-        visible: true,
-        commands,
-        distance,
-        dx,
-        dy,
-        dz,
-        angle_deg,
-        text,
-        label_x,
-        label_y,
-    }
+    QuickMeasureModel::default()
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

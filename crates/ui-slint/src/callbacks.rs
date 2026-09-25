@@ -174,6 +174,17 @@ pub(crate) fn sync_viewport_overlays<V: PetuniaViewport>(
     window.set_measure_dy(measure.dy);
     window.set_measure_dz(measure.dz);
     window.set_measure_angle_deg(measure.angle_deg);
+    window.set_measure_hud_text(measure.hud_text.as_str().into());
+    let measure_tags: Vec<MeasureTag> = measure
+        .tags
+        .iter()
+        .map(|tag| MeasureTag {
+            text: tag.text.as_str().into(),
+            x: tag.x,
+            y: tag.y,
+        })
+        .collect();
+    window.set_measure_tags(std::rc::Rc::new(slint::VecModel::from(measure_tags)).into());
 
     window.set_micro_inspector_open(bridge.micro_inspector_open);
     window.set_micro_inspector_x(bridge.micro_inspector_pos[0]);
@@ -655,6 +666,17 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_measure_dy(vm.measure_dy);
     window.set_measure_dz(vm.measure_dz);
     window.set_measure_angle_deg(vm.measure_angle_deg);
+    window.set_measure_hud_text(vm.measure_hud_text.as_str().into());
+    let measure_tags: Vec<MeasureTag> = vm
+        .measure_tags
+        .iter()
+        .map(|tag| MeasureTag {
+            text: tag.text.as_str().into(),
+            x: tag.x,
+            y: tag.y,
+        })
+        .collect();
+    window.set_measure_tags(std::rc::Rc::new(slint::VecModel::from(measure_tags)).into());
 
     window.set_micro_inspector_open(vm.micro_inspector_open);
     window.set_micro_inspector_x(vm.micro_inspector_x);

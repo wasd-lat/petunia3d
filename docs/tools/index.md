@@ -38,6 +38,6 @@ O Petunia3D possui uma suíte concisa e poderosa de 19 ferramentas dedicadas par
 | :--- | :--- | :--- |
 | **[3D Cursor](./cursor3d)** | `Shift+RMB` | Posiciona a âncora 3D para criação de primitivas e pivôs. |
 | **[Régua 3D (Measure)](./measure)** | `M` | Medição de distâncias euclidianas e deltas cartesianos com snap a vértices. |
-| **[Anotação 3D (Annotate)](./annotate)** | `D` | Rascunhos grease-pencil sobre a geometria com undo/redo total. |
+| **[Anotação 3D (Annotate)](./annotate)** *(Pós-V1)* | `—` | Rascunhos grease-pencil sobre a geometria (planejada para a Era 1 pós-GA). |
 | **[Adicionar Primitiva (Primitive)](./primitive)** | `Shift+A` | Instancia cubos, esferas, cilindros e planos no 3D Cursor. |
 | **[Imagens de Referência](./reference-image)** | `Shift+I` | Carrega imagens de referência ortogonais no viewport. |
