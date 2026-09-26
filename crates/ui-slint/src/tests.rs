@@ -6564,10 +6564,13 @@ fn parametric_primitive_persistence_and_inspector_re_editing() {
     assert!(bridge.state.active_is_parametric());
     assert!(bridge.view_model().active_asset_is_parametric);
 
+    let active_index = bridge.state.project.active;
+    assert_ne!(active_index, usize::MAX);
+
     // Deseleção e resseleção preserva estado paramétrico
     bridge.state.select_object(None, false);
     assert!(!bridge.view_model().active_asset_is_parametric);
-    bridge.state.select_object(Some(0), false);
+    bridge.state.select_object(Some(active_index), false);
     assert!(bridge.state.active_is_parametric());
     assert!(bridge.view_model().active_asset_is_parametric);
 }
