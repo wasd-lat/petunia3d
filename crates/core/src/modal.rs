@@ -191,6 +191,9 @@ impl AppState {
         if transform && self.edit_mode() == EditMode::Object {
             source.select_all();
         } else {
+            // Edições topológicas ou de sub-elementos congelam a primitiva paramétrica em malha B-Rep estática.
+            self.freeze_active_primitive();
+
             // Face and edge selection must transform their vertices too.
             for face in &source.faces {
                 if face.selected {

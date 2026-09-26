@@ -323,6 +323,10 @@ pub mod text_id {
     pub const UI_DECAL_ROTATION: TextId = TextId::new("ui.decal_rotation");
     pub const UI_DECAL_BAKE: TextId = TextId::new("ui.decal_bake");
     pub const UI_DECAL_HINT: TextId = TextId::new("ui.decal_hint");
+    pub const UI_PRIMITIVE_PARAMETRIC: TextId = TextId::new("ui.primitive_parametric");
+    pub const UI_PRIMITIVE_FREEZE: TextId = TextId::new("ui.primitive_freeze");
+    pub const UI_PRIMITIVE_FREEZE_HINT: TextId = TextId::new("ui.primitive_freeze_hint");
+    pub const UI_PRIMITIVE_FROZEN_STATUS: TextId = TextId::new("ui.primitive_frozen_status");
     pub const UI_MODEL_SELECT_HINT: TextId = TextId::new("ui.model_select_hint");
     pub const UI_MODEL_POSITION_HINT: TextId = TextId::new("ui.model_position_hint");
     pub const UI_MODEL_ROTATE_HINT: TextId = TextId::new("ui.model_rotate_hint");
@@ -651,6 +655,10 @@ pub mod text_id {
         UI_DECAL_ROTATION,
         UI_DECAL_BAKE,
         UI_DECAL_HINT,
+        UI_PRIMITIVE_PARAMETRIC,
+        UI_PRIMITIVE_FREEZE,
+        UI_PRIMITIVE_FREEZE_HINT,
+        UI_PRIMITIVE_FROZEN_STATUS,
         UI_MODEL_SELECT_HINT,
         UI_MODEL_POSITION_HINT,
         UI_MODEL_ROTATE_HINT,

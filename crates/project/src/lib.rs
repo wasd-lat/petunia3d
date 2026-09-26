@@ -208,6 +208,9 @@ pub struct Asset {
     pub modifiers: Vec<ModifierInstance>,
     #[serde(default)]
     pub origin: Option<[f32; 3]>,
+    /// Especificação paramétrica viva da primitiva (None = malha estática B-Rep).
+    #[serde(default)]
+    pub parametric: Option<petunia_mesh::PrimitiveDescriptor>,
     #[serde(skip)]
     eval_cache: Option<(u64, u64, Mesh)>,
 }
@@ -230,8 +233,24 @@ impl Asset {
             tags: Vec::new(),
             modifiers: Vec::new(),
             origin: None,
+            parametric: None,
             paint_stack: None,
             eval_cache: None,
+        }
+    }
+
+    /// Retorna verdadeiro se este asset é uma primitiva paramétrica reeditável.
+    pub fn is_parametric(&self) -> bool {
+        self.parametric.is_some()
+    }
+
+    /// Congela transparentemente a primitiva em malha estática B-Rep comum.
+    pub fn freeze_parametric(&mut self) -> bool {
+        if self.parametric.is_some() {
+            self.parametric = None;
+            true
+        } else {
+            false
         }
     }
 

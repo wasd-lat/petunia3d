@@ -2211,10 +2211,29 @@ component ObjectBody inherits VerticalLayout {
     in property <string> tris-label;
     in property <string> duplicate-label;
     in property <string> delete-label;
+    in property <bool> is-parametric: false;
+    in property <string> primitive-kind: "";
+    in property <float> primitive-radius: 1.0;
+    in property <float> primitive-radius-b: 1.0;
+    in property <float> primitive-height: 2.0;
+    in property <float> primitive-depth: 1.0;
+    in property <float> primitive-width: 1.0;
+    in property <int> primitive-sides: 8;
+    in property <int> primitive-rings: 6;
+    in property <int> primitive-subdiv: 1;
+    in property <bool> primitive-cap-top: true;
+    in property <bool> primitive-cap-bottom: true;
+    in property <bool> primitive-fill-disc: true;
+    in property <string> label-parametric-primitive: "Parametric Primitive";
+    in property <string> label-freeze-primitive: "Convert to Editable Mesh";
+    in property <string> label-freeze-primitive-hint: "Destructive edits auto-convert to mesh";
     callback scene-toggle-visibility(string);
     callback scene-toggle-lock(string);
     callback duplicate-requested;
     callback delete-requested;
+    callback primitive-param-float(string, float);
+    callback primitive-param-bool(string, bool);
+    callback freeze-primitive-requested;
 
     spacing: 6px;
     vertical-stretch: 0;
@@ -2276,6 +2295,170 @@ component ObjectBody inherits VerticalLayout {
                 color: DesignTokens.text-muted;
                 font-size: 10px;
                 horizontal-stretch: 1;
+                wrap: word-wrap;
+            }
+        }
+        if root.is-parametric: VerticalLayout {
+            spacing: 6px;
+            Rectangle {
+                height: 1px;
+                background: DesignTokens.border;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.label-parametric-primitive;
+                    color: DesignTokens.accent;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Rectangle {
+                    border-radius: 3px;
+                    background: DesignTokens.surface-raised;
+                    border-width: 1px;
+                    border-color: DesignTokens.accent;
+                    height: 18px;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        Text {
+                            text: root.primitive-kind;
+                            color: DesignTokens.accent;
+                            font-size: 9px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+            if root.primitive-kind == "box" || root.primitive-kind == "wedge": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Width"; value: root.primitive-width; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("width", root.primitive-width + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("width", t.to-float()); true } }
+                NumericField { label: "Height"; value: root.primitive-height; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("height", root.primitive-height + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("height", t.to-float()); true } }
+                NumericField { label: "Depth"; value: root.primitive-depth; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("depth", root.primitive-depth + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("depth", t.to-float()); true } }
+            }
+            if root.primitive-kind == "plane": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Width"; value: root.primitive-width; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("width", root.primitive-width + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("width", t.to-float()); true } }
+                NumericField { label: "Height"; value: root.primitive-height; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("height", root.primitive-height + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("height", t.to-float()); true } }
+            }
+            if root.primitive-kind == "cylinder": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Radius"; value: root.primitive-radius; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius", root.primitive-radius + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius", t.to-float()); true } }
+                NumericField { label: "Height"; value: root.primitive-height; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("height", root.primitive-height + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("height", t.to-float()); true } }
+                NumericField { label: "Sides"; value: root.primitive-sides; step: 1; scrubbed(d, f) => { root.primitive-param-float("sides", root.primitive-sides + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("sides", t.to-float()); true } }
+                HorizontalLayout {
+                    spacing: 4px; height: 26px;
+                    Rectangle {
+                        horizontal-stretch: 1; border-radius: 4px;
+                        background: root.primitive-cap-top ? DesignTokens.accent : DesignTokens.surface-raised;
+                        border-width: 1px; border-color: root.primitive-cap-top ? DesignTokens.accent : DesignTokens.border;
+                        Text { text: root.primitive-cap-top ? "Top Cap: on" : "Top Cap: off"; color: root.primitive-cap-top ? DesignTokens.canvas : DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.primitive-param-bool("cap_top", !root.primitive-cap-top); } }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1; border-radius: 4px;
+                        background: root.primitive-cap-bottom ? DesignTokens.accent : DesignTokens.surface-raised;
+                        border-width: 1px; border-color: root.primitive-cap-bottom ? DesignTokens.accent : DesignTokens.border;
+                        Text { text: root.primitive-cap-bottom ? "Bottom Cap: on" : "Bottom Cap: off"; color: root.primitive-cap-bottom ? DesignTokens.canvas : DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.primitive-param-bool("cap_bottom", !root.primitive-cap-bottom); } }
+                    }
+                }
+            }
+            if root.primitive-kind == "cone": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Bottom Radius"; value: root.primitive-radius; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius", root.primitive-radius + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius", t.to-float()); true } }
+                NumericField { label: "Top Radius"; value: root.primitive-radius-b; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius_b", root.primitive-radius-b + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius_b", t.to-float()); true } }
+                NumericField { label: "Height"; value: root.primitive-height; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("height", root.primitive-height + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("height", t.to-float()); true } }
+                NumericField { label: "Sides"; value: root.primitive-sides; step: 1; scrubbed(d, f) => { root.primitive-param-float("sides", root.primitive-sides + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("sides", t.to-float()); true } }
+                HorizontalLayout {
+                    spacing: 4px; height: 26px;
+                    Rectangle {
+                        horizontal-stretch: 1; border-radius: 4px;
+                        background: root.primitive-cap-bottom ? DesignTokens.accent : DesignTokens.surface-raised;
+                        border-width: 1px; border-color: root.primitive-cap-bottom ? DesignTokens.accent : DesignTokens.border;
+                        Text { text: root.primitive-cap-bottom ? "Base Cap: on" : "Base Cap: off"; color: root.primitive-cap-bottom ? DesignTokens.canvas : DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.primitive-param-bool("cap_bottom", !root.primitive-cap-bottom); } }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1; border-radius: 4px;
+                        background: root.primitive-cap-top ? DesignTokens.accent : DesignTokens.surface-raised;
+                        border-width: 1px; border-color: root.primitive-cap-top ? DesignTokens.accent : DesignTokens.border;
+                        Text { text: root.primitive-cap-top ? "Top Cap: on" : "Top Cap: off"; color: root.primitive-cap-top ? DesignTokens.canvas : DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.primitive-param-bool("cap_top", !root.primitive-cap-top); } }
+                    }
+                }
+            }
+            if root.primitive-kind == "sphere": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Radius"; value: root.primitive-radius; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius", root.primitive-radius + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius", t.to-float()); true } }
+                NumericField { label: "Segments"; value: root.primitive-sides; step: 1; scrubbed(d, f) => { root.primitive-param-float("sides", root.primitive-sides + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("sides", t.to-float()); true } }
+                NumericField { label: "Rings"; value: root.primitive-rings; step: 1; scrubbed(d, f) => { root.primitive-param-float("rings", root.primitive-rings + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("rings", t.to-float()); true } }
+            }
+            if root.primitive-kind == "icosphere": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Radius"; value: root.primitive-radius; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius", root.primitive-radius + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius", t.to-float()); true } }
+                NumericField { label: "Subdivisions"; value: root.primitive-subdiv; step: 1; scrubbed(d, f) => { root.primitive-param-float("subdiv", root.primitive-subdiv + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("subdiv", t.to-float()); true } }
+            }
+            if root.primitive-kind == "torus": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Ring Radius"; value: root.primitive-radius; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius", root.primitive-radius + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius", t.to-float()); true } }
+                NumericField { label: "Pipe Radius"; value: root.primitive-radius-b; step: 0.05; scrubbed(d, f) => { root.primitive-param-float("radius_b", root.primitive-radius-b + d * (f ? 0.005 : 0.05)); } text-committed(t) => { root.primitive-param-float("radius_b", t.to-float()); true } }
+                NumericField { label: "Ring Segments"; value: root.primitive-sides; step: 1; scrubbed(d, f) => { root.primitive-param-float("sides", root.primitive-sides + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("sides", t.to-float()); true } }
+                NumericField { label: "Pipe Segments"; value: root.primitive-rings; step: 1; scrubbed(d, f) => { root.primitive-param-float("rings", root.primitive-rings + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("rings", t.to-float()); true } }
+            }
+            if root.primitive-kind == "capsule": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Radius"; value: root.primitive-radius; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius", root.primitive-radius + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius", t.to-float()); true } }
+                NumericField { label: "Height"; value: root.primitive-height; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("height", root.primitive-height + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("height", t.to-float()); true } }
+                NumericField { label: "Sides"; value: root.primitive-sides; step: 1; scrubbed(d, f) => { root.primitive-param-float("sides", root.primitive-sides + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("sides", t.to-float()); true } }
+                NumericField { label: "Cap Rings"; value: root.primitive-rings; step: 1; scrubbed(d, f) => { root.primitive-param-float("rings", root.primitive-rings + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("rings", t.to-float()); true } }
+            }
+            if root.primitive-kind == "circle": VerticalLayout {
+                spacing: 6px;
+                NumericField { label: "Radius"; value: root.primitive-radius; step: 0.1; scrubbed(d, f) => { root.primitive-param-float("radius", root.primitive-radius + d * (f ? 0.01 : 0.1)); } text-committed(t) => { root.primitive-param-float("radius", t.to-float()); true } }
+                NumericField { label: "Vertices"; value: root.primitive-sides; step: 1; scrubbed(d, f) => { root.primitive-param-float("sides", root.primitive-sides + (d > 0 ? 1 : -1)); } text-committed(t) => { root.primitive-param-float("sides", t.to-float()); true } }
+                Rectangle {
+                    height: 26px; border-radius: 4px;
+                    background: root.primitive-fill-disc ? DesignTokens.accent : DesignTokens.surface-raised;
+                    border-width: 1px; border-color: root.primitive-fill-disc ? DesignTokens.accent : DesignTokens.border;
+                    Text { text: root.primitive-fill-disc ? "Fill: Disc" : "Fill: Open Loop"; color: root.primitive-fill-disc ? DesignTokens.canvas : DesignTokens.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.primitive-param-bool("fill_disc", !root.primitive-fill-disc); } }
+                }
+            }
+            Rectangle {
+                height: 26px;
+                border-radius: 4px;
+                background: DesignTokens.surface-raised;
+                border-width: 1px;
+                border-color: DesignTokens.border;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    IconDisplay {
+                        icon: IconSet.Box;
+                        size: 13px;
+                        stroke: DesignTokens.accent;
+                    }
+                    Text {
+                        text: root.label-freeze-primitive;
+                        color: DesignTokens.text-primary;
+                        font-size: 11px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea {
+                    clicked => { root.freeze-primitive-requested(); }
+                }
+            }
+            Text {
+                text: root.label-freeze-primitive-hint;
+                color: DesignTokens.text-muted;
+                font-size: 9px;
                 wrap: word-wrap;
             }
         }
@@ -3068,6 +3251,10 @@ export component PetuniaSlintShell inherits Window {
     in-out property <bool> primitive-cap-top: true;
     in-out property <bool> primitive-cap-bottom: true;
     in-out property <bool> primitive-fill-disc: true;
+    in-out property <bool> active-asset-is-parametric: false;
+    in-out property <string> label-parametric-primitive: "Parametric Primitive";
+    in-out property <string> label-freeze-primitive: "Convert to Editable Mesh";
+    in-out property <string> label-freeze-primitive-hint: "Destructive edits auto-convert to mesh";
     in-out property <bool> slice-preview-visible: false;
     in-out property <string> slice-preview-commands: "";
     in-out property <bool> slice-trim: false;
@@ -3208,6 +3395,7 @@ export component PetuniaSlintShell inherits Window {
     callback primitive-param-bool(string, bool);
     callback primitive-confirm;
     callback primitive-cancel;
+    callback freeze-primitive-requested;
     callback slice-trim-set(bool);
     callback toggle-bevel-clamp-overlap;
     callback toggle-bevel-affect-vertices;
@@ -3957,10 +4145,10 @@ export component PetuniaSlintShell inherits Window {
                             : (self.is-transform || self.is-keyboard-transform-drag) ? (root.active-tool == "scale" ? nesw-resize : (root.active-tool == "rotate" ? grabbing : move))
                             : (root.active-workspace == "PAINT") ? crosshair
                             : (root.active-tool == "slice" || root.active-tool == "knife" || root.active-tool == "loop_cut" || root.active-tool == "measure" || root.active-tool == "draw_profile" || root.active-tool == "cursor" || root.active-tool == "cursor_3d" || self.is-box-select || self.is-lasso-select) ? crosshair
-                            : (root.tool-modal-active && (root.tool-modal-id == "model.extrude" || root.tool-modal-id == "model.extrude_individual" || root.tool-modal-id == "model.push_pull")) || root.active-tool == "extrude" || root.active-tool == "push_pull" ? ns-resize
-                            : (root.tool-modal-active && root.tool-modal-id == "model.bevel") || root.active-tool == "bevel" ? nesw-resize
-                            : (root.tool-modal-active && root.tool-modal-id == "model.inset") || root.active-tool == "inset" ? nwse-resize
-                            : (root.tool-modal-active && root.tool-modal-id == "model.scale_selection") || root.active-tool == "scale" ? nesw-resize
+                            : (root.active-tool == "extrude" || root.active-tool == "push_pull") ? ns-resize
+                            : root.active-tool == "bevel" ? nesw-resize
+                            : root.active-tool == "inset" ? nwse-resize
+                            : root.active-tool == "scale" ? nesw-resize
                             : root.active-tool == "rotate" ? grabbing
                             : root.active-tool == "move" ? move
                             : root.gizmo-has-hover ? grab
@@ -6618,10 +6806,29 @@ export component PetuniaSlintShell inherits Window {
                                     tris-label: root.label-stats-tris;
                                     duplicate-label: root.label-duplicate;
                                     delete-label: root.label-delete;
+                                    is-parametric: root.active-asset-is-parametric;
+                                    primitive-kind: root.primitive-kind;
+                                    primitive-radius: root.primitive-radius;
+                                    primitive-radius-b: root.primitive-radius-b;
+                                    primitive-height: root.primitive-height;
+                                    primitive-depth: root.primitive-depth;
+                                    primitive-width: root.primitive-width;
+                                    primitive-sides: root.primitive-sides;
+                                    primitive-rings: root.primitive-rings;
+                                    primitive-subdiv: root.primitive-subdiv;
+                                    primitive-cap-top: root.primitive-cap-top;
+                                    primitive-cap-bottom: root.primitive-cap-bottom;
+                                    primitive-fill-disc: root.primitive-fill-disc;
+                                    label-parametric-primitive: root.label-parametric-primitive;
+                                    label-freeze-primitive: root.label-freeze-primitive;
+                                    label-freeze-primitive-hint: root.label-freeze-primitive-hint;
                                     scene-toggle-visibility(id) => { root.scene-toggle-visibility(id); }
                                     scene-toggle-lock(id) => { root.scene-toggle-lock(id); }
                                     duplicate-requested => { root.duplicate-requested(); }
                                     delete-requested => { root.delete-requested(); }
+                                    primitive-param-float(param, val) => { root.primitive-param-float(param, val); }
+                                    primitive-param-bool(param, val) => { root.primitive-param-bool(param, val); }
+                                    freeze-primitive-requested => { root.freeze-primitive-requested(); }
                                 }
                             }
                              InspectorSection {
@@ -8421,10 +8628,29 @@ export component PetuniaSlintShell inherits Window {
                 tris-label: root.label-stats-tris;
                 duplicate-label: root.label-duplicate;
                 delete-label: root.label-delete;
+                is-parametric: root.active-asset-is-parametric;
+                primitive-kind: root.primitive-kind;
+                primitive-radius: root.primitive-radius;
+                primitive-radius-b: root.primitive-radius-b;
+                primitive-height: root.primitive-height;
+                primitive-depth: root.primitive-depth;
+                primitive-width: root.primitive-width;
+                primitive-sides: root.primitive-sides;
+                primitive-rings: root.primitive-rings;
+                primitive-subdiv: root.primitive-subdiv;
+                primitive-cap-top: root.primitive-cap-top;
+                primitive-cap-bottom: root.primitive-cap-bottom;
+                primitive-fill-disc: root.primitive-fill-disc;
+                label-parametric-primitive: root.label-parametric-primitive;
+                label-freeze-primitive: root.label-freeze-primitive;
+                label-freeze-primitive-hint: root.label-freeze-primitive-hint;
                 scene-toggle-visibility(id) => { root.scene-toggle-visibility(id); }
                 scene-toggle-lock(id) => { root.scene-toggle-lock(id); }
                 duplicate-requested => { root.duplicate-requested(); }
                 delete-requested => { root.delete-requested(); }
+                primitive-param-float(param, val) => { root.primitive-param-float(param, val); }
+                primitive-param-bool(param, val) => { root.primitive-param-bool(param, val); }
+                freeze-primitive-requested => { root.freeze-primitive-requested(); }
             }
             if float-state.id == "material": MaterialBody {
     active-name: root.active-material-name;

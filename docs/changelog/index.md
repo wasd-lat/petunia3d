@@ -5,6 +5,40 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Sprint D: Ergonomia Unificada de Ferramentas, Navegação de Domínio e Medição Viewport (25/09/2026)
+- **Filosofia Unificada de Ativação de Ferramentas (1 Toque Card/Gizmo vs. 2 Toques Modo Livre)**:
+  - Todas as ferramentas de modelagem (`model.extrude`, `model.inset`, `model.bevel`, `model.push_pull`, `model.extrude_individual`) agora seguem a mesma ergonomia das ferramentas de transformação (`move`, `rotate`, `scale`).
+  - 1 toque no atalho ativa a ferramenta com seu card de opções e gizmos de manipulação direta no viewport, mantendo o ponteiro do mouse livre.
+  - 2 toques rápidos dentro do intervalo configurável (`double_tap_interval_ms`, padrão 350ms) acionam o **Modo Livre** modal rápido (estilo Blender), no qual o movimento do mouse altera a distância/quantidade interativamente, `LMB`/`Enter` confirma e `RMB`/`Escape` cancela sem sujar a pilha de histórico.
+- **Feedback Visual na Viewport & Cursores Contextuais**:
+  - Cursor contextual inteligente na viewport adaptado para cada operação (`ns-resize` para extrusão e push/pull, `nesw-resize` para chanfro/bevel e escala, `nwse-resize` para inserção/inset, `grabbing` para rotação, `crosshair` para faca/slice/loop-cut/medição/desenho).
+  - HUD Pill flutuante no topo central da viewport indicando a ferramenta ativa, o modo operacional (`[CARD / GIZMO]` vs `[MODO LIVRE]`) e as instruções de interação e cancelamento.
+- **Ciclo de Domínio com `Tab` & Remoção de Tecla Obsoleta**:
+  - O atalho `Tab` agora alterna perfeitamente entre o modo de Objeto (`Object`) e o último domínio de sub-elemento utilizado (`Point`, `Edge` ou `Face`).
+  - Remoção da tecla `0` para seleção de objeto em prol de `4` e `Tab`.
+- **Wireframe Overlay Padrão & Tag de Medição de Múltiplas Arestas**:
+  - `show_wireframe_overlay` agora é habilitado por padrão em toda a aplicação.
+  - Medição de arestas selecionadas: quando múltiplas arestas estão selecionadas, uma única tag flutuante no ponto médio/interseção exibe a média dos comprimentos (`Ø X.XXXm`), evitando poluição visual.
+  - Toggle nas Preferências (`multiselection_measure_tag`) com internacionalização em PT-BR e EN.
+- **Primitivas Paramétricas Persistentes**:
+  - Suporte completo a re-edição paramétrica de primitivas no Inspector após a criação, congelamento transparente em malha estática em operações destrutivas e ação explícita de congelamento com preservação de histórico.
+
+### Sprint C: Decalques 3D Interativos & Textura/Pintura Não-Destrutiva (25/09/2026)
+- **Manipulador 3D Interativo de Decalque na Viewport (`petunia_ui_slint`)**:
+  - Manipulação direta sobre a malha 3D via projeção baricêntrica reversa (`Mesh::uv_to_world`): o decalque acompanha a geometria da superfície em tempo real.
+  - Arraste interativo de posicionamento com raycast sobre as faces da malha ativa (`face_hit_uv`), convertendo as coordenadas de clique em espaço UV paramétrico.
+  - Modificadores táteis no viewport: `Shift + Arraste` para escala uniforme proporcional em tempo real e `Ctrl + Arraste` para rotação suave em graus.
+  - Suporte completo a cancelamento atômico via `Escape` (revertendo coordenadas de centro, escala e rotação prévias) e histórico transacional de undo/redo (`checkpoint("decal transform")`) ao soltar o clique.
+  - Renderização vetorial reativa na viewport Slint (`decal_preview_commands`): retículo central, perímetro subdividido conformado à curvatura de superfícies 3D curvas e indicador direcional de orientação (topo da estampa) em semi-transparência de destaque.
+- **Estrutura Não-Destrutiva de Camadas e Texturas (`petunia_project` & `petunia_module_paint`)**:
+  - Preservação estrita da pilha de camadas ativa (`Asset.paint_stack` / `DecalLayer`) como autoridade canônica persistente, mantendo o canvas original intacto sem compressões ou perdas raster destrutivas prematuras.
+  - Recomposição instantânea em tempo real no cache de textura composto (`Asset.texture`) e sincronização reativa com o material Albedo.
+  - Ação explícita de fixação (`Bake Decal to Layer` / `UiIntent::BakeActiveDecal`): a rasterização destrutiva só ocorre mediante solicitação direta e deliberada do usuário ou na exportação final.
+- **Seção do Decalque no Inspector Slint & Internacionalização**:
+  - Painel de controle no Inspector com campos numéricos para Posição (U, V), Escala (U, V) e Rotação (Deg) sem valores ou rótulos hardcoded.
+  - Inclusão dos TextIDs canônicos (`UI_DECAL_TRANSFORM`, `UI_DECAL_POSITION`, `UI_DECAL_SCALE`, `UI_DECAL_ROTATION`, `UI_DECAL_BAKE`, `UI_DECAL_HINT`) nos dicionários oficiais em português brasileiro e inglês (`assets/locales/`).
+  - Bateria de testes automatizados unitários e de integração (`test_decal_live_interactive_drag_manipulator_and_preview_commands`, `decal_layer_creation_and_rendering`, `decal_layer_transform_and_bake_workflow`).
+
 ### Sprint B: Simple Sweep Completo com Rotation Minimizing Frames (RMF) (25/09/2026)
 - **Varredura 3D com Rotation Minimizing Frames (`petunia_mesh::sweep`)**:
   - Implementação de algoritmo de varredura (*Sweep*) baseado na técnica de *Double Reflection RMF* (Wang et al., 2008), garantindo transporte paralelo de 4ª ordem e eliminando singularidades ou torções anômalas (*flipping/gimbal lock*) ao longo de caminhos 3D curvos arbitrários.

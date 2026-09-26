@@ -75,7 +75,9 @@ pub use camera::{Camera, Projection, ViewPreset};
 pub use events::{AppEvent, EventBus};
 pub use modal_feedback::ToolFeedback;
 pub use module::{Module, ModuleRegistry};
-pub use primitive_session::{CircleFill, PrimitiveCreationSession, PrimitiveDescriptor};
+pub use primitive_session::{
+    CircleFill, PrimitiveCreationSession, PrimitiveDescriptor, PrimitiveDescriptorExt,
+};
 pub use proportional::{ProportionalFalloff, ProportionalSettings, calculate_falloff_weight};
 pub use selection::{SelectMode, Selection, SelectionDomain, Workspace};
 pub use snap::{

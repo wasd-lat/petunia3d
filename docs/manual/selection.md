@@ -8,14 +8,15 @@ O Petunia3D usa um **modelo de seleção unificado e contextual**: você escolhe
 
 ## 1. Domínios de seleção
 
-| Domínio | O que seleciona | Texto de interface | Comando |
-| :--- | :--- | :--- | :--- |
-| **Objeto** | Malhas inteiras na cena, como unidades atômicas. | `Object` | `select.domain_object` |
-| **Face** | Polígonos planos (triângulos, quads ou n-gons) delimitados por arestas. | `Face` | `select.domain_face` |
-| **Edge** | Segmentos que conectam dois pontos da malha. | `Edge` | `select.domain_edge` |
-| **Point** | Pontos tridimensionais individuais da malha. | `Point` | `select.domain_vertex` |
+| Domínio | O que seleciona | Texto de interface | Atalho | Comando |
+| :--- | :--- | :--- | :--- | :--- |
+| **Point** | Pontos tridimensionais individuais da malha. | `Point` | `1` | `select.domain_vertex` |
+| **Edge** | Segmentos que conectam dois pontos da malha. | `Edge` | `2` | `select.domain_edge` |
+| **Face** | Polígonos planos delimitados por arestas. | `Face` | `3` | `select.domain_face` |
+| **Objeto** | Malhas inteiras na cena, como unidades atômicas. | `Object` | `4` | `select.domain_object` |
 
-- **Alternar o domínio**: `select.cycle_domain` (`Tab` no preset Petunia) alterna entre a seleção de objeto e o último domínio de componente usado.
+- **Alternar o domínio**: `select.cycle_domain` (`Tab` no preset Petunia) alterna de forma ágil entre a seleção de objeto (`Object`) e o último domínio de sub-elemento usado (`Point`, `Edge` ou `Face`). Pressionar `Tab` novamente retorna exatamente ao domínio de sub-elemento anterior.
+- **Atalhos numéricos**: Os números `1`, `2` e `3` acessam diretamente os modos de componente, enquanto `4` acessa o modo de objeto. A tecla `0` não é mais utilizada para alternância de modo.
 - **Selecionar o objeto antes dos componentes**: as ferramentas de malha operam sobre a **malha ativa**; selecione o objeto primeiro (ou clique direto na geometria, que ativa e seleciona).
 
 ### Seleção de objetos

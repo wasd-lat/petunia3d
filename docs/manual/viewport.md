@@ -87,3 +87,24 @@ Mesmo que o Petunia3D adote polígonos quadrangulares e n-gons para modelagem li
 - **Inverter Diagonal (`Flip Diagonal`)**: Selecione um quad ou uma aresta compartilhada por dois triângulos e acione **Flip Diagonal** no menu contextual de malha para inverter a direção do corte mantendo winding, normais e integridade topológica;
 - **Revolução de Perfis (`Revolve`)**: Converta polilinhas 2D ou perfis abertos em sólidos de revolução 360° com subdivisão configurável através de **Revolve Selection** no menu contextual de malha.
 
+---
+
+## 7. Feedback Visual da Viewport: HUD Pill & Cursores Contextuais
+
+Para máxima clareza durante a modelagem:
+- **HUD Pill Central**: No topo do viewport, uma pílula flutuante exibe a ferramenta ativa, o modo em execução (`[CARD / GIZMO]` quando ativada com 1 toque, ou `[MODO LIVRE]` com 2 toques rápidos) e as instruções de teclado e mouse.
+- **Cursores Contextuais**: O ponteiro do mouse se transforma de acordo com a operação ativa:
+  - `ns-resize`: Extrude, Extrude Individual, Push/Pull.
+  - `nesw-resize`: Bevel (Round Edge), Scale.
+  - `nwse-resize`: Inset.
+  - `grabbing`: Rotate (Órbita de rotação de elementos).
+  - `move`: Move / Transformação de posição.
+  - `crosshair`: Faca (Knife), Fatiador (Slice), Corte em Anel (Loop Cut), Perfil 2D, Medição (Measure), Pintura (Paint).
+
+---
+
+## 8. Wireframe Overlay & Tag de Medição de Múltiplas Arestas
+
+- **Wireframe Overlay**: Habilitado por padrão no Petunia3D, exibe a malha poligonal translúcida sobre os modelos sólidos, garantindo clareza topológica imediata sem precisar alternar para o modo Wireframe total.
+- **Medição Rápida de Arestas**: Ao selecionar uma aresta, sua dimensão métrica exata é projetada no viewport. Quando múltiplas arestas estão selecionadas simultaneamente, o sistema projeta uma única tag flutuante no ponto médio / centroide da seleção indicando o comprimento médio (`Ø X.XXXm`), permitindo inspecionar proporções globais sem poluição visual. Essa funcionalidade pode ser ligada ou desligada no menu **Preferências** (`multiselection_measure_tag`).
+

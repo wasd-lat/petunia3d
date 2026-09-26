@@ -26,6 +26,7 @@ use numeric::NumericFieldState;
 use overlay::{OverlayEntry, OverlayId, OverlayKind, OverlayStack};
 use petunia_config::keybinds::Mods2;
 use petunia_core::PivotPoint;
+use petunia_core::PrimitiveDescriptorExt;
 use petunia_core::{AppState, Camera, SelectionDomain, Workspace};
 use petunia_project::{AlphaMode, Project, ShaderProfile};
 use slint::ComponentHandle;
@@ -253,6 +254,7 @@ pub enum UiIntent {
     SetSelectionDomain(SelectionDomain),
     CycleSelectionDomain,
     AddPrimitive(petunia_core::PrimitiveKind),
+    FreezeActivePrimitive,
     DeleteActiveAsset,
     SetPaintColor([f32; 3]),
     SetBrushSize(f32),
@@ -938,6 +940,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 self.state.begin_primitive(kind, None);
                 self.state
                     .set_status(format!("Added {}", kind.default_name()));
+            }
+            UiIntent::FreezeActivePrimitive => {
+                if self.state.freeze_active_primitive() {
+                    self.state
+                        .set_status("Primitive frozen to editable mesh".to_string());
+                }
             }
             UiIntent::DeleteActiveAsset => {
                 // `edit.delete` é contextual: em Object remove o asset ativo; em
@@ -5310,6 +5318,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         mesh: petunia_core::Mesh,
         cuts: usize,
     ) -> bool {
+        self.state.freeze_active_primitive();
         let initial_cuts = if self.loop_cut_balanced && cuts < 2 {
             2
         } else {
@@ -5502,6 +5511,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             self.state.emit_mesh_changed();
             return false;
         };
+        self.state.freeze_active_primitive();
         self.state.checkpoint("loop cut");
         if let Some(active) = self.state.project.active_mesh_mut() {
             *active = cut;
@@ -5695,12 +5705,30 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         }
     }
 
+    pub fn active_primitive_descriptor_or_session(
+        &self,
+    ) -> Option<petunia_core::PrimitiveDescriptor> {
+        if let Some(session) = &self.state.session.primitive_session {
+            Some(session.descriptor)
+        } else {
+            self.state.active_primitive_descriptor()
+        }
+    }
+
+    pub fn freeze_active_primitive(&mut self) -> bool {
+        let frozen = self.state.freeze_active_primitive();
+        if frozen {
+            self.state.render.mark_dirty();
+        }
+        frozen
+    }
+
     pub fn update_primitive_param_float(&mut self, param: &str, value: f32) -> bool {
-        let Some(session) = &self.state.session.primitive_session else {
+        let Some(desc) = self.active_primitive_descriptor_or_session() else {
             return false;
         };
         use petunia_core::PrimitiveDescriptor::*;
-        let new_desc = match session.descriptor {
+        let new_desc = match desc {
             Box {
                 width,
                 height,
@@ -5943,15 +5971,16 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
                 _ => return false,
             },
         };
-        self.state.update_primitive(new_desc)
+        self.state
+            .update_active_primitive(new_desc, !self.state.primitive_session_valid())
     }
 
     pub fn update_primitive_param_bool(&mut self, param: &str, value: bool) -> bool {
-        let Some(session) = &self.state.session.primitive_session else {
+        let Some(desc) = self.active_primitive_descriptor_or_session() else {
             return false;
         };
         use petunia_core::PrimitiveDescriptor::*;
-        let new_desc = match session.descriptor {
+        let new_desc = match desc {
             Cylinder {
                 radius,
                 height,
@@ -6017,7 +6046,8 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
             },
             _ => return false,
         };
-        self.state.update_primitive(new_desc)
+        self.state
+            .update_active_primitive(new_desc, !self.state.primitive_session_valid())
     }
 
     pub fn confirm_primitive(&mut self) -> bool {
@@ -6077,25 +6107,32 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         let position = va.lerp(vb, t);
         let point = petunia_core::CutEdgePoint { edge, position };
 
-        let Some(session) = self.state.session.tools.cut_session.as_mut() else {
-            return false;
-        };
-        let Some(start) = session.edge_start else {
-            session.edge_start = Some(point);
-            session.anchor = Some([normalized_x, normalized_y]);
-            self.state.set_status("Knife: pick the second edge point");
-            self.state.mark_dirty();
-            return true;
+        let cut_result = {
+            let Some(session) = self.state.session.tools.cut_session.as_mut() else {
+                return false;
+            };
+            let Some(start) = session.edge_start else {
+                session.edge_start = Some(point);
+                session.anchor = Some([normalized_x, normalized_y]);
+                self.state.set_status("Knife: pick the second edge point");
+                self.state.mark_dirty();
+                return true;
+            };
+
+            let Some(mesh) = self.state.project.active_mesh().cloned() else {
+                return false;
+            };
+            session.cut_knife_segment(start, point, &mesh)
         };
 
-        let Some(mesh) = self.state.project.active_mesh().cloned() else {
-            return false;
-        };
-        match session.cut_knife_segment(start, point, &mesh) {
+        match cut_result {
             Ok(cut) => {
-                session.segments += 1;
-                session.edge_start = None;
-                session.anchor = None;
+                self.state.freeze_active_primitive();
+                if let Some(session) = self.state.session.tools.cut_session.as_mut() {
+                    session.segments += 1;
+                    session.edge_start = None;
+                    session.anchor = None;
+                }
                 if let Some(active) = self.state.project.active_mesh_mut() {
                     *active = cut;
                 }
@@ -6123,6 +6160,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         };
         self.state.session.tools.active_tool = "select".into();
         if session.segments > 0 {
+            self.state.freeze_active_primitive();
             let Some(result) = self.state.project.active_mesh().cloned() else {
                 return false;
             };
@@ -7046,13 +7084,12 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
 
         let is_double_tap = if interval_ms > 0 {
             if let Some((ref last_tool, last_time)) = self.last_tool_press {
-                last_tool == id
-                    && now.duration_since(last_time).as_millis() <= interval_ms as u128
+                last_tool == id && now.duration_since(last_time).as_millis() <= interval_ms as u128
             } else {
                 false
             }
         } else {
-            self.tool_modal.as_ref().map_or(false, |m| m.id() == id)
+            self.tool_modal.as_ref().is_some_and(|m| m.id() == id)
         };
 
         let kind = ToolModalKind::from_id(id);
@@ -7861,7 +7898,13 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         if vm.operation_hud_active {
             vm.hud_pill_visible = true;
             vm.hud_pill_title = vm.operation_hud_title.clone();
-            vm.hud_pill_badge = vm.operation_hud_subject.clone();
+            vm.hud_pill_badge = if self.is_instant_tool_mode() {
+                "MODO LIVRE".to_string()
+            } else if !vm.operation_hud_subject.is_empty() {
+                vm.operation_hud_subject.clone()
+            } else {
+                "CARD".to_string()
+            };
             vm.hud_pill_value = vm.operation_hud_lines.join("   ");
             vm.hud_pill_hint = vm.operation_hud_hint.clone();
             if self.pointer_position[0] > 0.0 && self.pointer_position[1] > 0.0 {
@@ -8148,6 +8191,11 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.label_decal_rotation = translated(petunia_config::text_id::UI_DECAL_ROTATION);
         vm.label_decal_bake = translated(petunia_config::text_id::UI_DECAL_BAKE);
         vm.label_decal_hint = translated(petunia_config::text_id::UI_DECAL_HINT);
+        vm.label_parametric_primitive =
+            translated(petunia_config::text_id::UI_PRIMITIVE_PARAMETRIC);
+        vm.label_freeze_primitive = translated(petunia_config::text_id::UI_PRIMITIVE_FREEZE);
+        vm.label_freeze_primitive_hint =
+            translated(petunia_config::text_id::UI_PRIMITIVE_FREEZE_HINT);
         vm.label_hide_part = translated(petunia_config::text_id::UI_HIDE_PART);
         vm.label_show_part = translated(petunia_config::text_id::UI_SHOW_PART);
         vm.label_lock_part = translated(petunia_config::text_id::UI_LOCK_PART);
@@ -8433,6 +8481,7 @@ impl<V: PetuniaViewport> SlintUiBridge<V> {
         vm.tool_activation = self.state.session.tools.tool_activation.id().to_string();
         vm.keyboard_tool_modal_active =
             self.keyboard_tool_modal_active && self.tool_modal.is_some();
+        vm.is_instant_tool_mode = self.is_instant_tool_mode();
         vm.invert_vertical_drag = self.state.ui.invert_vertical_drag;
         vm.colorblind_axes = self.state.ui.colorblind_axes;
         vm.reduced_motion = self.state.ui.reduced_motion;

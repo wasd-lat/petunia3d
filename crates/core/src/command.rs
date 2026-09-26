@@ -237,6 +237,9 @@ impl CommandDispatcher {
                 "Confirm or cancel the active operation first".into(),
             ));
         }
+        if cmd.is_destructive() {
+            state.freeze_active_primitive();
+        }
         state.project.project.history_selection = state.session.selection.assets.clone();
         let original_selection = state.session.selection.clone();
         let original = cmd.is_destructive().then(|| state.project.project.clone());

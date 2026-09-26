@@ -3666,7 +3666,7 @@ fn drag_mode_keeps_selecting_on_click_with_a_tool_open() {
 }
 
 #[test]
-fn extrude_shortcut_uses_instant_pointer_even_with_drag_preference() {
+fn modeling_tool_shortcut_double_tap_behavior() {
     let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
     bridge.resize_viewport(800, 600);
     bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
@@ -3674,15 +3674,76 @@ fn extrude_shortcut_uses_instant_pointer_even_with_drag_preference() {
     bridge.state.sync_selection();
     assert_eq!(bridge.view_model().tool_activation, "drag");
 
+    // 1-toque no atalho E: ativa a ferramenta paramétrica com card e alças,
+    // sem sequestrar o mouse no modo livre (Blender modal ainda inativo).
     assert!(bridge.route_shortcut("E", false, false, false));
+    assert!(bridge.tool_modal.is_some());
+    assert!(!bridge.keyboard_tool_modal_active);
+    assert!(!bridge.view_model().keyboard_tool_modal_active);
+    assert!(!bridge.view_model().is_instant_tool_mode);
+    assert_eq!(bridge.view_model().hud_pill_badge, "1 face(s)");
+
+    // 2-toque no atalho E (dentro do intervalo): entra no Modo Livre (mouse manipula).
+    assert!(bridge.route_shortcut("E", false, false, false));
+    assert!(bridge.tool_modal.is_some());
     assert!(bridge.keyboard_tool_modal_active);
     assert!(bridge.view_model().keyboard_tool_modal_active);
+    assert!(bridge.view_model().is_instant_tool_mode);
+    assert_eq!(bridge.view_model().hud_pill_badge, "MODO LIVRE");
+
+    // No Modo Livre, arrasto/mouse ajusta o valor:
     assert!(bridge.scrub_tool_modal(-32.0, false));
     assert!(bridge.tool_modal_value > 0.0);
+
+    // Clique na viewport confirma a operação paramétrica:
     bridge.select_viewport(0.5, 0.5, false);
     assert!(bridge.tool_modal.is_none());
     assert!(!bridge.keyboard_tool_modal_active);
     assert_eq!(bridge.state.project.undo.depth(), (1, 0));
+}
+
+#[test]
+fn modeling_tool_shortcut_with_instant_preference_enters_modal_immediately() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+    bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+    bridge.state.sync_selection();
+    bridge.set_tool_activation("instant");
+
+    // Com preferência Instant ativa, 1 toque já entra no modo livre imediatamente.
+    assert!(bridge.route_shortcut("E", false, false, false));
+    assert!(bridge.keyboard_tool_modal_active);
+    assert!(bridge.view_model().is_instant_tool_mode);
+}
+
+#[test]
+fn inset_and_bevel_shortcuts_support_single_and_double_tap() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.resize_viewport(800, 600);
+    bridge.state.set_edit_mode(petunia_core::EditMode::Edit);
+    bridge.state.project.active_mesh_mut().unwrap().faces[0].selected = true;
+    bridge.state.sync_selection();
+
+    // Inset (I): 1 toque -> Card / Direto
+    assert!(bridge.route_shortcut("I", false, false, false));
+    assert!(bridge.tool_modal.is_some());
+    assert!(!bridge.keyboard_tool_modal_active);
+
+    // Inset (I): 2 toque -> Modo Livre
+    assert!(bridge.route_shortcut("I", false, false, false));
+    assert!(bridge.keyboard_tool_modal_active);
+    assert!(bridge.cancel_tool_modal());
+
+    // Bevel (Ctrl+B): 1 toque -> Card / Direto
+    assert!(bridge.route_shortcut("B", true, false, false));
+    assert!(bridge.tool_modal.is_some());
+    assert!(!bridge.keyboard_tool_modal_active);
+
+    // Bevel (Ctrl+B): 2 toque -> Modo Livre
+    assert!(bridge.route_shortcut("B", true, false, false));
+    assert!(bridge.keyboard_tool_modal_active);
+    assert!(bridge.cancel_tool_modal());
 }
 
 #[test]
@@ -6462,4 +6523,93 @@ fn multiselection_measure_tag_displays_single_average_and_toggles_via_preference
     assert!(bridge.state.ui.multiselection_measure_tag);
     assert!(bridge.preferences.multiselection_measure_tag);
     assert!(bridge.view_model().multiselection_measure_tag);
+}
+
+#[test]
+fn parametric_primitive_persistence_and_inspector_re_editing() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::AddPrimitive(
+        petunia_core::PrimitiveKind::Cylinder,
+    ));
+    assert!(bridge.confirm_primitive());
+
+    // O asset criado deve ser paramétrico
+    assert!(bridge.state.active_is_parametric());
+    let vm = bridge.view_model();
+    assert!(vm.active_asset_is_parametric);
+    assert_eq!(vm.primitive_kind, "cylinder");
+    assert!(!vm.label_parametric_primitive.is_empty());
+    assert!(!vm.label_freeze_primitive.is_empty());
+
+    // Reedição paramétrica fora da sessão de criação inicial
+    assert!(bridge.update_primitive_param_float("radius", 2.5));
+    assert!(bridge.update_primitive_param_float("height", 6.0));
+
+    // A malha foi regenerada com as novas dimensões
+    let active_mesh = bridge.state.project.active_mesh().expect("active mesh");
+    let min_y = active_mesh
+        .verts
+        .iter()
+        .map(|v| v.pos[1])
+        .fold(f32::INFINITY, f32::min);
+    let max_y = active_mesh
+        .verts
+        .iter()
+        .map(|v| v.pos[1])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let height = max_y - min_y;
+    assert!((height - 6.0).abs() < 1e-3);
+
+    // Continua paramétrico após edição
+    assert!(bridge.state.active_is_parametric());
+    assert!(bridge.view_model().active_asset_is_parametric);
+
+    // Deseleção e resseleção preserva estado paramétrico
+    bridge.state.select_object(None, false);
+    assert!(!bridge.view_model().active_asset_is_parametric);
+    bridge.state.select_object(Some(0), false);
+    assert!(bridge.state.active_is_parametric());
+    assert!(bridge.view_model().active_asset_is_parametric);
+}
+
+#[test]
+fn parametric_primitive_manual_freeze() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Cube));
+    assert!(bridge.confirm_primitive());
+    assert!(bridge.state.active_is_parametric());
+
+    // Freeze manual via Intent ou bridge
+    assert!(bridge.freeze_active_primitive());
+    assert!(!bridge.state.active_is_parametric());
+    assert!(!bridge.view_model().active_asset_is_parametric);
+
+    // Malha é preservada
+    let mesh = bridge.state.project.active_mesh().expect("active mesh");
+    assert_eq!(mesh.verts.len(), 8);
+    assert_eq!(mesh.faces.len(), 6);
+}
+
+#[test]
+fn parametric_primitive_auto_freeze_on_destructive_modal() {
+    let mut bridge = SlintUiBridge::new(AppState::default(), PlaceholderViewport::default());
+    bridge.apply(UiIntent::AddPrimitive(petunia_core::PrimitiveKind::Cube));
+    assert!(bridge.confirm_primitive());
+    assert!(bridge.state.active_is_parametric());
+
+    // Ao iniciar uma operação destrutiva sub-objeto (ex: Extrude em Face)
+    bridge.state.set_selection_domain(SelectionDomain::Face);
+    if let Some(mesh) = bridge.state.project.active_mesh_mut() {
+        mesh.faces[0].selected = true;
+    }
+    assert!(
+        bridge
+            .state
+            .begin_modal(petunia_core::ModalKind::Extrude)
+            .is_ok()
+    );
+
+    // O asset foi congelado de forma transparente sem erro
+    assert!(!bridge.state.active_is_parametric());
+    assert!(!bridge.view_model().active_asset_is_parametric);
 }

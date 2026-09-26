@@ -200,6 +200,10 @@ decal_scale = "Scale"
 decal_rotation = "Rotation"
 decal_bake = "Bake Decal to Layer"
 decal_hint = "Drag on 3D surface to place decal. Shift+drag: scale, Ctrl+drag: rotate."
+primitive_parametric = "Parametric Primitive"
+primitive_freeze = "Make Editable"
+primitive_freeze_hint = "Freeze parametric primitive into static editable mesh"
+primitive_frozen_status = "Primitive converted to editable mesh"
 
 [pivot]
 median = "Median Point"

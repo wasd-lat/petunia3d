@@ -919,6 +919,10 @@ pub(crate) fn sync_window_properties(window: &PetuniaSlintShell, vm: &ShellViewM
     window.set_primitive_cap_top(vm.primitive_cap_top);
     window.set_primitive_cap_bottom(vm.primitive_cap_bottom);
     window.set_primitive_fill_disc(vm.primitive_fill_disc);
+    window.set_active_asset_is_parametric(vm.active_asset_is_parametric);
+    window.set_label_parametric_primitive(vm.label_parametric_primitive.as_str().into());
+    window.set_label_freeze_primitive(vm.label_freeze_primitive.as_str().into());
+    window.set_label_freeze_primitive_hint(vm.label_freeze_primitive_hint.as_str().into());
     window.set_slice_trim(vm.slice_trim);
     window.set_bevel_clamp_overlap(vm.bevel_clamp_overlap);
     window.set_bevel_affect_vertices(vm.bevel_affect_vertices);
@@ -3292,6 +3296,22 @@ pub(crate) fn connect_callbacks<V: PetuniaViewport + 'static>(
     window.on_primitive_cancel(move || {
         if let Ok(mut bridge) = prim_cancel_bridge.lock() {
             bridge.cancel_primitive();
+            let vm = bridge.view_model();
+            let new_frame = bridge.render_viewport();
+            if let Some(window) = window_weak.upgrade() {
+                sync_window_properties(&window, &vm);
+                if let Some(frame) = new_frame {
+                    window.set_viewport_image(frame);
+                }
+            }
+        }
+    });
+
+    let freeze_bridge = Arc::clone(&bridge);
+    let window_weak = window.as_weak();
+    window.on_freeze_primitive_requested(move || {
+        if let Ok(mut bridge) = freeze_bridge.lock() {
+            bridge.apply(UiIntent::FreezeActivePrimitive);
             let vm = bridge.view_model();
             let new_frame = bridge.render_viewport();
             if let Some(window) = window_weak.upgrade() {

@@ -5,6 +5,24 @@ O formato baseia-se no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0
 
 ## [Unreleased] — Frontend Declarativo Slint & Modern UI
 
+### Sprint D: Ergonomia Unificada de Ferramentas, Navegação de Domínio e Medição Viewport (25/09/2026)
+- **Filosofia Unificada de Ativação de Ferramentas (1 Toque Card/Gizmo vs. 2 Toques Modo Livre)**:
+  - Todas as ferramentas de modelagem (`model.extrude`, `model.inset`, `model.bevel`, `model.push_pull`, `model.extrude_individual`) agora seguem a mesma ergonomia das ferramentas de transformação (`move`, `rotate`, `scale`).
+  - 1 toque no atalho ativa a ferramenta com seu card de opções e gizmos de manipulação direta no viewport, mantendo o ponteiro do mouse livre.
+  - 2 toques rápidos dentro do intervalo configurável (`double_tap_interval_ms`, padrão 350ms) acionam o **Modo Livre** modal rápido (estilo Blender), no qual o movimento do mouse altera a distância/quantidade interativamente, `LMB`/`Enter` confirma e `RMB`/`Escape` cancela sem sujar a pilha de histórico.
+- **Feedback Visual na Viewport & Cursores Contextuais**:
+  - Cursor contextual inteligente na viewport adaptado para cada operação (`ns-resize` para extrusão e push/pull, `nesw-resize` para chanfro/bevel e escala, `nwse-resize` para inserção/inset, `grabbing` para rotação, `crosshair` para faca/slice/loop-cut/medição/desenho).
+  - HUD Pill flutuante no topo central da viewport indicando a ferramenta ativa, o modo operacional (`[CARD / GIZMO]` vs `[MODO LIVRE]`) e as instruções de interação e cancelamento.
+- **Ciclo de Domínio com `Tab` & Remoção de Tecla Obsoleta**:
+  - O atalho `Tab` agora alterna perfeitamente entre o modo de Objeto (`Object`) e o último domínio de sub-elemento utilizado (`Point`, `Edge` ou `Face`).
+  - Remoção da tecla `0` para seleção de objeto em prol de `4` e `Tab`.
+- **Wireframe Overlay Padrão & Tag de Medição de Múltiplas Arestas**:
+  - `show_wireframe_overlay` agora é habilitado por padrão em toda a aplicação.
+  - Medição de arestas selecionadas: quando múltiplas arestas estão selecionadas, uma única tag flutuante no ponto médio/interseção exibe a média dos comprimentos (`Ø X.XXXm`), evitando poluição visual.
+  - Toggle nas Preferências (`multiselection_measure_tag`) com internacionalização em PT-BR e EN.
+- **Primitivas Paramétricas Persistentes**:
+  - Suporte completo a re-edição paramétrica de primitivas no Inspector após a criação, congelamento transparente em malha estática em operações destrutivas e ação explícita de congelamento com preservação de histórico.
+
 ### Sprint C: Decalques 3D Interativos & Textura/Pintura Não-Destrutiva (25/09/2026)
 - **Manipulador 3D Interativo de Decalque na Viewport (`petunia_ui_slint`)**:
   - Manipulação direta sobre a malha 3D via projeção baricêntrica reversa (`Mesh::uv_to_world`): o decalque acompanha a geometria da superfície em tempo real.

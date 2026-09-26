@@ -262,6 +262,7 @@ mod tests {
                 origin: None,
                 paint_stack: None,
                 eval_cache: None,
+                parametric: None,
             }],
             active: 42,
             palette: vec![],

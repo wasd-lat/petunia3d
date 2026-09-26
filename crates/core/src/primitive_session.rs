@@ -8,86 +8,22 @@
 //! A sessão invalida sozinha quando outra operação assume o topo do undo
 //! (qualquer edição topológica converte a primitiva em malha comum): a UI
 //! esconde o cartão e o Esc posterior não remove nada.
-
-use petunia_mesh::Mesh;
 use uuid::Uuid;
 
 use super::selection::Selection;
 use crate::command::PrimitiveKind;
 
-/// Preenchimento do círculo (§16): anel aberto ou leque soldado.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CircleFill {
-    None,
-    Disc,
+pub use petunia_mesh::{CircleFill, PrimitiveDescriptor};
+
+/// Extensão com métodos de alto nível para `PrimitiveDescriptor` (conversão com `PrimitiveKind` e `TextId`).
+pub trait PrimitiveDescriptorExt {
+    fn default_for(kind: PrimitiveKind) -> Self;
+    fn kind(&self) -> PrimitiveKind;
+    fn name_key(&self) -> petunia_config::TextId;
 }
 
-/// Parâmetros de criação por primitiva (regeneração determinística).
-///
-/// Defaults intencionalmente low-poly (§5). Limites (§44): lados 3–32, anéis
-/// 2–24, subdivisão ico 0–3, torus 3–64/3–32, raios e alturas > 0 (clamp).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PrimitiveDescriptor {
-    Box {
-        width: f32,
-        height: f32,
-        depth: f32,
-    },
-    Plane {
-        width: f32,
-        height: f32,
-    },
-    Wedge {
-        width: f32,
-        height: f32,
-        depth: f32,
-    },
-    Cylinder {
-        radius: f32,
-        height: f32,
-        sides: u32,
-        cap_top: bool,
-        cap_bottom: bool,
-    },
-    Cone {
-        bottom_radius: f32,
-        top_radius: f32,
-        height: f32,
-        sides: u32,
-        cap_bottom: bool,
-        cap_top: bool,
-    },
-    Circle {
-        radius: f32,
-        vertices: u32,
-        fill: CircleFill,
-    },
-    Torus {
-        major_radius: f32,
-        minor_radius: f32,
-        major_segments: u32,
-        minor_segments: u32,
-    },
-    LowSphere {
-        radius: f32,
-        segments: u32,
-        rings: u32,
-    },
-    Icosphere {
-        radius: f32,
-        subdiv: u32,
-    },
-    Capsule {
-        radius: f32,
-        height: f32,
-        radial_segments: u32,
-        cap_segments: u32,
-    },
-}
-
-impl PrimitiveDescriptor {
-    /// Descritor padrão da espécie (diálogo abre com valores low-poly sãos).
-    pub fn default_for(kind: PrimitiveKind) -> Self {
+impl PrimitiveDescriptorExt for PrimitiveDescriptor {
+    fn default_for(kind: PrimitiveKind) -> Self {
         match kind {
             PrimitiveKind::Cube => Self::Box {
                 width: 1.0,
@@ -147,25 +83,7 @@ impl PrimitiveDescriptor {
         }
     }
 
-    /// Nome i18n (`prims.cube`, …).
-    pub fn name_key(self) -> petunia_config::TextId {
-        use petunia_config::text_id as T;
-        match self {
-            Self::Box { .. } => T::PRIMS_CUBE,
-            Self::Plane { .. } => T::PRIMS_PLANE,
-            Self::Wedge { .. } => T::PRIMS_WEDGE,
-            Self::Cylinder { .. } => T::PRIMS_CYLINDER,
-            Self::Cone { .. } => T::PRIMS_CONE,
-            Self::Circle { .. } => T::PRIMS_CIRCLE,
-            Self::Torus { .. } => T::PRIMS_TORUS,
-            Self::LowSphere { .. } => T::PRIMS_SPHERE,
-            Self::Icosphere { .. } => T::PRIMS_ICOSPHERE,
-            Self::Capsule { .. } => T::PRIMS_CAPSULE,
-        }
-    }
-
-    /// Espécie de volta (reabertura e atalhos).
-    pub fn kind(self) -> PrimitiveKind {
+    fn kind(&self) -> PrimitiveKind {
         match self {
             Self::Box { .. } => PrimitiveKind::Cube,
             Self::Plane { .. } => PrimitiveKind::Plane,
@@ -180,99 +98,19 @@ impl PrimitiveDescriptor {
         }
     }
 
-    /// Constrói a malha LOCAL (sem offset) a partir dos parâmetros.
-    pub fn build(self) -> Mesh {
+    fn name_key(&self) -> petunia_config::TextId {
+        use petunia_config::text_id as T;
         match self {
-            Self::Box {
-                width,
-                height,
-                depth,
-            } => Mesh::box_dim(width, height, depth),
-            Self::Plane { width, height } => {
-                let mut mesh = Mesh::plane(1.0);
-                for v in &mut mesh.verts {
-                    v.pos[0] *= width.clamp(0.05, 100.0);
-                    v.pos[2] *= height.clamp(0.05, 100.0);
-                }
-                mesh
-            }
-            Self::Wedge {
-                width,
-                height,
-                depth,
-            } => Mesh::wedge(width, height, depth),
-            Self::Cylinder {
-                radius,
-                height,
-                sides,
-                cap_top,
-                cap_bottom,
-            } => Mesh::radial_frustum(
-                radius.clamp(0.05, 100.0),
-                radius.clamp(0.05, 100.0),
-                height.clamp(0.05, 100.0),
-                sides.clamp(3, 32),
-                cap_bottom,
-                cap_top,
-            ),
-            Self::Cone {
-                bottom_radius,
-                top_radius,
-                height,
-                sides,
-                cap_bottom,
-                cap_top,
-            } => Mesh::radial_frustum(
-                bottom_radius.clamp(0.0, 100.0),
-                top_radius.clamp(0.0, 100.0),
-                height.clamp(0.05, 100.0),
-                sides.clamp(3, 32),
-                cap_bottom,
-                cap_top,
-            ),
-            Self::Circle {
-                radius,
-                vertices,
-                fill,
-            } => Mesh::circle(
-                radius.clamp(0.05, 100.0),
-                vertices.clamp(3, 64),
-                fill == CircleFill::Disc,
-            ),
-            Self::Torus {
-                major_radius,
-                minor_radius,
-                major_segments,
-                minor_segments,
-            } => Mesh::torus(
-                major_radius.clamp(0.05, 100.0),
-                minor_radius.clamp(0.01, 100.0),
-                major_segments.clamp(3, 64),
-                minor_segments.clamp(3, 32),
-            ),
-            Self::LowSphere {
-                radius,
-                segments,
-                rings,
-            } => Mesh::sphere_low(
-                segments.clamp(3, 32),
-                rings.clamp(2, 24),
-                radius.clamp(0.05, 100.0),
-            ),
-            Self::Icosphere { radius, subdiv } => {
-                Mesh::icosphere(radius.clamp(0.05, 100.0), subdiv.min(3))
-            }
-            Self::Capsule {
-                radius,
-                height,
-                radial_segments,
-                cap_segments,
-            } => Mesh::capsule_profile(
-                radial_segments.clamp(3, 32),
-                radius.clamp(0.05, 100.0),
-                height.clamp(0.05, 100.0),
-                cap_segments.clamp(1, 8),
-            ),
+            Self::Box { .. } => T::PRIMS_CUBE,
+            Self::Plane { .. } => T::PRIMS_PLANE,
+            Self::Wedge { .. } => T::PRIMS_WEDGE,
+            Self::Cylinder { .. } => T::PRIMS_CYLINDER,
+            Self::Cone { .. } => T::PRIMS_CONE,
+            Self::Circle { .. } => T::PRIMS_CIRCLE,
+            Self::Torus { .. } => T::PRIMS_TORUS,
+            Self::LowSphere { .. } => T::PRIMS_SPHERE,
+            Self::Icosphere { .. } => T::PRIMS_ICOSPHERE,
+            Self::Capsule { .. } => T::PRIMS_CAPSULE,
         }
     }
 }

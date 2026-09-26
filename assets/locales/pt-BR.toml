@@ -200,6 +200,10 @@ decal_scale = "Escala"
 decal_rotation = "Rotação"
 decal_bake = "Fixar Decalque na Camada"
 decal_hint = "Arraste na superfície 3D para posicionar. Shift+arraste: escala, Ctrl+arraste: rotação."
+primitive_parametric = "Primitiva Paramétrica"
+primitive_freeze = "Converter em Malha"
+primitive_freeze_hint = "Congela a primitiva paramétrica em malha estática editável"
+primitive_frozen_status = "Primitiva convertida em malha editável"
 
 [pivot]
 median = "Ponto mediano"

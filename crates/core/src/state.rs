@@ -1566,7 +1566,7 @@ impl AppState {
         kind: crate::command::PrimitiveKind,
         name: Option<String>,
     ) -> bool {
-        use crate::primitive_session::PrimitiveDescriptor;
+        use crate::primitive_session::{PrimitiveDescriptor, PrimitiveDescriptorExt};
         self.finalize_primitive_session();
         let descriptor = PrimitiveDescriptor::default_for(kind);
         self.begin_primitive_with(descriptor, name)
@@ -1578,6 +1578,7 @@ impl AppState {
         descriptor: crate::primitive_session::PrimitiveDescriptor,
         name: Option<String>,
     ) -> bool {
+        use crate::primitive_session::PrimitiveDescriptorExt;
         self.finalize_primitive_session();
         let original_selection = self.session.selection.clone();
         let cursor_offset = self.session.cursor_3d;
@@ -1591,9 +1592,12 @@ impl AppState {
             v.pos[2] += cursor_offset[2];
         }
         self.project.add(&asset_name, mesh);
-        let Some(asset_id) = self.project.assets.last().map(|a| a.id) else {
+        let Some(asset) = self.project.assets.last_mut() else {
             return false;
         };
+        asset.parametric = Some(descriptor);
+        asset.origin = Some(cursor_offset);
+        let asset_id = asset.id;
         self.session.primitive_session = Some(crate::primitive_session::PrimitiveCreationSession {
             asset_id,
             descriptor,
@@ -1631,10 +1635,88 @@ impl AppState {
             v.pos[2] += cursor_offset[2];
         }
         asset.mesh = mesh;
+        asset.parametric = Some(descriptor);
         if let Some(session) = self.session.primitive_session.as_mut() {
             session.descriptor = descriptor;
         }
         self.emit_mesh_changed();
+        true
+    }
+
+    /// O asset ativo é uma primitiva paramétrica viva?
+    pub fn active_is_parametric(&self) -> bool {
+        self.project.active().is_some_and(|a| a.is_parametric())
+    }
+
+    /// Retorna o descritor paramétrico do asset ativo, se houver.
+    pub fn active_primitive_descriptor(
+        &self,
+    ) -> Option<crate::primitive_session::PrimitiveDescriptor> {
+        self.project.active().and_then(|a| a.parametric)
+    }
+
+    /// Congela transparentemente a primitiva paramétrica do asset ativo em malha estática.
+    pub fn freeze_active_primitive(&mut self) -> bool {
+        let Some(asset) = self.project.active_mut() else {
+            return false;
+        };
+        if asset.freeze_parametric() {
+            if let Some(session) = self.session.primitive_session.take() {
+                self.session.last_primitive = Some(session.descriptor);
+            }
+            self.emit_mesh_changed();
+            self.mark_dirty();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Atualiza os parâmetros da primitiva do asset ativo e regenera a malha.
+    ///
+    /// Se a sessão de criação estiver ativa, atualiza diretamente sem novo checkpoint.
+    /// Caso contrário, se `create_checkpoint` for verdadeiro, registra checkpoint no undo.
+    pub fn update_active_primitive(
+        &mut self,
+        descriptor: crate::primitive_session::PrimitiveDescriptor,
+        create_checkpoint: bool,
+    ) -> bool {
+        if self.primitive_session_valid() {
+            return self.update_primitive(descriptor);
+        }
+
+        let Some(asset) = self.project.active_mut() else {
+            return false;
+        };
+        if !asset.is_parametric() {
+            return false;
+        }
+
+        let origin = asset.origin.unwrap_or_else(|| {
+            let c = asset.mesh.center();
+            [c.x, c.y, c.z]
+        });
+
+        if create_checkpoint {
+            let label = format!("edit primitive: {}", descriptor.kind_name());
+            self.checkpoint(&label);
+        }
+
+        let mut mesh = descriptor.build();
+        for v in &mut mesh.verts {
+            v.pos[0] += origin[0];
+            v.pos[1] += origin[1];
+            v.pos[2] += origin[2];
+        }
+
+        let Some(asset) = self.project.active_mut() else {
+            return false;
+        };
+        asset.mesh = mesh;
+        asset.parametric = Some(descriptor);
+        self.session.last_primitive = Some(descriptor);
+        self.emit_mesh_changed();
+        self.mark_dirty();
         true
     }
 

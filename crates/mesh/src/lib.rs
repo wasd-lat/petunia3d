@@ -209,6 +209,15 @@ impl Mesh {
     pub fn face_normal(&self, fi: usize) -> Vec3 {
         triangulate::face_normal_of(&self.verts, &self.faces[fi].verts)
     }
+
+    /// Calcula o centroide médio dos vértices da malha.
+    pub fn center(&self) -> Vec3 {
+        if self.verts.is_empty() {
+            return Vec3::ZERO;
+        }
+        let sum: Vec3 = self.verts.iter().map(|v| v.vec()).sum();
+        sum / (self.verts.len() as f32)
+    }
 }
 
 mod bevel;
@@ -233,6 +242,7 @@ pub use curve::{BezierNode, BezierNodeKind, BezierPath, create_hollow_profile, o
 pub use half_edge::{
     EdgeId, FaceId, HalfEdge, HalfEdgeId, HalfEdgeMesh, TopologyDefect, TopologyReport, VertexId,
 };
+pub use primitives::{CircleFill, PrimitiveAudit, PrimitiveDescriptor, primitive_audit};
 pub use sweep::{SweepFrame, SweepOptions, compute_rmf_frames, generate_sweep};
 pub use topology::{DirtyDomains, ElementRemap, TopologyResult};
 pub use uv_tools::{UvDiagnostics, UvIsland};
