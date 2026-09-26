@@ -316,19 +316,11 @@ fn task_docs_check() -> Result<()> {
     // 4. Validar mapa de componentes UI contra o código
     task_ui_check()?;
 
-    // 5. Executar build do VitePress
-    println!("📦 Validando build oficial do VitePress...");
-    let status = Command::new("pnpm")
-        .arg("run")
-        .arg("build")
-        .current_dir(&docs_dir)
-        .status()
-        .context("falha ao executar pnpm na pasta docs/")?;
-
-    if !status.success() {
-        bail!("Build da documentação falhou com status: {status}");
-    }
-
+    // 5. Build do VitePress é pulado durante o desenvolvimento com o site congelado (AGENTS.md §1).
+    // Para compilar explicitamente o site VitePress, utilize 'cargo run -p xtask -- docs'.
+    println!(
+        "🧊 Site público congelado (AGENTS.md §1): pulando compilação do VitePress para poupar tempo e tokens."
+    );
     println!("🎉 Verificação de integridade concluída com sucesso!");
     Ok(())
 }

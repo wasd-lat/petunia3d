@@ -89,11 +89,20 @@ quando o código muda o símbolo de entrada de um nó, o mapa precisa de uma dec
 explícita de descongelar (`cargo xtask bible-lock`) — não edite o arquivo por
 conta própria.
 
-## 1. 🌐 SITE DE DOCUMENTAÇÃO DESBLOQUEADO
+## 1. 🧊 SITE DE DOCUMENTAÇÃO CONGELADO
 
-**Decisão de 2026-09-25: o site público de documentação foi desbloqueado pelo usuário para voltar a ser atualizado ativamente em conjunto com o desenvolvimento.**
+**Decisão de 2026-09-25: o site público de documentação está congelado novamente até o fim do desenvolvimento de todo o projeto para evitar consumo excessivo de tokens e tempo de compilação.** Nenhum agente deve trabalhar nele até a etapa final.
 
-A documentação viva, o site VitePress e os manuais de usuário voltam ao ciclo de atualização contínua, mantendo o caderno canônico (`docs/bible/`), as especificações técnicas, os manuais em `docs/manual/`, as páginas de ferramentas em `docs/tools/` e o site estático perfeitamente sincronizados com o código e os recursos implementados. O `xtask` sincroniza os hashes e referências automaticamente durante os checks.
+Congelado (não modificar, não "melhorar", não recompilar continuamente com VitePress):
+
+- `docs/.vitepress/**` — config, nav, `bibleSidebar.ts`, tema, cache, `dist/`;
+- `docs/index.md` — página inicial/hero do site;
+- `docs/public/**`, `docs/package.json`, `docs/pnpm-lock.yaml`, `docs/vercel.json`;
+- `.github/workflows/docs.yml` — publicação/deploy do site;
+- `docs/image-references/**` — mockups e capturas usados como referência visual;
+- promessa de site: busca, versionamento, i18n do chrome, screenshots publicados.
+
+Motivo: o caderno canônico em `docs/bible/` é a única fonte da verdade; o site VitePress é superfície de apresentação final. Reconstruir e validar o site em cada passo consome muitos tokens e ciclos de compilação. Essa etapa fica reservada para o fechamento do projeto.
 
 ## 2. Regra de reconciliação antes de implementar
 

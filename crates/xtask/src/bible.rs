@@ -424,19 +424,58 @@ fn check_frozen_site(root: &Path, update_lock: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("🌐 Site de documentação desbloqueado para atualizações ativas.");
+    println!("🧊 Verificando congelamento do site de documentação...");
     let Ok(current) = std::fs::read_to_string(&lock_path) else {
-        std::fs::write(&lock_path, serialized + "\n")?;
-        return Ok(());
+        bail!("lock ausente ({FROZEN_LOCK}); rode `cargo run -p xtask -- bible-lock`");
     };
-    if current.trim() != serialized.trim() {
-        let _ = std::fs::write(&lock_path, serialized + "\n");
-        println!("🔄 Lock do site de documentação sincronizado com as alterações recentes.");
-    } else {
-        println!(
-            "✅ Site público intacto e sincronizado ({} arquivos).",
-            entries.len()
+    let Ok(expected) = serde_json::from_str::<serde_json::Value>(&current) else {
+        bail!("lock inválido: {FROZEN_LOCK}");
+    };
+    let Some(expected_files) = expected.get("files").and_then(|value| value.as_array()) else {
+        bail!("lock sem campo `files`: {FROZEN_LOCK}");
+    };
+
+    let expected: Vec<(String, String)> = expected_files
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                entry.get("path")?.as_str()?.to_string(),
+                entry.get("hash")?.as_str()?.to_string(),
+            ))
+        })
+        .collect();
+
+    let mut changes = Vec::new();
+    for (path, hash) in &entries {
+        let hash = format!("{hash:016x}");
+        match expected
+            .iter()
+            .find(|(expected_path, _)| expected_path == path)
+        {
+            Some((_, expected_hash)) if *expected_hash == hash => {}
+            Some(_) => changes.push(format!("modificado: {path}")),
+            None => changes.push(format!("adicionado: {path}")),
+        }
+    }
+    for (path, _) in &expected {
+        if !entries.iter().any(|(current, _)| current == path) {
+            changes.push(format!("removido: {path}"));
+        }
+    }
+
+    if !changes.is_empty() {
+        for change in changes.iter().take(20) {
+            eprintln!("  ✖ {change}");
+        }
+        bail!(
+            "{} alteração(ões) no site público, que está CONGELADO até o fim do projeto (ver AGENTS.md §1)",
+            changes.len()
         );
     }
+
+    println!(
+        "✅ Site público intacto e congelado ({} arquivos).",
+        entries.len()
+    );
     Ok(())
 }
